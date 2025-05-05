@@ -15,11 +15,19 @@
       {
         "title": "tauri-app",
         "width": 800,
-        "height": 600
+        "height": 600,
+        "fullscreen": true,
+        "transparent": true
       }
     ],
     "security": {
-      "csp": null
+      "csp": null,
+      "assetProtocol": {
+        "enable": true,
+        "scope": [
+          "*"
+        ]
+      }
     }
   },
   "bundle": {
