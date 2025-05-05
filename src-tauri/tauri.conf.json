@@ -1,8 +1,8 @@
 {
   "$schema": "https://schema.tauri.app/config/2",
-  "productName": "tauri-app",
+  "productName": "lixa-gallery",
   "version": "0.1.0",
-  "identifier": "com.tauri-app.app",
+  "identifier": "com.lixa-gallery.app",
   "build": {
     "beforeDevCommand": "yarn dev",
     "devUrl": "http://localhost:1420",
@@ -13,14 +13,13 @@
     "withGlobalTauri": true,
     "windows": [
       {
-        "title": "tauri-app",
+        "title": "lixa-gallery",
         "width": 800,
         "height": 600,
-        "fullscreen": true,
-        "transparent": true
+        "fullscreen": false
       }
     ],
-    "security": {
+    "security": { 
       "csp": null,
       "assetProtocol": {
         "enable": true,

@@ -3,19 +3,79 @@
 
 <head>
   <meta charset="UTF-8" />
-  <link rel="stylesheet" href="/src/styles.css" />
+  <link rel="stylesheet" href="/src/styles/main.css" />
+  <link rel="stylesheet" href="/src/styles/animation.css" />
+  <link rel="preconnect" href="https://fonts.googleapis.com">
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+  <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600&display=swap" rel="stylesheet">
   <meta name="viewport" content="width=device-width, initial-scale=1.0" />
-  <title>Tauri App</title>
-  <script type="module" src="/src/main.ts" defer></script>
+  <title>Lixa App</title>
 </head>
 
 <body>
-  <main class="container">
-    <h1>Welcome to Tauri</h1>
+  <div class="container">
+    <header class="header">
+      <div class="header-content">
+        <h1 class="title">Lixa Gallery</h1>
+        <div class="subtitle">
+          <p>Select your favorite photos and export</p>
+          <button type="button" id="folder-selector-button" class="load-photos-button">Load Photos</button>
+        </div>
+      </div>
+    </header>
 
-    <button id="folder-selector-button">Files</button>
-    <div id="images-container"></div>
-  </main>
+  
+    <main class="main">
+      <div id="top-loading-spinner" class="loading-spinner"></div>
+      <div id="gallery" class="gallery-grid">
+        <!-- Gallery items will be inserted here -->
+      </div>
+    </main>
+
+    <div id="preview-overlay" class="preview-overlay">
+      <button id="close-button" class="preview-button close-button" aria-label="Close preview">
+        <svg xmlns="http://www.w3.org/2000/svg" width="24" height="24" viewBox="0 0 24 24" fill="none"
+          stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" class="icon">
+          <path d="M18 6 6 18"></path>
+          <path d="m6 6 12 12"></path>
+        </svg>
+      </button>
+      <button id="prev-button" class="preview-button nav-button prev-button" aria-label="Previous image">
+        <svg xmlns="http://www.w3.org/2000/svg" width="24" height="24" viewBox="0 0 24 24" fill="none"
+          stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" class="icon">
+          <path d="m15 18-6-6 6-6"></path>
+        </svg>
+      </button>
+      <button id="next-button" class="preview-button nav-button next-button" aria-label="Next image">
+        <svg xmlns="http://www.w3.org/2000/svg" width="24" height="24" viewBox="0 0 24 24" fill="none"
+          stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" class="icon">
+          <path d="m9 18 6-6-6-6"></path>
+        </svg>
+      </button>
+      <div class="preview-container">
+        <div id="preview-image-container" class="preview-image-container">
+          <div id="loading-spinner" class="loading-spinner">
+            <div class="spinner"></div>
+          </div>
+          <img id="preview-image" class="preview-image" src="" alt="">
+        </div>
+        <div id="preview-info" class="preview-info">
+          <h2 id="preview-title" class="preview-title"></h2>
+          <p id="preview-description" class="preview-description"></p>
+          <p id="preview-location" class="preview-location"></p>
+        </div>
+      </div>
+    </div>
+
+    <footer class="footer">
+      <div class="footer-content">
+        <p>&copy; <span id="current-year"></span> Lixa Gallery. All rights reserved.</p>
+      </div>
+    </footer>
+  </div>
+
+  <!-- Scripts -->
+  <script type="module" src="/src/scripts/main.ts" defer></script>
 </body>
 
 </html>

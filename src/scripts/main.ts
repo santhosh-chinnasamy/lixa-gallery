@@ -1,5 +1,6 @@
-import { invoke, convertFileSrc } from "@tauri-apps/api/core";
+import { invoke } from "@tauri-apps/api/core";
 import { open } from "@tauri-apps/plugin-dialog";
+import { Gallery, Photo } from './gallery';
 
 window.addEventListener("DOMContentLoaded", () => {
   const folderSelector: HTMLButtonElement | null = document.querySelector(
@@ -10,28 +11,20 @@ window.addEventListener("DOMContentLoaded", () => {
     const folder = await open({
       multiple: false,
       directory: true,
-      filters: [],
     });
 
     const imagesContainer: HTMLDivElement | null = document.querySelector(
       "#images-container"
     );
 
-    if (imagesContainer) {
+    if (imagesContainer) { // reset the container
       imagesContainer.innerHTML = "";
     }
 
-    const result: string[] = await invoke("scan_folder", {
+    const photos: Photo[] = await invoke("scan_folder", {
       path: folder,
     });
 
-    result.forEach((src: string) => {
-      const img = document.createElement("img");
-      img.src = `${convertFileSrc(src)}`;
-      img.loading = "lazy";
-      img.style.width = "15vw";
-      img.style.height = "15vh";
-      imagesContainer?.appendChild(img);
-    });
+    new Gallery(photos);
   });
 });
