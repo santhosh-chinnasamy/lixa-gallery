@@ -1,4 +1,5 @@
 import { convertFileSrc } from "@tauri-apps/api/core";
+import { Favourite } from "./favourite";
 
 export type Photo = string;
 
@@ -10,6 +11,8 @@ export class Gallery {
   private topLoadingSpinner: HTMLElement;
   private loadingSpinner: HTMLElement;
   private activeIndex: number | null = null;
+  private heartCheckbox: HTMLInputElement;
+  private favourites: Favourite;
 
   constructor(photos: Photo[]) {
     this.photos = photos;
@@ -18,6 +21,8 @@ export class Gallery {
     this.previewImageElement = document.getElementById('preview-image') as HTMLImageElement;
     this.topLoadingSpinner = document.getElementById('top-loading-spinner') as HTMLElement;
     this.loadingSpinner = document.getElementById('loading-spinner') as HTMLElement;
+    this.heartCheckbox = document.getElementsByName('heart-checkbox')[0] as HTMLInputElement;
+    this.favourites = new Favourite();
 
     this.initGallery();
     this.initEventListeners();
@@ -26,37 +31,50 @@ export class Gallery {
   private initGallery(): void {
     // Create thumbnails
     this.galleryElement.innerHTML = '';
+    if (this.photos.length === 0) {
+      this.galleryElement.innerHTML = '<div class="no-photos">No photos found</div>';
+      return;
+    }
+
     this.topLoadingSpinner.classList.add('active');
     this.photos.forEach((photo, index) => {
       const thumbnailElement = document.createElement('div');
       thumbnailElement.className = 'gallery-item';
+      thumbnailElement.tabIndex = index + 1;
       thumbnailElement.innerHTML = `
         <div class="thumbnail-container">
-          <img src="${convertFileSrc(photo)}" alt="${photo}" class="thumbnail-image" loading="lazy">
+          <img src="${convertFileSrc(photo)}" alt="${photo}" class="thumbnail-image" loading="lazy" id="thumbnail-image-${photo}" />
         </div>
       `;
 
       thumbnailElement.addEventListener('click', () => this.openPreview(index));
+      thumbnailElement.addEventListener('keydown', (e) => {
+        if (e.key === 'Enter') {
+          this.openPreview(index);
+        }
+      });
+
       this.galleryElement.appendChild(thumbnailElement);
+      this.activeIndex = index;
+      this.toggleFavourite(true);
     });
   }
 
   private initEventListeners(): void {
-    // Close button
     const closeButton = document.getElementById('close-button') as HTMLElement;
     closeButton.addEventListener('click', () => this.closePreview());
 
-    // Navigation buttons
     const prevButton = document.getElementById('prev-button') as HTMLElement;
     const nextButton = document.getElementById('next-button') as HTMLElement;
 
     prevButton.addEventListener('click', () => this.goToPrevious());
     nextButton.addEventListener('click', () => this.goToNext());
+    this.heartCheckbox.addEventListener('change', () => this.toggleFavourite());
 
-    // Keyboard navigation
     document.addEventListener('keydown', (e) => {
       if (this.activeIndex === null) return;
 
+      console.log('e.key', e.key);
       switch (e.key) {
         case 'Escape':
           this.closePreview();
@@ -66,6 +84,12 @@ export class Gallery {
           break;
         case 'ArrowRight':
           this.goToNext();
+          break;
+        case "l":
+          this.toggleFavourite();
+          break;
+        case " ":
+          this.closePreview();
           break;
       }
     });
@@ -135,26 +159,14 @@ export class Gallery {
     if (this.activeIndex === null) return;
 
     const photo = this.photos[this.activeIndex];
+    const isFavourite = this.favourites.isFavourite(photo);
+    this.heartCheckbox.checked = isFavourite;
 
-    // Set image source to trigger loading
     this.previewImageElement.src = convertFileSrc(photo);
     this.previewImageElement.alt = photo;
     this.previewImageElement.classList.add('loading');
 
-    // Update info
-    // this.previewTitleElement.textContent = photo.title;
-    // this.previewDescriptionElement.textContent = photo.description;
-
-    /*  if (photo.location) {
-       this.previewLocationElement.textContent = `📍 ${photo.location}`;
-       this.previewLocationElement.style.display = 'block';
-     } else {
-       this.previewLocationElement.style.display = 'none';
-     } */
-
-    // Handle image load complete
     this.previewImageElement.onload = () => {
-
       this.loadingSpinner.classList.remove('active');
       this.previewImageElement.classList.remove('loading');
       this.previewImageElement.classList.add('loaded');
@@ -164,7 +176,6 @@ export class Gallery {
   private preloadImages(): void {
     if (this.activeIndex === null) return;
 
-    // Preload next and previous images
     const nextIndex = this.activeIndex === this.photos.length - 1 ? 0 : this.activeIndex + 1;
     const prevIndex = this.activeIndex === 0 ? this.photos.length - 1 : this.activeIndex - 1;
 
@@ -172,5 +183,27 @@ export class Gallery {
       const preloadImage = new Image();
       preloadImage.src = convertFileSrc(this.photos[index]);
     });
+  }
+
+  private toggleFavourite(isFirstLoad: boolean = false): void {
+    if (this.activeIndex === null) return;
+
+    const photo = this.photos[this.activeIndex];
+    const isFavourite = this.favourites.isFavourite(photo);
+    const thumbnailImage = document.getElementById(`thumbnail-image-${photo}`) as HTMLImageElement;
+
+    if (isFavourite) {
+      this.favourites.removeFromFavourites(photo);
+      this.heartCheckbox.checked = false;
+      thumbnailImage.classList.remove('favourite');
+      return;
+    }
+
+    if (!isFirstLoad) {
+      this.favourites.addToFavourites(photo);
+      this.heartCheckbox.checked = true;
+      thumbnailImage.classList.add('favourite');
+    }
+
   }
 }
