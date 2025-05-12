@@ -244,8 +244,8 @@ body.no-scroll {
     background-color: rgba(0, 0, 0, 0.5);
     color: white;
     border: none;
-    width: 48px;
-    height: 48px;
+    height: 2.5rem;
+    width: 2.5rem;
     border-radius: 50%;
     display: flex;
     align-items: center;
@@ -377,6 +377,11 @@ body.no-scroll {
     background-color: var(--color-primary-700);
 }
 
+.load-photos-button:disabled {
+    background-color: var(--color-gray-100);
+    color: var(--color-gray-500);
+}
+
 input {
     display: none;
 }
@@ -387,6 +392,13 @@ input:checked~label {
 
 label {
     font-size: 5em;
+}
+
+.heart-checkbox-container {
+    max-height: 2.5rem;
+    display: flex;
+    justify-content: center;
+    align-items: center;
 }
 
 .no-photos {

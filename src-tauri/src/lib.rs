@@ -1,4 +1,9 @@
-use std::{fs, path::PathBuf};
+use std::{
+    fs::{self},
+    path::PathBuf,
+};
+
+use tauri::Manager;
 
 // Learn more about Tauri commands at https://tauri.app/develop/calling-rust/
 #[tauri::command]
@@ -30,12 +35,38 @@ fn scan_folder(path: &str) -> Result<Vec<String>, String> {
     }
 }
 
+#[tauri::command]
+fn export_favourites(destination: &str, files: Vec<String>) -> Result<Vec<String>, String> {
+    println!("destination: {}", destination);
+    files
+        .into_iter()
+        .map(|file_path| {
+            let file = PathBuf::from(&file_path);
+            let name = file
+                .file_name()
+                .ok_or_else(|| format!("Invalid path (no file name): {}", file_path))?;
+            let name_str = name
+                .to_str()
+                .ok_or_else(|| format!("Non-UTF8 file name: {}", file_path))?;
+            // TODO: add file to destination
+            let destination_path = PathBuf::from(destination).join(name_str);
+            fs::copy(&file_path, &destination_path).map_err(|e| format!("Error copying file: {}", e))?;
+            Ok(name_str.to_string())
+        })
+        .collect()
+}
+
 #[cfg_attr(mobile, tauri::mobile_entry_point)]
 pub fn run() {
     tauri::Builder::default()
+        .setup(|app| {
+            let main_window = app.get_webview_window("main").unwrap();
+            main_window.open_devtools();
+            Ok(())
+        })
         .plugin(tauri_plugin_dialog::init())
         .plugin(tauri_plugin_opener::init())
-        .invoke_handler(tauri::generate_handler![scan_folder])
+        .invoke_handler(tauri::generate_handler![scan_folder, export_favourites])
         .run(tauri::generate_context!())
         .expect("error while running tauri application");
 }

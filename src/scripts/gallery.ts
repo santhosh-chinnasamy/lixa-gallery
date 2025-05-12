@@ -13,7 +13,7 @@ export class Gallery {
   private activeIndex: number | null = null;
   private heartCheckbox: HTMLInputElement;
   private favourites: Favourite;
-
+  
   constructor(photos: Photo[]) {
     this.photos = photos;
     this.galleryElement = document.getElementById('gallery') as HTMLElement;
@@ -74,7 +74,6 @@ export class Gallery {
     document.addEventListener('keydown', (e) => {
       if (this.activeIndex === null) return;
 
-      console.log('e.key', e.key);
       switch (e.key) {
         case 'Escape':
           this.closePreview();
@@ -190,19 +189,19 @@ export class Gallery {
 
     const photo = this.photos[this.activeIndex];
     const isFavourite = this.favourites.isFavourite(photo);
-    const thumbnailImage = document.getElementById(`thumbnail-image-${photo}`) as HTMLImageElement;
+    const currentImage = document.getElementById(`thumbnail-image-${photo}`) as HTMLImageElement;
 
     if (isFavourite) {
       this.favourites.removeFromFavourites(photo);
       this.heartCheckbox.checked = false;
-      thumbnailImage.classList.remove('favourite');
+      currentImage.classList.remove('favourite');
       return;
     }
 
     if (!isFirstLoad) {
       this.favourites.addToFavourites(photo);
       this.heartCheckbox.checked = true;
-      thumbnailImage.classList.add('favourite');
+      currentImage.classList.add('favourite');
     }
 
   }
