@@ -3,7 +3,6 @@ use std::{
     path::PathBuf,
 };
 
-use tauri::Manager;
 
 // Learn more about Tauri commands at https://tauri.app/develop/calling-rust/
 #[tauri::command]
@@ -59,11 +58,6 @@ fn export_favourites(destination: &str, files: Vec<String>) -> Result<Vec<String
 #[cfg_attr(mobile, tauri::mobile_entry_point)]
 pub fn run() {
     tauri::Builder::default()
-        .setup(|app| {
-            let main_window = app.get_webview_window("main").unwrap();
-            main_window.open_devtools();
-            Ok(())
-        })
         .plugin(tauri_plugin_dialog::init())
         .plugin(tauri_plugin_opener::init())
         .invoke_handler(tauri::generate_handler![scan_folder, export_favourites])
