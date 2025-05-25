@@ -2,52 +2,57 @@
 @keyframes fadeIn {
     from { opacity: 0; }
     to { opacity: 1; }
-  }
-  
-  @keyframes fadeOut {
+}
+
+@keyframes fadeOut {
     from { opacity: 1; }
     to { opacity: 0; }
-  }
-  
-  @keyframes scaleIn {
+}
+
+@keyframes scaleIn {
     from {
-      opacity: 0;
-      transform: scale(0.95);
+        opacity: 0;
+        transform: scale(0.95);
     }
     to {
-      opacity: 1;
-      transform: scale(1);
+        opacity: 1;
+        transform: scale(1);
     }
-  }
-  
-  @keyframes slideUp {
+}
+
+@keyframes slideUp {
     from {
-      opacity: 0;
-      transform: translateY(20px);
+        opacity: 0;
+        transform: translateY(20px);
     }
     to {
-      opacity: 1;
-      transform: translateY(0);
+        opacity: 1;
+        transform: translateY(0);
     }
-  }
-  
-  @keyframes spin {
+}
+
+@keyframes spin {
     to { transform: rotate(360deg); }
-  }
-  
-  /* Animation Classes */
-  .animate-fadeIn {
+}
+
+/* Animation Classes */
+.animate-fadeIn {
     animation: fadeIn 0.3s ease forwards;
-  }
-  
-  .animate-fadeOut {
+}
+
+.animate-fadeOut {
     animation: fadeOut 0.3s ease forwards;
-  }
-  
-  .animate-scaleIn {
+}
+
+.animate-scaleIn {
     animation: scaleIn 0.5s ease forwards;
-  }
-  
-  .animate-slideUp {
+}
+
+.animate-slideUp {
     animation: slideUp 0.5s ease forwards;
-  }
+}
+
+/* New Animation Classes */
+.animate-spin {
+    animation: spin 1s linear infinite;
+}

@@ -1,53 +1,85 @@
-import { convertFileSrc, invoke } from "@tauri-apps/api/core";
-import { Favourite } from "./favourite";
+import { convertFileSrc } from "@tauri-apps/api/core";
+import { FavouriteManager } from "./favourite";
 
 export type Photo = string;
 
+interface DOMElements {
+  gallery: HTMLElement;
+  overlay: HTMLElement;
+  previewImage: HTMLImageElement;
+  topLoadingSpinner: HTMLElement;
+  loadingSpinner: HTMLElement;
+  heartCheckbox: HTMLInputElement;
+  closeButton: HTMLElement;
+  prevButton: HTMLElement;
+  nextButton: HTMLElement;
+}
+
 export class Gallery {
-  private photos: Photo[];
-  private galleryElement: HTMLElement;
-  private overlayElement: HTMLElement;
-  private previewImageElement: HTMLImageElement;
-  private topLoadingSpinner: HTMLElement;
-  private loadingSpinner: HTMLElement;
+  private readonly photos: Photo[];
+  private readonly elements: DOMElements;
+  private readonly favourites: FavouriteManager;
   private activeIndex: number | null = null;
-  private heartCheckbox: HTMLInputElement;
-  private favourites: Favourite;
+  private readonly SWIPE_THRESHOLD = 50;
 
   constructor(photos: Photo[]) {
     this.photos = photos;
-    this.galleryElement = document.getElementById("gallery") as HTMLElement;
-    this.overlayElement = document.getElementById(
-      "preview-overlay"
-    ) as HTMLElement;
-    this.previewImageElement = document.getElementById(
-      "preview-image"
-    ) as HTMLImageElement;
-    this.topLoadingSpinner = document.getElementById(
-      "top-loading-spinner"
-    ) as HTMLElement;
-    this.loadingSpinner = document.getElementById(
-      "loading-spinner"
-    ) as HTMLElement;
-    this.heartCheckbox = document.getElementsByName(
-      "heart-checkbox"
-    )[0] as HTMLInputElement;
-    this.favourites = new Favourite();
+    this.elements = this.initializeDOMElements();
+    this.favourites = new FavouriteManager();
 
     this.initGallery();
     this.initEventListeners();
   }
 
-  private initGallery(): void {
-    // Create thumbnails
-    this.galleryElement.innerHTML = "";
+  private initializeDOMElements(): DOMElements {
+    const getElement = <T extends HTMLElement>(id: string): T => {
+      const element = document.getElementById(id);
+      if (!element) throw new Error(`Element with id '${id}' not found`);
+      return element as T;
+    };
+
+    const getHeartCheckbox = (): HTMLInputElement => {
+      const checkbox = document.getElementsByName("heart-checkbox")[0];
+      if (!checkbox || !(checkbox instanceof HTMLInputElement)) {
+        throw new Error("Heart checkbox not found");
+      }
+      return checkbox;
+    };
+
+    return {
+      gallery: getElement("gallery"),
+      overlay: getElement("preview-overlay"),
+      previewImage: getElement("preview-image"),
+      topLoadingSpinner: getElement("top-loading-spinner"),
+      loadingSpinner: getElement("loading-spinner"),
+      heartCheckbox: getHeartCheckbox(),
+      closeButton: getElement("close-button"),
+      prevButton: getElement("prev-button"),
+      nextButton: getElement("next-button"),
+    };
+  }
+
+  private async initGallery(): Promise<void> {
+    try {
+      await this.createThumbnails();
+      await this.initializeFavorites();
+    } catch (error) {
+      console.error("Failed to initialize gallery:", error);
+      throw new Error("Gallery initialization failed");
+    }
+  }
+
+  private createThumbnails(): void {
+    this.elements.gallery.innerHTML = "";
     if (this.photos.length === 0) {
-      this.galleryElement.innerHTML =
+      this.elements.gallery.innerHTML =
         '<div class="no-photos">No photos found</div>';
       return;
     }
 
-    this.topLoadingSpinner.classList.add("active");
+    this.elements.topLoadingSpinner.classList.add("active");
+    const fragment = document.createDocumentFragment();
+
     this.photos.forEach((photo, index) => {
       const thumbnailElement = document.createElement("div");
       thumbnailElement.className = "gallery-item";
@@ -67,27 +99,41 @@ export class Gallery {
         }
       });
 
-      this.galleryElement.appendChild(thumbnailElement);
+      fragment.appendChild(thumbnailElement);
       this.activeIndex = index;
       this.toggleFavourite(true);
     });
+
+    this.elements.gallery.appendChild(fragment);
   }
 
+  private async initializeFavorites(): Promise<void> {
+    try {
+      const favourites = await this.favourites.getFavourites();
+      favourites.forEach((favourite) => {
+        const thumbnailImage = document.getElementById(
+          `thumbnail-image-${favourite}`
+        ) as HTMLImageElement;
+
+        if (thumbnailImage) {
+          thumbnailImage.classList.add("favourite");
+        }
+      });
+    } catch (error) {
+      console.error("Failed to initialize favorites:", error);
+      throw new Error("Favorites initialization failed");
+    }
+  }
   private initEventListeners(): void {
-    const closeButton = document.getElementById("close-button") as HTMLElement;
-    closeButton.addEventListener("click", () => this.closePreview());
+    this.initKeyboardEvents();
+    this.initButtonEvents();
+    this.initTouchEvents();
+    this.initFavoriteEvents();
+  }
 
-    const prevButton = document.getElementById("prev-button") as HTMLElement;
-    const nextButton = document.getElementById("next-button") as HTMLElement;
-
-    prevButton.addEventListener("click", () => this.goToPrevious());
-    nextButton.addEventListener("click", () => this.goToNext());
-    this.heartCheckbox.addEventListener("change", () => this.toggleFavourite());
-
-    document.addEventListener("keydown", (e) => {
-      if (this.activeIndex === null) return;
-
-      switch (e.key) {
+  private initKeyboardEvents(): void {
+    document.addEventListener("keydown", (event) => {
+      switch (event.key) {
         case "Escape":
           this.closePreview();
           break;
@@ -105,119 +151,204 @@ export class Gallery {
           break;
       }
     });
+  }
 
-    const handleSwipe = (): void => {
-      const swipeThreshold = 50;
+  private initButtonEvents(): void {
+    this.elements.closeButton.addEventListener("click", () =>
+      this.closePreview()
+    );
+    this.elements.prevButton.addEventListener("click", () =>
+      this.goToPrevious()
+    );
+    this.elements.nextButton.addEventListener("click", () => this.goToNext());
+  }
 
-      if (touchEndX - touchStartX > swipeThreshold) {
-        this.goToPrevious(); // Swipe right
-      } else if (touchStartX - touchEndX > swipeThreshold) {
-        this.goToNext(); // Swipe left
-      }
-    };
-
-    // Touch swipe navigation on the preview image
+  private initTouchEvents(): void {
     let touchStartX: number = 0;
     let touchEndX: number = 0;
 
-    this.previewImageElement.addEventListener("touchstart", (e) => {
+    this.elements.previewImage.addEventListener("touchstart", (e) => {
       touchStartX = e.changedTouches[0].screenX;
     });
 
-    this.previewImageElement.addEventListener("touchend", (e) => {
+    this.elements.previewImage.addEventListener("touchend", (e) => {
       touchEndX = e.changedTouches[0].screenX;
-      handleSwipe();
+      this.handleSwipe(touchStartX, touchEndX);
     });
   }
 
-  private openPreview(index: number): void {
-    this.activeIndex = index;
-    this.loadingSpinner.classList.add("active");
-    this.overlayElement.classList.add("active");
-    document.body.classList.add("no-scroll");
+  private handleSwipe(startX: number, endX: number): void {
+    const swipeDistance = endX - startX;
+    if (Math.abs(swipeDistance) < this.SWIPE_THRESHOLD) return;
 
-    this.updatePreviewContent();
-    this.preloadImages();
+    if (swipeDistance > 0) {
+      this.goToPrevious();
+    } else {
+      this.goToNext();
+    }
+  }
+
+  private initFavoriteEvents(): void {
+    this.elements.heartCheckbox.addEventListener("change", () =>
+      this.toggleFavourite()
+    );
+  }
+
+  private async openPreview(index: number): Promise<void> {
+    try {
+      if (index < 0 || index >= this.photos.length) {
+        throw new Error(`Invalid photo index: ${index}`);
+      }
+
+      this.activeIndex = index;
+      this.elements.loadingSpinner.classList.add("active");
+      this.elements.overlay.classList.add("active");
+      document.body.classList.add("no-scroll");
+
+      await this.updatePreviewContent();
+      this.preloadImages();
+    } catch (error) {
+      console.error("Failed to open preview:", error);
+      this.closePreview();
+    }
   }
 
   private closePreview(): void {
-    this.overlayElement.classList.remove("active");
+    this.elements.overlay.classList.remove("active");
     document.body.classList.remove("no-scroll");
+    this.elements.previewImage.src = "";
+    this.elements.previewImage.classList.remove("loading", "loaded");
     this.activeIndex = null;
   }
 
-  private goToPrevious(): void {
-    if (this.activeIndex === null) return;
+  private async goToPrevious(): Promise<void> {
+    if (!this.canNavigate()) return;
 
-    this.loadingSpinner.classList.add("active");
-    this.activeIndex =
-      this.activeIndex === 0 ? this.photos.length - 1 : this.activeIndex - 1;
-    this.updatePreviewContent();
-    this.preloadImages();
+    try {
+      this.elements.loadingSpinner.classList.add("active");
+      this.activeIndex = this.calculatePreviousIndex();
+      await this.updatePreviewContent();
+      this.preloadImages();
+    } catch (error) {
+      console.error("Failed to navigate to previous image:", error);
+      this.elements.loadingSpinner.classList.remove("active");
+    }
   }
 
-  private goToNext(): void {
-    if (this.activeIndex === null) return;
+  private async goToNext(): Promise<void> {
+    if (!this.canNavigate()) return;
 
-    this.loadingSpinner.classList.add("active");
-    this.activeIndex =
-      this.activeIndex === this.photos.length - 1 ? 0 : this.activeIndex + 1;
-    this.updatePreviewContent();
-    this.preloadImages();
+    try {
+      this.elements.loadingSpinner.classList.add("active");
+      this.activeIndex = this.calculateNextIndex();
+      await this.updatePreviewContent();
+      this.preloadImages();
+    } catch (error) {
+      console.error("Failed to navigate to next image:", error);
+      this.elements.loadingSpinner.classList.remove("active");
+    }
   }
 
-  private updatePreviewContent(): void {
+  private calculatePreviousIndex(): number {
+    return this.activeIndex === 0
+      ? this.photos.length - 1
+      : this.activeIndex! - 1;
+  }
+
+  private calculateNextIndex(): number {
+    return this.activeIndex === this.photos.length - 1
+      ? 0
+      : this.activeIndex! + 1;
+  }
+
+  private canNavigate(): boolean {
+    return this.activeIndex !== null && this.photos.length > 0;
+  }
+
+  private async updatePreviewContent(): Promise<void> {
     if (this.activeIndex === null) return;
 
     const photo = this.photos[this.activeIndex];
-    const isFavourite = this.favourites.isFavourite(photo);
-    this.heartCheckbox.checked = isFavourite;
+    try {
+      const isFavourite = await this.favourites.isFavourite(photo);
+      this.elements.heartCheckbox.checked = isFavourite;
 
-    this.previewImageElement.src = convertFileSrc(photo);
-    this.previewImageElement.alt = photo;
-    this.previewImageElement.classList.add("loading");
+      this.elements.previewImage.src = convertFileSrc(photo);
+      this.elements.previewImage.alt = `Preview of ${photo}`;
+      this.elements.previewImage.classList.add("loading");
 
-    this.previewImageElement.onload = () => {
-      this.loadingSpinner.classList.remove("active");
-      this.previewImageElement.classList.remove("loading");
-      this.previewImageElement.classList.add("loaded");
-    };
+      await this.waitForImageLoad();
+    } catch (error) {
+      console.error("Failed to update preview content:", error);
+      throw error;
+    }
+  }
+
+  private waitForImageLoad(): Promise<void> {
+    return new Promise((resolve) => {
+      this.elements.previewImage.onload = () => {
+        this.elements.loadingSpinner.classList.remove("active");
+        this.elements.previewImage.classList.remove("loading");
+        this.elements.previewImage.classList.add("loaded");
+        resolve();
+      };
+    });
   }
 
   private preloadImages(): void {
-    if (this.activeIndex === null) return;
+    if (!this.canNavigate()) return;
 
-    const nextIndex =
-      this.activeIndex === this.photos.length - 1 ? 0 : this.activeIndex + 1;
-    const prevIndex =
-      this.activeIndex === 0 ? this.photos.length - 1 : this.activeIndex - 1;
+    const indicesToPreload = [
+      this.calculatePreviousIndex(),
+      this.calculateNextIndex(),
+    ];
 
-    [nextIndex, prevIndex].forEach((index) => {
+    indicesToPreload.forEach((index) => {
       const preloadImage = new Image();
       preloadImage.src = convertFileSrc(this.photos[index]);
     });
   }
 
   private async toggleFavourite(isFirstLoad: boolean = false): Promise<void> {
-    if (this.activeIndex === null) return;
+    try {
+      if (!this.canNavigate()) return;
 
-    const photo = this.photos[this.activeIndex];
-    const isFavourite = this.favourites.isFavourite(photo);
-    const currentImage = document.getElementById(
-      `thumbnail-image-${photo}`
-    ) as HTMLImageElement;
+      const photo = this.photos[this.activeIndex!];
+      const thumbnailImage = document.getElementById(
+        `thumbnail-image-${photo}`
+      ) as HTMLImageElement;
 
-    if (isFavourite) {
-      this.favourites.removeFromFavourites(photo);
-      this.heartCheckbox.checked = false;
-      currentImage.classList.remove("favourite");
-      return;
+      // if (!thumbnailImage) {
+      //   throw new Error(`Thumbnail image not found for photo: ${photo}`);
+      // }
+
+      const isFavourite = await this.favourites.isFavourite(photo);
+
+      if (isFavourite) {
+        await this.removeFavourite(photo, thumbnailImage);
+      } else if (!isFirstLoad) {
+        await this.addFavourite(photo, thumbnailImage);
+      }
+    } catch (error) {
+      console.error("Failed to toggle favourite:", error);
     }
+  }
 
-    if (!isFirstLoad) {
-      this.favourites.addToFavourites(photo);
-      this.heartCheckbox.checked = true;
-      currentImage.classList.add("favourite");
-    }
+  private async removeFavourite(
+    photo: Photo,
+    thumbnailImage: HTMLImageElement
+  ): Promise<void> {
+    await this.favourites.removeFromFavourites(photo);
+    this.elements.heartCheckbox.checked = false;
+    thumbnailImage.classList.remove("favourite");
+  }
+
+  private async addFavourite(
+    photo: Photo,
+    thumbnailImage: HTMLImageElement
+  ): Promise<void> {
+    await this.favourites.addToFavourites(photo);
+    this.elements.heartCheckbox.checked = true;
+    thumbnailImage.classList.add("favourite");
   }
 }

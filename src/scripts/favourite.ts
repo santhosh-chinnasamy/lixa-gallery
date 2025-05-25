@@ -5,55 +5,74 @@ export interface Favourite {
   path: string;
 }
 
-export class Favourite {
-  private favourites: Favourite[];
+export class FavouriteManager {
+  private static readonly EXPORT_BUTTON_ID = "export-favourites-button";
+  private favourites: Favourite[] = [];
   private exportFavouritesButton: HTMLButtonElement;
 
   constructor() {
-    this.favourites = [];
-    this.exportFavouritesButton = document.getElementById(
-      "export-favourites-button"
-    ) as HTMLButtonElement;
+    const button = document.getElementById(FavouriteManager.EXPORT_BUTTON_ID);
+    if (!button) {
+      throw new Error(`Export button with ID '${FavouriteManager.EXPORT_BUTTON_ID}' not found`);
+    }
+    this.exportFavouritesButton = button as HTMLButtonElement;
+    this.initializeExportButton();
+    this.toggleExportFavouritesButton().catch(this.handleError);
+  }
 
+  private initializeExportButton(): void {
     this.exportFavouritesButton.addEventListener("click", async () => {
-      await this.exportFavourites();
-      alert("Favourites exported to selected folder");
+      try {
+        await this.exportFavourites();
+        this.showSuccessMessage("Favourites exported successfully");
+      } catch (error) {
+        this.handleError(error);
+      }
     });
-
-    this.toggleExportFavouritesButton();
   }
 
   public async addToFavourites(filePath: string): Promise<void> {
-    await invoke("add_favourite", {
-      path: filePath,
-    });
-    this.toggleExportFavouritesButton();
+    try {
+      if (!filePath?.trim()) {
+        throw new Error("File path cannot be empty");
+      }
+      await invoke("add_favourite", { path: filePath });
+      await this.toggleExportFavouritesButton();
+    } catch (error) {
+      this.handleError(error);
+    }
   }
 
   public async removeFromFavourites(filePath: string): Promise<void> {
-    await invoke("remove_favourite", {
-      path: filePath,
-    });
-    this.toggleExportFavouritesButton();
+    try {
+      if (!filePath?.trim()) {
+        throw new Error("File path cannot be empty");
+      }
+      await invoke("remove_favourite", { path: filePath });
+      await this.toggleExportFavouritesButton();
+    } catch (error) {
+      this.handleError(error);
+    }
   }
 
   public async getFavourites(): Promise<Favourite[]> {
-    const favourites: Favourite[] = await invoke("get_favourites");
-    this.favourites = favourites;
-    return favourites;
+    try {
+      this.favourites = await invoke("get_favourites");
+      return this.favourites;
+    } catch (error) {
+      this.handleError(error);
+      return [];
+    }
   }
 
   public isFavourite(filePath: string): boolean {
-    return this.favourites.some((favourite) => favourite.path === filePath);
+    if (!filePath?.trim()) return false;
+    return this.favourites.some(favourite => favourite.path === filePath);
   }
 
-  public async toggleExportFavouritesButton(): Promise<void> {
+  private async toggleExportFavouritesButton(): Promise<void> {
     const favourites = await this.getFavourites();
-    if (favourites.length > 0) {
-      this.exportFavouritesButton.removeAttribute("disabled");
-    } else {
-      this.exportFavouritesButton.setAttribute("disabled", "disabled");
-    }
+    this.exportFavouritesButton.disabled = favourites.length === 0;
   }
 
   private async exportFavourites(): Promise<void> {
@@ -62,8 +81,20 @@ export class Favourite {
       directory: true,
     });
 
-    await invoke("export_favourites", {
-      destination,
-    });
+    if (!destination) {
+      throw new Error("No destination selected for export");
+    }
+
+    await invoke("export_favourites", { destination });
+  }
+
+  private showSuccessMessage(message: string): void {
+    alert(message);
+  }
+
+  private handleError(error: unknown): void {
+    const errorMessage = error instanceof Error ? error.message : 'An unexpected error occurred';
+    console.error('Favourite operation failed:', errorMessage);
+    alert(`Error: ${errorMessage}`);
   }
 }

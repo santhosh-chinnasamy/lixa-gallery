@@ -351,47 +351,65 @@ body.no-scroll {
     font-size: 0.875rem;
 }
 
+.button-group {
+    display: flex;
+    gap: var(--space-4);
+    margin-left: auto;
+}
+
 .load-photos-button {
     background-color: var(--color-primary-500);
     color: white;
     border: none;
-    padding: var(--space-4);
+    padding: var(--space-2) var(--space-4);
     border-radius: var(--radius-md);
     cursor: pointer;
-    transition: background-color 0.2s ease;
-    margin-left: auto;
+    transition: all 0.2s ease;
     display: flex;
     justify-content: center;
     align-items: center;
-    width: 6vw;
-    height: 4vh;
-    font-size: 0.75rem;
+    font-size: 0.875rem;
+    min-width: 120px;
+    height: 40px;
+    position: relative;
+    overflow: hidden;
+}
 
+.load-photos-button::after {
+    content: '';
+    position: absolute;
+    top: 50%;
+    left: 50%;
+    width: 0;
+    height: 0;
+    background-color: rgba(255, 255, 255, 0.2);
+    border-radius: 50%;
+    transform: translate(-50%, -50%);
+    transition: width 0.3s ease, height 0.3s ease;
 }
 
 .load-photos-button:hover {
     background-color: var(--color-primary-600);
+    transform: translateY(-1px);
+    box-shadow: var(--shadow-sm);
 }
 
-.load-photos-button:active {
-    background-color: var(--color-primary-700);
+.load-photos-button:active::after {
+    width: 150%;
+    height: 150%;
+}
+
+.load-photos-button:focus-visible {
+    outline: 2px solid var(--color-primary-300);
+    outline-offset: 2px;
 }
 
 .load-photos-button:disabled {
-    background-color: var(--color-gray-100);
+    background-color: var(--color-gray-200);
     color: var(--color-gray-500);
-}
-
-input {
-    display: none;
-}
-
-input:checked~label {
-    color: var(--color-error);
-}
-
-label {
-    font-size: 5em;
+    cursor: not-allowed;
+    transform: none;
+    box-shadow: none;
 }
 
 .heart-checkbox-container {
@@ -399,6 +417,51 @@ label {
     display: flex;
     justify-content: center;
     align-items: center;
+    margin-top: var(--space-4);
+}
+
+.heart-checkbox-container input {
+    position: absolute;
+    opacity: 0;
+    width: 1px;
+    height: 1px;
+    padding: 0;
+    margin: -1px;
+    overflow: hidden;
+    clip: rect(0, 0, 0, 0);
+    white-space: nowrap;
+    border: 0;
+}
+
+.heart-checkbox-container label {
+    font-size: 2.5rem;
+    cursor: pointer;
+    transition: all 0.2s ease;
+    color: rgba(255, 255, 255, 0.5);
+    user-select: none;
+    padding: var(--space-2);
+}
+
+.heart-checkbox-container label:hover {
+    transform: scale(1.1);
+    color: var(--color-error);
+}
+
+.heart-checkbox-container input:checked + label {
+    color: var(--color-error);
+    animation: heartBeat 0.3s ease;
+}
+
+.heart-checkbox-container input:focus-visible + label {
+    outline: 2px solid var(--color-primary-300);
+    outline-offset: 2px;
+    border-radius: var(--radius-sm);
+}
+
+@keyframes heartBeat {
+    0% { transform: scale(1); }
+    50% { transform: scale(1.2); }
+    100% { transform: scale(1); }
 }
 
 .no-photos {
@@ -414,8 +477,13 @@ label {
 }
 
 @media (max-width: 800px) {
+    .button-group {
+        flex-direction: column;
+        gap: var(--space-2);
+    }
+
     .load-photos-button {
-        width: 15vw;
-        height: 6vh;
+        width: 100%;
+        min-width: 150px;
     }
 }

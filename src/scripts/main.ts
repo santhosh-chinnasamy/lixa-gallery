@@ -1,48 +1,89 @@
 import { invoke } from "@tauri-apps/api/core";
 import { open } from "@tauri-apps/plugin-dialog";
-import { Gallery, Photo } from "./gallery";
 import { attachConsole } from "@tauri-apps/plugin-log";
+import { Gallery, Photo } from "./gallery";
 
-const loadPhotos = async () => {
-  const folder = await open({
-    multiple: false,
-    directory: true,
-  });
+class AppInitializer {
+  gallery: Gallery | null = null;
 
-  const imagesContainer: HTMLDivElement | null =
-    document.querySelector("#images-container");
-
-  if (imagesContainer) {
-    // reset the container
-    imagesContainer.innerHTML = "";
+  constructor() {
+    this.initializeApp();
   }
 
-  const photos: Photo[] = await invoke("scan_folder", {
-    path: folder,
-  });
-
-  new Gallery(photos);
-};
-
-window.addEventListener("DOMContentLoaded", async () => {
-  await attachConsole();
-  const folderSelector: HTMLButtonElement | null = document.querySelector(
-    "#folder-selector-button"
-  );
-
-  folderSelector?.addEventListener("click", loadPhotos);
-
-  document.addEventListener("keydown", (e) => {
-    if (e.key === "o") {
-      loadPhotos();
+  private async initializeApp(): Promise<void> {
+    try {
+      await attachConsole();
+      this.initializeEventListeners();
+      this.updateCopyrightYear();
+    } catch (error) {
+      console.error("Failed to initialize app:", error);
     }
-  });
-
-  const currentYear = document.querySelector(
-    "#current-year"
-  ) as HTMLSpanElement;
-
-  if (currentYear) {
-    currentYear.textContent = new Date().getFullYear().toString();
   }
-});
+
+  private initializeEventListeners(): void {
+    const folderSelector = document.querySelector<HTMLButtonElement>(
+      "#folder-selector-button"
+    );
+    if (!folderSelector) {
+      throw new Error("Folder selector button not found");
+    }
+
+    folderSelector.addEventListener("click", () => this.loadPhotos());
+    document.addEventListener("keydown", (e) => {
+      if (e.key === "o") {
+        this.loadPhotos();
+      }
+    });
+  }
+
+  private async loadPhotos(): Promise<void> {
+    try {
+      const folder = await open({
+        multiple: false,
+        directory: true,
+      });
+
+      if (!folder) {
+        console.log("No folder selected");
+        return;
+      }
+
+      const imagesContainer =
+        document.querySelector<HTMLDivElement>("#images-container");
+
+      if (imagesContainer) imagesContainer.innerHTML = "";
+
+      const photos: Photo[] = await invoke("scan_folder", { path: folder });
+      if (!photos.length && imagesContainer) {
+        imagesContainer.innerHTML =
+          '<div class="no-photos">No photos found in selected folder</div>';
+        return;
+      }
+
+      this.gallery = new Gallery(photos);
+    } catch (error) {
+      console.error("Failed to load photos:", error);
+      this.handleError(error);
+    }
+  }
+
+  private updateCopyrightYear(): void {
+    const currentYear =
+      document.querySelector<HTMLSpanElement>("#current-year");
+    if (currentYear) {
+      currentYear.textContent = new Date().getFullYear().toString();
+    }
+  }
+
+  private handleError(error: unknown): void {
+    const message =
+      error instanceof Error ? error.message : "An unexpected error occurred";
+    const imagesContainer =
+      document.querySelector<HTMLDivElement>("#images-container");
+    if (imagesContainer) {
+      imagesContainer.innerHTML = `<div class="error-message">${message}</div>`;
+    }
+  }
+}
+
+window.addEventListener("DOMContentLoaded", () => new AppInitializer());
