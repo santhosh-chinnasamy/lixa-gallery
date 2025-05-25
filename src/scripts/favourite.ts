@@ -13,7 +13,9 @@ export class FavouriteManager {
   constructor() {
     const button = document.getElementById(FavouriteManager.EXPORT_BUTTON_ID);
     if (!button) {
-      throw new Error(`Export button with ID '${FavouriteManager.EXPORT_BUTTON_ID}' not found`);
+      throw new Error(
+        `Export button with ID '${FavouriteManager.EXPORT_BUTTON_ID}' not found`
+      );
     }
     this.exportFavouritesButton = button as HTMLButtonElement;
     this.initializeExportButton();
@@ -67,12 +69,16 @@ export class FavouriteManager {
 
   public isFavourite(filePath: string): boolean {
     if (!filePath?.trim()) return false;
-    return this.favourites.some(favourite => favourite.path === filePath);
+    return this.favourites.some((favourite) => favourite.path === filePath);
   }
 
   private async toggleExportFavouritesButton(): Promise<void> {
     const favourites = await this.getFavourites();
     this.exportFavouritesButton.disabled = favourites.length === 0;
+    this.exportFavouritesButton.innerHTML =
+      favourites.length === 0
+        ? "No favourites to export"
+        : `Export ${favourites.length} &#9829; photos`;
   }
 
   private async exportFavourites(): Promise<void> {
@@ -93,8 +99,9 @@ export class FavouriteManager {
   }
 
   private handleError(error: unknown): void {
-    const errorMessage = error instanceof Error ? error.message : 'An unexpected error occurred';
-    console.error('Favourite operation failed:', errorMessage);
+    const errorMessage =
+      error instanceof Error ? error.message : "An unexpected error occurred";
+    console.error("Favourite operation failed:", errorMessage);
     alert(`Error: ${errorMessage}`);
   }
 }
