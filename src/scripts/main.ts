@@ -4,8 +4,6 @@ import { attachConsole } from "@tauri-apps/plugin-log";
 import { Gallery, Photo } from "./gallery";
 
 class AppInitializer {
-  gallery: Gallery | null = null;
-
   constructor() {
     this.initializeApp();
   }
@@ -60,7 +58,7 @@ class AppInitializer {
         return;
       }
 
-      this.gallery = new Gallery(photos);
+      new Gallery(photos).load();
     } catch (error) {
       console.error("Failed to load photos:", error);
       this.handleError(error);

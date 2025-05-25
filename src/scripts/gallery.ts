@@ -17,13 +17,16 @@ interface DOMElements {
 
 export class Gallery {
   private readonly photos: Photo[];
-  private readonly elements: DOMElements;
-  private readonly favourites: FavouriteManager;
+  private elements!: DOMElements;
+  private favourites!: FavouriteManager;
   private activeIndex: number | null = null;
   private readonly SWIPE_THRESHOLD = 50;
 
   constructor(photos: Photo[]) {
     this.photos = photos;
+  }
+
+  async load(): Promise<void> {
     this.elements = this.initializeDOMElements();
     this.favourites = new FavouriteManager();
 
