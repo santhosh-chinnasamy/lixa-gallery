@@ -1,20 +1,38 @@
 <script lang="ts">
-  import { convertFileSrc } from "@tauri-apps/api/core";
+  import { convertFileSrc, invoke } from "@tauri-apps/api/core";
   import { photos } from "../stores/galleryStore";
 
   export let selectedImage: string | null;
   export let onClose: () => void;
 
   $: currentIndex = selectedImage ? $photos.indexOf(selectedImage) : -1;
+  let isFavorite = false;
+
+  async function toggleFavorite() {
+    if (!selectedImage) return;
+
+    try {
+      if (isFavorite) {
+        await invoke("remove_favourite", { path: selectedImage });
+        isFavorite = false;
+      } else {
+        await invoke("add_favourite", { path: selectedImage });
+        isFavorite = true;
+      }
+    } catch (error) {
+      console.error("Error toggling favorite:", error);
+    }
+  }
 
   function handleKeydown(event: KeyboardEvent) {
     if (event.key === "Escape") {
-      event.preventDefault();
       onClose();
     } else if (event.key === "ArrowLeft") {
       showPrevious();
     } else if (event.key === "ArrowRight") {
       showNext();
+    } else if (event.key === "l") {
+      toggleFavorite();
     }
   }
 
@@ -50,7 +68,18 @@
     </button>
     <div class="modal-content" on:click|stopPropagation>
       <img src={convertFileSrc(selectedImage)} alt="" class="modal-image" />
+      <div class="toolbar">
+        <button
+          class="favorite-button"
+          on:click={toggleFavorite}
+          class:active={isFavorite}
+          aria-label={isFavorite ? "Remove from favorites" : "Add to favorites"}
+        >
+          ♥
+        </button>
+      </div>
     </div>
+
     <button
       class="nav-button next"
       on:click={showNext}
@@ -76,7 +105,7 @@
     z-index: var(--z-modal);
   }
 
-  .modal-overlay button{
+  .modal-overlay button {
     z-index: 1;
   }
 
@@ -90,6 +119,7 @@
     box-shadow: 0 0 10px rgba(0, 0, 0, 0.5);
     background-color: aliceblue;
     padding: 20px;
+    padding-top: 50px;
   }
 
   .modal-image {
@@ -147,5 +177,41 @@
   .next {
     position: absolute;
     right: 1rem;
+  }
+
+  .toolbar {
+    display: flex;
+    justify-content: center;
+    align-items: center;
+    background-color: var(--color-gray-400);
+    height: 4rem;
+    position: absolute;
+    margin: auto;
+    bottom: 0;
+    right: 0;
+    left: 0;
+    z-index: 1;
+  }
+
+  .favorite-button {
+    position: absolute;
+    background: none;
+    border: none;
+    color: white;
+    font-size: 2rem;
+    cursor: pointer;
+    padding: 0.5rem;
+    transition: color 0.2s;
+    display: flex;
+    justify-content: center;
+    align-items: center;
+  }
+
+  .favorite-button:hover {
+    color: var(--color-warning);
+  }
+
+  .favorite-button.active {
+    color: var(--color-error);
   }
 </style>
