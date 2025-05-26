@@ -77,11 +77,11 @@ body {
   font-size: 16px;
   line-height: 1.5;
   color: var(--color-gray-900);
-  background-color: var(--color-gray-50);
+  background-color: var(--color-gray-200);
   -webkit-font-smoothing: antialiased;
   -moz-osx-font-smoothing: grayscale;
 }
 
-body:has(.no-photos) {
+body {
   overflow: hidden;
 }

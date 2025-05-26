@@ -19,7 +19,6 @@
         photos.set([]);
         return;
       }
-      isLoading.set(true);
       const loadedPhotos: string[] = await invoke("scan_folder", {
         path: folder,
       });
@@ -49,13 +48,13 @@
       <button class="button"> Export Favourites </button>
     </div>
   </header>
-  <hr />
+
   {#if $isLoading}
-    <p class="loading"></p>
+    <p class="loading">Select Folder...</p>
   {:else}
     <Gallery />
   {/if}
-  <hr />
+
   <footer class="footer">
     <p>{APP_NAME} &copy; {new Date().getFullYear()}</p>
   </footer>
@@ -95,6 +94,15 @@
     background-color: #0069d9;
   }
 
+  .loading {
+    display: flex;
+    justify-content: center;
+    height: 100vh;
+    font-size: 2rem;
+    font-weight: bold;
+    color: var(--color-gray-500);
+  }
+
   .footer {
     display: flex;
     justify-content: center;
@@ -102,7 +110,6 @@
     padding: 1rem;
     position: sticky;
     bottom: 0;
-    left: 0;
     background-color: white;
   }
   .footer p {
