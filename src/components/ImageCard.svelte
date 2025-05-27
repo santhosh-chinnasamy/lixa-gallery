@@ -1,22 +1,27 @@
 <script lang="ts">
   import { convertFileSrc } from "@tauri-apps/api/core";
-  import { createEventDispatcher } from "svelte";
+  import { favorites } from "../stores/galleryStore";
 
-  let { path, tabindex } = $props();
-  const dispatch = createEventDispatcher();
+  let { path, tabindex, handleImageClick } = $props();
 
-  function handleClick() {
-    dispatch("click");
-  }
+  const handleClick = () => {
+    handleImageClick(path);
+  };
 
-  function handleKeyPress(event: KeyboardEvent) {
-    if (event.key === " " || event.key === "Enter") {
-      handleClick();
+  const toggleFavorite = () => favorites.toggle(path);
+
+  const handleKeyPress = (event: KeyboardEvent) => {
+    switch (event.key) {
+      case "Enter":
+        handleImageClick(path);
+        break;
+      case "h":
+        toggleFavorite();
+        break;
     }
-  }
+  };
 </script>
 
-<!-- svelte-ignore a11y_no_noninteractive_tabindex -->
 <main
   class="image-card"
   {tabindex}

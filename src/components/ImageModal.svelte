@@ -1,13 +1,10 @@
 <script lang="ts">
-  import { convertFileSrc, invoke } from "@tauri-apps/api/core";
+  import { convertFileSrc } from "@tauri-apps/api/core";
   import { favorites, photos } from "../stores/galleryStore";
+  import type { KeyboardActions } from "../types/events";
 
   export let selectedImage: string | null;
   export let onClose: () => void;
-
-  type KeyboardActions = {
-    [key: string]: () => void;
-  };
 
   $: currentIndex = selectedImage ? $photos.indexOf(selectedImage) : -1;
   $: canShowPrevious = currentIndex > 0;
@@ -18,20 +15,13 @@
     Escape: onClose,
     ArrowLeft: showPrevious,
     ArrowRight: showNext,
-    f: toggleFavorite,
+    h: toggleFavorite,
   };
 
   async function toggleFavorite() {
     if (!selectedImage) return;
-
     try {
-      const action = isFavorite ? "remove_favourite" : "add_favourite";
-      await invoke(action, { path: selectedImage });
-      if (isFavorite) {
-        favorites.remove(selectedImage);
-      } else {
-        favorites.add(selectedImage);
-      }
+      favorites.toggle(selectedImage);
     } catch (error) {
       console.error(
         `Error ${isFavorite ? "removing" : "adding"} favorite:`,

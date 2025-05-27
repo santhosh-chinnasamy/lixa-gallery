@@ -20,11 +20,7 @@
   {:else}
     <div class="images">
       {#each $photos as path, index}
-        <ImageCard
-          {path}
-          tabindex={index + 1}
-          on:click={() => handleImageClick(path)}
-        />
+        <ImageCard {path} tabindex={index + 1} {handleImageClick} />
       {/each}
     </div>
   {/if}
