@@ -36,6 +36,16 @@ function createFavoritesStore() {
       const favoriteSet = get({ subscribe });
       return favoriteSet.has(path);
     },
+    toggle: async (path: string) => {
+      const favoriteSet = get({ subscribe });
+      if (favoriteSet.has(path)) {
+        await invoke("remove_favourite", { path });
+        favorites.remove(path);
+      } else {
+        await invoke("add_favourite", { path });
+        favorites.add(path);
+      }
+    },
   };
 }
 

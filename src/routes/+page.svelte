@@ -1,9 +1,11 @@
 <script lang="ts">
   import { invoke } from "@tauri-apps/api/core";
+  import { getCurrentWindow } from "@tauri-apps/api/window";
   import { open } from "@tauri-apps/plugin-dialog";
   import Gallery from "../components/Gallery.svelte";
   import "../main.css";
-  import { isLoading, photos } from "../stores/galleryStore";
+  import { favorites, isLoading, photos } from "../stores/galleryStore";
+  import type { KeyboardActions } from "../types/events";
 
   const APP_NAME = "Lixa Gallery";
 
@@ -29,10 +31,33 @@
       isLoading.set(false);
     }
   };
-  // event listener on key press
-  document.addEventListener("keydown", (event) => {
-    if (event.key === "o") {
-      loadPhotos();
+
+  const toggleFullScreen = async () => {
+    const fullscreen = await getCurrentWindow().isFullscreen();
+
+    if (!fullscreen) {
+      await getCurrentWindow().setFullscreen(true);
+    }
+
+    if (fullscreen) {
+      await getCurrentWindow().setFullscreen(false);
+    }
+  };
+
+  const keyboardActions: KeyboardActions = {
+    o: loadPhotos,
+    F11: toggleFullScreen,
+  };
+
+  document.addEventListener("keydown", async (event) => {
+    try {
+      const action = keyboardActions[event.key];
+      if (action) action();
+    } catch (error) {
+      console.log(
+        `Error executing keyboard action: [key: ${event.key}]`,
+        error
+      );
     }
   });
 </script>
@@ -45,7 +70,7 @@
     </div>
     <div>
       <button class="button" on:click={loadPhotos}>Load Photos</button>
-      <button class="button"> Export Favourites </button>
+      <button class="button"> Export Favourites {$favorites.size}</button>
     </div>
   </header>
 
