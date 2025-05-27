@@ -1,5 +1,6 @@
 <script lang="ts">
   import { invoke } from "@tauri-apps/api/core";
+  import { listen } from "@tauri-apps/api/event";
   import { getCurrentWindow } from "@tauri-apps/api/window";
   import { open } from "@tauri-apps/plugin-dialog";
   import Gallery from "../components/Gallery.svelte";
@@ -8,6 +9,7 @@
   import type { KeyboardActions } from "../types/events";
 
   const APP_NAME = "Lixa Gallery";
+  $: exportButtonText = "Export Favourites";
 
   const loadPhotos = async () => {
     try {
@@ -54,12 +56,41 @@
       const action = keyboardActions[event.key];
       if (action) action();
     } catch (error) {
-      console.log(
+      console.error(
         `Error executing keyboard action: [key: ${event.key}]`,
         error
       );
     }
   });
+
+  const exportFiles = async () => {
+    try {
+      const destination = await open({
+        multiple: false,
+        directory: true,
+      });
+      if (!destination) return;
+
+      listen("export-progress", (event) => {
+        console.log("export-progress", event);
+        exportButtonText = `Exporting ${event.payload} /`;
+      }).then((unlisten) => {
+        setTimeout(() => {
+          unlisten();
+        }, 10000);
+      });
+
+      await invoke("export_favourites", {
+        destination,
+      });
+
+      alert(`Favourites exported to ${destination}`);
+    } catch (error) {
+      console.error("Failed to export files:", error);
+    } finally {
+      exportButtonText = "Export Favourites";
+    }
+  };
 </script>
 
 <main class="container">
@@ -69,8 +100,10 @@
       <p>Select your favorite photos and export them</p>
     </div>
     <div>
-      <button class="button" on:click={loadPhotos}>Load Photos</button>
-      <button class="button"> Export Favourites {$favorites.size}</button>
+      <button class="button" onclick={loadPhotos}>Select Folder</button>
+      <button class="button" onclick={exportFiles}>
+        {exportButtonText} {$favorites.size}</button
+      >
     </div>
   </header>
 
@@ -148,5 +181,16 @@
   .footer p {
     font-size: 1rem;
     margin: 0;
+  }
+
+  .exporting {
+    display: flex;
+    justify-content: center;
+    height: 100vh;
+    font-size: 2rem;
+    font-weight: bold;
+    color: var(--color-gray-500);
+    overlay: var(--z-overlay);
+    background-color: var(--color-primary-500);
   }
 </style>

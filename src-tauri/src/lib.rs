@@ -6,7 +6,7 @@ use std::{
 
 use serde::{Deserialize, Serialize};
 use sqlx::{migrate::MigrateDatabase, prelude::FromRow, sqlite::SqlitePoolOptions, Pool, Sqlite};
-use tauri::{App, Manager as _};
+use tauri::{App, AppHandle, Emitter, Manager as _};
 
 type Db = Pool<Sqlite>;
 
@@ -51,6 +51,7 @@ fn scan_folder(path: &str) -> Result<Vec<String>, String> {
 
 #[tauri::command]
 async fn export_favourites(
+    app: AppHandle,
     db: tauri::State<'_, AppState>,
     destination: &str,
 ) -> Result<Vec<String>, String> {
@@ -60,6 +61,7 @@ async fn export_favourites(
         .map(|favorite| favorite.path)
         .collect::<Vec<String>>();
 
+    let mut counter = 0;
     files
         .into_iter()
         .map(|file_path| {
@@ -74,6 +76,11 @@ async fn export_favourites(
             let destination_path = PathBuf::from(destination).join(name_str);
             fs::copy(&file_path, &destination_path)
                 .map_err(|e| format!("Error copying file: {}", e))?;
+
+            counter += 1;
+            // emit event to update the progress bar
+            app.emit("export-progress", counter)
+                .expect("failed to emit progress event");
             Ok(name_str.to_string())
         })
         .collect()
