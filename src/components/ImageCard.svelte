@@ -24,7 +24,7 @@
   onkeypress={handleKeyPress}
 >
   <div class="image-container">
-    <img src={convertFileSrc(path)} alt="" class="image" />
+    <img src={convertFileSrc(path)} alt="" class="image" loading="lazy" />
   </div>
 </main>
 
@@ -40,16 +40,17 @@
   }
 
   .image-container {
-    width: 100%;
-    height: 100%;
+    width: 300px;
+    height: 300px;
     display: flex;
     justify-content: center;
     align-items: center;
+    overflow: hidden;
   }
 
   .image {
-    max-width: 100%;
-    max-height: 100%;
+    width: 100%;
+    height: 100%;
     object-fit: contain;
   }
 
@@ -57,5 +58,12 @@
     transform: scale(1.05);
     transition: transform 0.2s ease-in-out;
     cursor: pointer;
+  }
+
+  @media (max-width: 800px) {
+    .image-container {
+      width: 200px;
+      height: 200px;
+    }
   }
 </style>

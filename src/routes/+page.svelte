@@ -56,7 +56,15 @@
   {/if}
 
   <footer class="footer">
-    <p>{APP_NAME} &copy; {new Date().getFullYear()}</p>
+    <p>
+      <a
+        href="http://github.com/santhosh-chinnasamy/lixa-gallery"
+        target="_blank"
+      >
+        {APP_NAME}
+      </a>
+      &copy; {new Date().getFullYear()}
+    </p>
   </footer>
 </main>
 
@@ -110,7 +118,7 @@
     padding: 1rem;
     position: sticky;
     bottom: 0;
-    background-color: white;
+    background-color: none;
   }
   .footer p {
     font-size: 1rem;
