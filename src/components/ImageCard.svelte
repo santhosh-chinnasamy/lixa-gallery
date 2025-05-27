@@ -46,21 +46,21 @@
 
   .image-container {
     width: 300px;
-    height: 300px;
+    height: 200px;
     display: flex;
     justify-content: center;
     align-items: center;
     overflow: hidden;
   }
 
-  .image {
-    width: 100%;
-    height: 100%;
-    object-fit: contain;
+  .image-container .image {
+    max-width: 100%;
+    height: auto;
+    object-fit: cover;
   }
 
-  .image-container:hover {
-    transform: scale(1.05);
+  .image:hover {
+    transform: scale(1.1);
     transition: transform 0.2s ease-in-out;
     cursor: pointer;
   }
