@@ -75,11 +75,10 @@
       <p>Select your favorite photos and export them</p>
     </div>
     <div>
-      <!-- <button class="button" onclick={loadPhotos}>Select Folder</button> -->
-      <a href="/">All Photos</a>
-      <button class="button" onclick={exportFiles}>
-        {exportButtonText} {$favorites.size}</button
+      <button class="button" onclick={exportFiles}
+        >{exportButtonText} {$favorites.size}</button
       >
+      <a href="/">All Photos</a>
     </div>
   </header>
 
