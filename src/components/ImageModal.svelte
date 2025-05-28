@@ -1,14 +1,17 @@
 <script lang="ts">
+  import { page } from "$app/state";
   import { convertFileSrc } from "@tauri-apps/api/core";
   import { favorites, photos } from "../stores/galleryStore";
   import type { KeyboardActions } from "../types/events";
 
   export let selectedImage: string | null;
   export let onClose: () => void;
+  const sourceForPhotos =
+    page.url.pathname === "/" ? $photos : Array.from($favorites);
 
-  $: currentIndex = selectedImage ? $photos.indexOf(selectedImage) : -1;
+  $: currentIndex = selectedImage ? sourceForPhotos.indexOf(selectedImage) : -1;
   $: canShowPrevious = currentIndex > 0;
-  $: canShowNext = currentIndex < $photos.length - 1;
+  $: canShowNext = currentIndex < sourceForPhotos.length - 1;
   $: isFavorite = selectedImage ? $favorites.has(selectedImage) : false;
 
   const keyboardActions: KeyboardActions = {
@@ -40,13 +43,13 @@
 
   function showPrevious() {
     if (canShowPrevious && selectedImage) {
-      selectedImage = $photos[currentIndex - 1];
+      selectedImage = sourceForPhotos[currentIndex - 1];
     }
   }
 
   function showNext() {
     if (canShowNext && selectedImage) {
-      selectedImage = $photos[currentIndex + 1];
+      selectedImage = sourceForPhotos[currentIndex + 1];
     }
   }
 </script>
@@ -230,7 +233,7 @@
     color: var(--color-error);
   }
 
-  @media (max-width: 640px) {
+  @media (max-width: 800px) {
     .control-button {
       --button-size: 2.5rem;
       font-size: 1.25rem;
