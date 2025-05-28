@@ -1,6 +1,5 @@
 <script lang="ts">
   import { invoke } from "@tauri-apps/api/core";
-  import { listen } from "@tauri-apps/api/event";
   import { getCurrentWindow } from "@tauri-apps/api/window";
   import { open } from "@tauri-apps/plugin-dialog";
   import Gallery from "../components/Gallery.svelte";
@@ -8,7 +7,6 @@
   import type { KeyboardActions } from "../types/events";
 
   const APP_NAME = "Lixa Gallery";
-  $: exportButtonText = "Export Favourites";
 
   const loadPhotos = async () => {
     try {
@@ -61,35 +59,6 @@
       );
     }
   });
-
-  const exportFiles = async () => {
-    try {
-      const destination = await open({
-        multiple: false,
-        directory: true,
-      });
-      if (!destination) return;
-
-      listen("export-progress", (event) => {
-        console.log("export-progress", event);
-        exportButtonText = `Exporting ${event.payload} /`;
-      }).then((unlisten) => {
-        setTimeout(() => {
-          unlisten();
-        }, 10000);
-      });
-
-      await invoke("export_favourites", {
-        destination,
-      });
-
-      alert(`Favourites exported to ${destination}`);
-    } catch (error) {
-      console.error("Failed to export files:", error);
-    } finally {
-      exportButtonText = "Export Favourites";
-    }
-  };
 </script>
 
 <main class="container">
@@ -128,7 +97,7 @@
     display: flex;
     justify-content: space-between;
     align-items: center;
-    background-color: white;
+    background-color: var(--color-gray-50);
     box-shadow: var(--shadow-sm);
     padding: var(--space-6) var(--space-4);
     position: sticky;
@@ -183,21 +152,10 @@
     padding: 1rem;
     position: sticky;
     bottom: 0;
-    background-color: none;
+    background-color: var(--color-gray-50);
   }
   .footer p {
     font-size: 1rem;
     margin: 0;
-  }
-
-  .exporting {
-    display: flex;
-    justify-content: center;
-    height: 100vh;
-    font-size: 2rem;
-    font-weight: bold;
-    color: var(--color-gray-500);
-    overlay: var(--z-overlay);
-    background-color: var(--color-primary-500);
   }
 </style>
