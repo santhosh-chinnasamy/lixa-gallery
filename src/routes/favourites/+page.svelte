@@ -3,35 +3,12 @@
   import { listen } from "@tauri-apps/api/event";
   import { getCurrentWindow } from "@tauri-apps/api/window";
   import { open } from "@tauri-apps/plugin-dialog";
-  import Gallery from "../components/Gallery.svelte";
-  import { favorites, isLoading, photos } from "../stores/galleryStore";
-  import type { KeyboardActions } from "../types/events";
+  import Gallery from "../../components/Gallery.svelte";
+  import { favorites, isLoading } from "../../stores/galleryStore";
+  import type { KeyboardActions } from "../../types/events";
 
   const APP_NAME = "Lixa Gallery";
   $: exportButtonText = "Export Favourites";
-
-  const loadPhotos = async () => {
-    try {
-      isLoading.set(true);
-      const folder = await open({
-        multiple: false,
-        directory: true,
-      });
-      if (!folder) {
-        isLoading.set(false);
-        photos.set([]);
-        return;
-      }
-      const loadedPhotos: string[] = await invoke("scan_folder", {
-        path: folder,
-      });
-      photos.set(loadedPhotos);
-    } catch (error) {
-      console.error("Failed to load photos:", error);
-    } finally {
-      isLoading.set(false);
-    }
-  };
 
   const toggleFullScreen = async () => {
     const fullscreen = await getCurrentWindow().isFullscreen();
@@ -46,7 +23,6 @@
   };
 
   const keyboardActions: KeyboardActions = {
-    o: loadPhotos,
     F11: toggleFullScreen,
   };
 
@@ -99,15 +75,18 @@
       <p>Select your favorite photos and export them</p>
     </div>
     <div>
-      <button class="button" onclick={loadPhotos}>Select Folder</button>
-      <a href="/favourites">Show Favourites {$favorites.size}</a>
+      <!-- <button class="button" onclick={loadPhotos}>Select Folder</button> -->
+      <a href="/">All Photos</a>
+      <button class="button" onclick={exportFiles}>
+        {exportButtonText} {$favorites.size}</button
+      >
     </div>
   </header>
 
   {#if $isLoading}
     <p class="loading">Select Folder...</p>
   {:else}
-    <Gallery photos={$photos} />
+    <Gallery photos={$favorites} />
   {/if}
 
   <footer class="footer">
@@ -153,16 +132,6 @@
     color: #fff;
     cursor: pointer;
   }
-  .header a {
-    font-size: 1rem;
-    padding: 0.5rem 1rem;
-    border: none;
-    border-radius: 0.25rem;
-    background-color: var(--color-primary-900);
-    color: #fff;
-    cursor: pointer;
-    text-decoration: none;
-  }
   .header button:hover {
     background-color: #0069d9;
   }
@@ -190,14 +159,14 @@
     margin: 0;
   }
 
-  .exporting {
-    display: flex;
-    justify-content: center;
-    height: 100vh;
-    font-size: 2rem;
-    font-weight: bold;
-    color: var(--color-gray-500);
-    overlay: var(--z-overlay);
-    background-color: var(--color-primary-500);
+  .header a {
+    font-size: 1rem;
+    padding: 0.5rem 1rem;
+    border: none;
+    border-radius: 0.25rem;
+    background-color: var(--color-primary-900);
+    color: #fff;
+    cursor: pointer;
+    text-decoration: none;
   }
 </style>
