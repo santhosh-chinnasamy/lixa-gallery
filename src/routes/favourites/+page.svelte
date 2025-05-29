@@ -47,7 +47,6 @@
       if (!destination) return;
 
       listen("export-progress", (event) => {
-        console.log("export-progress", event);
         exportButtonText = `Exporting ${event.payload} /`;
       }).then((unlisten) => {
         setTimeout(() => {

@@ -3,7 +3,6 @@ use std::{
     fs::{self},
     path::PathBuf,
 };
-
 use serde::{Deserialize, Serialize};
 use sqlx::{migrate::MigrateDatabase, prelude::FromRow, sqlite::SqlitePoolOptions, Pool, Sqlite};
 use tauri::{App, AppHandle, Emitter, Manager as _};
@@ -54,7 +53,7 @@ async fn export_favourites(
     app: AppHandle,
     db: tauri::State<'_, AppState>,
     destination: &str,
-) -> Result<Vec<String>, String> {
+) -> Result<(), String> {
     let favourites = get_favourites(db).await?;
     let files = favourites
         .into_iter()
@@ -62,28 +61,39 @@ async fn export_favourites(
         .collect::<Vec<String>>();
 
     let mut counter = 0;
-    files
-        .into_iter()
-        .map(|file_path| {
-            let file = PathBuf::from(&file_path);
-            let name = file
-                .file_name()
-                .ok_or_else(|| format!("Invalid path (no file name): {}", file_path))?;
-            let name_str = name
-                .to_str()
-                .ok_or_else(|| format!("Non-UTF8 file name: {}", file_path))?;
 
-            let destination_path = PathBuf::from(destination).join(name_str);
-            fs::copy(&file_path, &destination_path)
-                .map_err(|e| format!("Error copying file: {}", e))?;
+    for file_path in files {
+        let file = PathBuf::from(&file_path);
+        let name = file
+            .file_name()
+            .ok_or_else(|| format!("Invalid path (no file name): {}", file_path))?;
+        let name_str = name
+            .to_str()
+            .ok_or_else(|| format!("Non-UTF8 file name: {}", file_path))?;
 
-            counter += 1;
-            // emit event to update the progress bar
-            app.emit("export-progress", counter)
-                .expect("failed to emit progress event");
-            Ok(name_str.to_string())
-        })
-        .collect()
+        let destination_path = PathBuf::from(destination).join(name_str);
+
+        let canonical_src = fs::canonicalize(&file_path)
+            .map_err(|e| format!("Failed to canonicalize source path: {}", e))?;
+        let canonical_dst = fs::canonicalize(&destination_path).unwrap_or(destination_path.clone());
+
+        if canonical_src == canonical_dst {
+            log::info!(
+                "Skipping copy of {} as it already exists in the same folder",
+                file_path
+            );
+            continue;
+        }
+
+        fs::copy(&file_path, &destination_path)
+            .map_err(|e| format!("Error copying file: {}", e))?;
+
+        counter += 1;
+        app.emit("export-progress", counter)
+            .map_err(|e| format!("Failed to emit event: {}", e))?;
+    }
+
+    Ok(())
 }
 
 #[tauri::command]
