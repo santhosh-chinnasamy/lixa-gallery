@@ -8,7 +8,11 @@
     "build": "tsc && vite build",
     "preview": "vite preview",
     "tauri": "tauri",
-    "clean": "cd src-tauri && cargo clean"
+    "clean": "cd src-tauri && cargo clean",
+    "format:rs": "cd src-tauri && cargo fmt",
+    "format:ts": "prettier --write src/**/*.{ts,svelte}",
+    "lint:fix": "npm run format:rs && npm run format:ts",
+    "lint": "prettier --check ."
   },
   "dependencies": {
     "@tailwindcss/vite": "^4.1.5",
@@ -19,13 +23,15 @@
     "tailwindcss": "^4.1.5"
   },
   "devDependencies": {
-    "@tauri-apps/cli": "^2",
-    "typescript": "~5.6.2",
-    "vite": "^6.0.3",
     "@sveltejs/adapter-static": "^3.0.6",
     "@sveltejs/kit": "^2.9.0",
     "@sveltejs/vite-plugin-svelte": "^5.0.0",
+    "@tauri-apps/cli": "^2",
+    "prettier": "^3.4.2",
+    "prettier-plugin-svelte": "^3.3.3",
     "svelte": "^5.0.0",
-    "svelte-check": "^4.0.0"
+    "svelte-check": "^4.0.0",
+    "typescript": "~5.6.2",
+    "vite": "^6.0.3"
   }
 }
