@@ -4,6 +4,7 @@
   "version": "0.3.0",
   "type": "module",
   "scripts": {
+    "postinstall": "svelte-kit sync",
     "dev": "vite",
     "build": "tsc && vite build",
     "preview": "vite preview",
