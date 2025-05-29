@@ -1,6 +1,6 @@
 <script lang="ts">
-  import { convertFileSrc } from "@tauri-apps/api/core";
-  import { favorites } from "../stores/galleryStore";
+  import { convertFileSrc } from '@tauri-apps/api/core';
+  import { favorites } from '../stores/galleryStore';
 
   let { path, tabindex, handleImageClick } = $props();
 
@@ -12,10 +12,10 @@
 
   const handleKeyPress = (event: KeyboardEvent) => {
     switch (event.key) {
-      case "Enter":
+      case 'Enter':
         handleImageClick(path);
         break;
-      case "h":
+      case 'h':
         toggleFavorite();
         break;
     }

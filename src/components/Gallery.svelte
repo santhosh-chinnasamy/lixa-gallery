@@ -1,6 +1,6 @@
 <script lang="ts">
-  import ImageCard from "./ImageCard.svelte";
-  import ImageModal from "./ImageModal.svelte";
+  import ImageCard from './ImageCard.svelte';
+  import ImageModal from './ImageModal.svelte';
 
   let { photos } = $props();
   let selectedImage: string | null = $state(null);

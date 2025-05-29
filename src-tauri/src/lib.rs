@@ -1,10 +1,10 @@
 use futures::TryStreamExt;
+use serde::{Deserialize, Serialize};
+use sqlx::{migrate::MigrateDatabase, prelude::FromRow, sqlite::SqlitePoolOptions, Pool, Sqlite};
 use std::{
     fs::{self},
     path::PathBuf,
 };
-use serde::{Deserialize, Serialize};
-use sqlx::{migrate::MigrateDatabase, prelude::FromRow, sqlite::SqlitePoolOptions, Pool, Sqlite};
 use tauri::{App, AppHandle, Emitter, Manager as _};
 
 type Db = Pool<Sqlite>;

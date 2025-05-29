@@ -1,5 +1,5 @@
-import { invoke } from "@tauri-apps/api/core";
-import { get, writable } from "svelte/store";
+import { invoke } from '@tauri-apps/api/core';
+import { get, writable } from 'svelte/store';
 
 export const photos = writable<string[]>([]);
 export const isLoading = writable(false);
@@ -13,13 +13,12 @@ function createFavoritesStore() {
     subscribe,
     initialize: async () => {
       try {
-        const favorites = await invoke<Array<{ path: string }>>(
-          "get_favourites"
-        );
+        const favorites =
+          await invoke<Array<{ path: string }>>('get_favourites');
         const paths = new Set(favorites.map((f) => f.path));
         set(paths);
       } catch (error) {
-        console.error("Error loading favorites:", error);
+        console.error('Error loading favorites:', error);
       }
     },
     add: (path: string) =>
@@ -39,10 +38,10 @@ function createFavoritesStore() {
     toggle: async (path: string) => {
       const favoriteSet = get({ subscribe });
       if (favoriteSet.has(path)) {
-        await invoke("remove_favourite", { path });
+        await invoke('remove_favourite', { path });
         favorites.remove(path);
       } else {
-        await invoke("add_favourite", { path });
+        await invoke('add_favourite', { path });
         favorites.add(path);
       }
     },

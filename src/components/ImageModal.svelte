@@ -1,13 +1,13 @@
 <script lang="ts">
-  import { page } from "$app/state";
-  import { convertFileSrc } from "@tauri-apps/api/core";
-  import { favorites, photos } from "../stores/galleryStore";
-  import type { KeyboardActions } from "../types/events";
+  import { page } from '$app/state';
+  import { convertFileSrc } from '@tauri-apps/api/core';
+  import { favorites, photos } from '../stores/galleryStore';
+  import type { KeyboardActions } from '../types/events';
 
   export let selectedImage: string | null;
   export let onClose: () => void;
   const sourceForPhotos =
-    page.url.pathname === "/" ? $photos : Array.from($favorites);
+    page.url.pathname === '/' ? $photos : Array.from($favorites);
 
   $: currentIndex = selectedImage ? sourceForPhotos.indexOf(selectedImage) : -1;
   $: canShowPrevious = currentIndex > 0;
@@ -27,8 +27,8 @@
       favorites.toggle(selectedImage);
     } catch (error) {
       console.error(
-        `Error ${isFavorite ? "removing" : "adding"} favorite:`,
-        error
+        `Error ${isFavorite ? 'removing' : 'adding'} favorite:`,
+        error,
       );
     }
   }
@@ -104,7 +104,7 @@
           class="control-button favorite-button"
           on:click={toggleFavorite}
           class:active={isFavorite}
-          aria-label={isFavorite ? "Remove from favorites" : "Add to favorites"}
+          aria-label={isFavorite ? 'Remove from favorites' : 'Add to favorites'}
           aria-pressed={isFavorite}
         >
           <span aria-hidden="true">♥</span>

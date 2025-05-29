@@ -1,12 +1,12 @@
 <script lang="ts">
-  import { invoke } from "@tauri-apps/api/core";
-  import { getCurrentWindow } from "@tauri-apps/api/window";
-  import { open } from "@tauri-apps/plugin-dialog";
-  import Gallery from "../components/Gallery.svelte";
-  import { favorites, isLoading, photos } from "../stores/galleryStore";
-  import type { KeyboardActions } from "../types/events";
+  import { invoke } from '@tauri-apps/api/core';
+  import { getCurrentWindow } from '@tauri-apps/api/window';
+  import { open } from '@tauri-apps/plugin-dialog';
+  import Gallery from '../components/Gallery.svelte';
+  import { favorites, isLoading, photos } from '../stores/galleryStore';
+  import type { KeyboardActions } from '../types/events';
 
-  const APP_NAME = "Lixa Gallery";
+  const APP_NAME = 'Lixa Gallery';
 
   const loadPhotos = async () => {
     try {
@@ -20,12 +20,12 @@
         photos.set([]);
         return;
       }
-      const loadedPhotos: string[] = await invoke("scan_folder", {
+      const loadedPhotos: string[] = await invoke('scan_folder', {
         path: folder,
       });
       photos.set(loadedPhotos);
     } catch (error) {
-      console.error("Failed to load photos:", error);
+      console.error('Failed to load photos:', error);
     } finally {
       isLoading.set(false);
     }
@@ -48,14 +48,14 @@
     F11: toggleFullScreen,
   };
 
-  document.addEventListener("keydown", async (event) => {
+  document.addEventListener('keydown', async (event) => {
     try {
       const action = keyboardActions[event.key];
       if (action) action();
     } catch (error) {
       console.error(
         `Error executing keyboard action: [key: ${event.key}]`,
-        error
+        error,
       );
     }
   });
