@@ -11,7 +11,7 @@
     "tauri": "tauri",
     "clean": "cd src-tauri && cargo clean",
     "format:rs": "cd src-tauri && cargo fmt",
-    "format:ts": "prettier --write src/**/*.{ts,svelte}",
+    "format:ts": "prettier --write src/**/*.{ts,svelte,css,html}",
     "lint:fix": "npm run format:rs && npm run format:ts",
     "lint": "prettier --check ."
   },
