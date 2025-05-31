@@ -50,13 +50,5 @@ jobs:
       - name: install frontend dependencies
         run: yarn install # change this to npm, pnpm or bun depending on which one you use.
 
-      - uses: tauri-apps/tauri-action@v0
-        env:
-          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
-        with:
-          tagName: ${{ github.event.repository.name }}-v__VERSION__ # uses repo name from GitHub context
-          releaseName: '${{ github.event.repository.name }} v__VERSION__'
-          releaseBody: 'See the assets to download this version and install.'
-          releaseDraft: false
-          prerelease: false
-          args: ${{ matrix.args }}
+      - name: build app
+        run: yarn tauri build ${{ matrix.args }}
