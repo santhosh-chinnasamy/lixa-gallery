@@ -64,10 +64,10 @@
     aria-modal="true"
     aria-label="Image preview"
   >
-    <div class="modal-controls">
+    <div class="modal-controls" on:click|stopPropagation>
       <button
         class="control-button close-button"
-        on:click={onClose}
+        on:click|stopPropagation={onClose}
         aria-label="Close modal"
       >
         <span aria-hidden="true">×</span>
@@ -75,7 +75,7 @@
 
       <button
         class="control-button nav-button prev"
-        on:click={showPrevious}
+        on:click|stopPropagation={showPrevious}
         disabled={!canShowPrevious}
         aria-label="Previous image"
       >
@@ -84,7 +84,7 @@
 
       <button
         class="control-button nav-button next"
-        on:click={showNext}
+        on:click|stopPropagation={showNext}
         disabled={!canShowNext}
         aria-label="Next image"
       >
@@ -188,19 +188,12 @@
   .nav-button.prev {
     left: 1rem;
     top: 50%;
-    transform: translateY(-50%);
   }
 
   .nav-button.next {
     right: 1rem;
     top: 50%;
-    transform: translateY(-50%);
   }
-
-  .nav-button:hover:not(:disabled) {
-    transform: translateY(-50%) scale(1.1);
-  }
-
   .toolbar {
     position: absolute;
     bottom: 0;
