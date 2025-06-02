@@ -65,6 +65,16 @@
       exportButtonText = 'Export Favourites';
     }
   };
+
+  const clearFavourites = async () => {
+    const isClearConfirmed = await confirm(
+      'Are you sure you want to clear all favourites? This action cannot be undone.',
+    );
+
+    if (!isClearConfirmed) return;
+
+    favorites.clear();
+  };
 </script>
 
 <main class="container">
@@ -78,6 +88,7 @@
         >{exportButtonText} {$favorites.size}</button
       >
       <a href="/">All Photos</a>
+      <button class="btn-danger" onclick={clearFavourites}>🗑️</button>
     </div>
   </header>
 
@@ -168,5 +179,9 @@
     color: #fff;
     cursor: pointer;
     text-decoration: none;
+  }
+
+  button.btn-danger:hover {
+    background-color: var(--color-error);
   }
 </style>

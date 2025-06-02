@@ -1,6 +1,6 @@
 {
   "$schema": "https://schema.tauri.app/config/2",
-  "productName": "lixa-gallery",
+  "productName": "Lixa Gallery",
   "version": "0.3.0",
   "identifier": "com.lixa-gallery.app",
   "build": {
@@ -13,7 +13,7 @@
     "withGlobalTauri": true,
     "windows": [
       {
-        "title": "lixa-gallery",
+        "title": "Lixa Gallery",
         "width": 800,
         "height": 600,
         "fullscreen": false

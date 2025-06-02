@@ -128,6 +128,15 @@ async fn remove_favourite(db: tauri::State<'_, AppState>, path: String) -> Resul
     Ok(())
 }
 
+#[tauri::command]
+async fn clear_favourites(db: tauri::State<'_, AppState>) -> Result<(), String> {
+    sqlx::query("DELETE FROM favourites")
+        .execute(&db.db)
+        .await
+        .map_err(|e| format!("Error removing favourites: {}", e))?;
+    Ok(())
+}
+
 async fn setup_db(app: &App) -> Db {
     let mut path = app.path().app_data_dir().expect("failed to get data_dir");
 
@@ -189,6 +198,7 @@ pub fn run() {
             add_favourite,
             remove_favourite,
             get_favourites,
+            clear_favourites
         ])
         .setup(|app| {
             tauri::async_runtime::block_on(async move {

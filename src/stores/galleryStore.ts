@@ -45,6 +45,10 @@ function createFavoritesStore() {
         favorites.add(path);
       }
     },
+    clear: async () => {
+      await invoke('clear_favourites');
+      set(new Set());
+    },
   };
 }
 
