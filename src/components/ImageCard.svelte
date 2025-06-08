@@ -1,4 +1,5 @@
 <script lang="ts">
+  import * as Card from '$lib/components/ui/card';
   import { convertFileSrc } from '@tauri-apps/api/core';
   import { favorites } from '../stores/galleryStore';
 
@@ -22,53 +23,18 @@
   };
 </script>
 
-<main
-  class="image-card"
+<Card.Root
+  class="h-96 w-96"
   {tabindex}
   onclick={handleClick}
   onkeypress={handleKeyPress}
 >
-  <div class="image-container">
-    <img src={convertFileSrc(path)} alt="" class="image" loading="lazy" />
-  </div>
-</main>
-
-<style>
-  .image-card {
-    display: flex;
-    justify-content: center;
-    align-items: center;
-    margin: auto;
-    border-radius: 0.25rem;
-    background-color: var(--color-gray-300);
-    color: #fff;
-  }
-
-  .image-container {
-    width: 300px;
-    height: 200px;
-    display: flex;
-    justify-content: center;
-    align-items: center;
-    overflow: hidden;
-  }
-
-  .image-container .image {
-    max-width: 100%;
-    height: auto;
-    object-fit: cover;
-  }
-
-  .image:hover {
-    transform: scale(1.1);
-    transition: transform 0.2s ease-in-out;
-    cursor: pointer;
-  }
-
-  @media (max-width: 800px) {
-    .image-container {
-      width: 200px;
-      height: 200px;
-    }
-  }
-</style>
+  <Card.Content>
+    <img
+      src={convertFileSrc(path)}
+      alt={path}
+      class="h-80 w-80 object-cover"
+      loading="lazy"
+    />
+  </Card.Content>
+</Card.Root>

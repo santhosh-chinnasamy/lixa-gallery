@@ -1,4 +1,5 @@
 <script lang="ts">
+  import { Button } from '$lib/components/ui/button';
   import { invoke } from '@tauri-apps/api/core';
   import { getCurrentWindow } from '@tauri-apps/api/window';
   import { open } from '@tauri-apps/plugin-dialog';
@@ -48,7 +49,7 @@
     F11: toggleFullScreen,
   };
 
-  document.addEventListener('keydown', async (event) => {
+  const handleKeydown = (event: KeyboardEvent) => {
     try {
       const action = keyboardActions[event.key];
       if (action) action();
@@ -58,41 +59,35 @@
         error,
       );
     }
-  });
+  };
 </script>
+
+<svelte:window onkeydown={handleKeydown} />
 
 <main class="container">
   <header class="header">
+    <h3 class="scroll-m-20 text-2xl font-semibold tracking-tight">
+      {APP_NAME}
+    </h3>
     <div>
-      <h1>{APP_NAME}</h1>
-      <p>Select your favorite photos and export them</p>
-    </div>
-    <div>
-      <button class="button" onclick={loadPhotos}>Select Folder</button>
       <a href="/favourites">Show Favourites {$favorites.size}</a>
     </div>
   </header>
 
   {#if $isLoading}
-    <p class="loading">Select Folder...</p>
+    <p>...</p>
+  {:else if $photos.length === 0}
+    <Button onclick={loadPhotos}>Load Photos</Button>
   {:else}
     <Gallery photos={$photos} />
   {/if}
-
-  <footer class="footer">
-    <p>
-      <a
-        href="http://github.com/santhosh-chinnasamy/lixa-gallery"
-        target="_blank"
-      >
-        {APP_NAME}
-      </a>
-      &copy; {new Date().getFullYear()}
-    </p>
-  </footer>
 </main>
 
 <style>
+  .container {
+    max-width: 100vw;
+  }
+
   .header {
     display: flex;
     justify-content: space-between;
