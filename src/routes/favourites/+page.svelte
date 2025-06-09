@@ -1,4 +1,5 @@
 <script lang="ts">
+  import { Button } from '$lib/components/ui/button';
   import { invoke } from '@tauri-apps/api/core';
   import { listen } from '@tauri-apps/api/event';
   import { getCurrentWindow } from '@tauri-apps/api/window';
@@ -77,32 +78,46 @@
   };
 </script>
 
-<main class="container">
-  <header class="header">
+<main class="max-w-[100vw]">
+  <header
+    class="sticky top-0 z-10 flex items-center justify-between bg-white px-4 py-6 shadow-sm"
+  >
     <div>
-      <h1>{APP_NAME}</h1>
-      <p>Select your favorite photos and export them</p>
+      <h1 class="m-0 text-4xl font-bold">{APP_NAME}</h1>
+      <p class="m-0 text-base">Select your favorite photos and export them</p>
     </div>
-    <div>
-      <button class="button" onclick={exportFiles}
-        >{exportButtonText} {$favorites.size}</button
-      >
-      <a href="/">All Photos</a>
-      <button class="btn-danger" onclick={clearFavourites}>🗑️</button>
+    <div class="flex items-center gap-2">
+      <Button variant="default" on:click={exportFiles}>
+        {exportButtonText}
+        {$favorites.size}
+      </Button>
+      <Button variant="outline" href="/" class="no-underline">
+        All Photos
+      </Button>
+      <Button variant="destructive" on:click={clearFavourites} class="px-3">
+        🗑️
+      </Button>
     </div>
   </header>
 
   {#if $favorites.size === 0}
-    <p class="no-photos">No Favourites found.</p>
+    <div
+      class="flex h-[calc(100vh-100px)] items-center justify-center text-center text-xl font-bold text-gray-600"
+    >
+      No Favourites found.
+    </div>
   {:else}
     <Gallery photos={$favorites} />
   {/if}
 
-  <footer class="footer">
-    <p>
+  <footer
+    class="sticky bottom-0 flex items-center justify-center bg-transparent p-4"
+  >
+    <p class="m-0 text-base">
       <a
         href="http://github.com/santhosh-chinnasamy/lixa-gallery"
         target="_blank"
+        class="text-primary transition-colors hover:text-primary/90"
       >
         {APP_NAME}
       </a>
@@ -110,78 +125,3 @@
     </p>
   </footer>
 </main>
-
-<style>
-  .header {
-    display: flex;
-    justify-content: space-between;
-    align-items: center;
-    background-color: white;
-    box-shadow: var(--shadow-sm);
-    padding: var(--space-6) var(--space-4);
-    position: sticky;
-    top: 0;
-    z-index: 1;
-  }
-
-  .header h1 {
-    font-size: 2rem;
-    margin: 0;
-  }
-  .header p {
-    font-size: 1rem;
-    margin: 0;
-  }
-  .header button {
-    font-size: 1rem;
-    padding: 0.5rem 1rem;
-    border: none;
-    border-radius: 0.25rem;
-    background-color: var(--color-primary-900);
-    color: #fff;
-    cursor: pointer;
-  }
-  .header button:hover {
-    background-color: #0069d9;
-  }
-
-  .no-photos {
-    display: flex;
-    justify-content: center;
-    align-items: center;
-    text-align: center;
-    font-size: 1.5rem;
-    font-weight: bold;
-    color: var(--color-gray-600);
-    height: calc(100vh - 100px);
-  }
-
-  .footer {
-    display: flex;
-    justify-content: center;
-    align-items: center;
-    padding: 1rem;
-    position: sticky;
-    bottom: 0;
-    background-color: none;
-  }
-  .footer p {
-    font-size: 1rem;
-    margin: 0;
-  }
-
-  .header a {
-    font-size: 1rem;
-    padding: 0.5rem 1rem;
-    border: none;
-    border-radius: 0.25rem;
-    background-color: var(--color-primary-900);
-    color: #fff;
-    cursor: pointer;
-    text-decoration: none;
-  }
-
-  button.btn-danger:hover {
-    background-color: var(--color-error);
-  }
-</style>

@@ -64,93 +64,32 @@
 
 <svelte:window onkeydown={handleKeydown} />
 
-<main class="container">
-  <header class="header">
+<main class="max-w-[100vw]">
+  <header
+    class="sticky top-0 z-10 flex items-center justify-between bg-gray-50 px-4 py-6 shadow-sm"
+  >
     <h3 class="scroll-m-20 text-2xl font-semibold tracking-tight">
       {APP_NAME}
     </h3>
     <div>
-      <a href="/favourites">Show Favourites {$favorites.size}</a>
+      <a
+        href="/favourites"
+        class="inline-flex h-10 items-center justify-center rounded-md bg-primary px-4 py-2 text-sm font-medium text-primary-foreground ring-offset-background transition-colors hover:bg-primary/90 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-offset-2 disabled:pointer-events-none disabled:opacity-50"
+      >
+        Show Favourites {$favorites.size}
+      </a>
     </div>
   </header>
 
-  {#if $isLoading}
-    <p>...</p>
-  {:else if $photos.length === 0}
-    <Button onclick={loadPhotos}>Load Photos</Button>
-  {:else}
-    <Gallery photos={$photos} />
-  {/if}
+  <div class="top-10 flex items-center justify-center p-4">
+    {#if $isLoading}
+      <p class="text-center">Loading...</p>
+    {:else if $photos.length === 0}
+      <div>
+        <Button on:click={loadPhotos}>Open Folder</Button>
+      </div>
+    {:else}
+      <Gallery photos={$photos} />
+    {/if}
+  </div>
 </main>
-
-<style>
-  .container {
-    max-width: 100vw;
-  }
-
-  .header {
-    display: flex;
-    justify-content: space-between;
-    align-items: center;
-    background-color: var(--color-gray-50);
-    box-shadow: var(--shadow-sm);
-    padding: var(--space-6) var(--space-4);
-    position: sticky;
-    top: 0;
-    z-index: 1;
-  }
-
-  .header h1 {
-    font-size: 2rem;
-    margin: 0;
-  }
-  .header p {
-    font-size: 1rem;
-    margin: 0;
-  }
-  .header button {
-    font-size: 1rem;
-    padding: 0.5rem 1rem;
-    border: none;
-    border-radius: 0.25rem;
-    background-color: var(--color-primary-900);
-    color: #fff;
-    cursor: pointer;
-  }
-  .header a {
-    font-size: 1rem;
-    padding: 0.5rem 1rem;
-    border: none;
-    border-radius: 0.25rem;
-    background-color: var(--color-primary-900);
-    color: #fff;
-    cursor: pointer;
-    text-decoration: none;
-  }
-  .header button:hover {
-    background-color: #0069d9;
-  }
-
-  .loading {
-    display: flex;
-    justify-content: center;
-    height: 100vh;
-    font-size: 2rem;
-    font-weight: bold;
-    color: var(--color-gray-500);
-  }
-
-  .footer {
-    display: flex;
-    justify-content: center;
-    align-items: center;
-    padding: 1rem;
-    position: sticky;
-    bottom: 0;
-    background-color: var(--color-gray-50);
-  }
-  .footer p {
-    font-size: 1rem;
-    margin: 0;
-  }
-</style>
