@@ -14,8 +14,12 @@
   }
 </script>
 
-<main class="gallery">
-  <div class="images">
+<main
+  class="flex h-[calc(100vh-100px)] flex-col items-center overflow-auto p-4"
+>
+  <div
+    class="xs:grid-cols-1 grid grid-cols-4 gap-4 sm:grid-cols-1 md:grid-cols-3 lg:grid-cols-4"
+  >
     {#each photos as path, index}
       <ImageCard {path} tabindex={index + 1} {handleImageClick} />
     {/each}
@@ -23,32 +27,3 @@
 </main>
 
 <ImageModal {selectedImage} onClose={handleCloseModal} />
-
-<style>
-  .gallery {
-    display: flex;
-    flex-direction: column;
-    align-items: center;
-    padding: 1rem;
-    overflow: scroll;
-    height: calc(100vh - 100px);
-  }
-
-  .images {
-    display: grid;
-    grid-template-columns: repeat(4, 1fr);
-    gap: 1rem;
-  }
-
-  @media (max-width: 800px) {
-    .images {
-      grid-template-columns: repeat(3, 1fr);
-    }
-  }
-
-  @media (min-width: 1024px) {
-    .images {
-      grid-template-columns: repeat(4, 1fr);
-    }
-  }
-</style>
