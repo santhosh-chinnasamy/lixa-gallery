@@ -16,7 +16,7 @@
       case 'Enter':
         handleImageClick(path);
         break;
-      case 'h':
+      case 'l':
         toggleFavorite();
         break;
     }
@@ -24,7 +24,7 @@
 </script>
 
 <Card.Root
-  class="h-96 w-96"
+  class={`h-96 w-96 ${!!$favorites.has(path) ? 'border-[0.2rem] border-red-500' : ''}`}
   {tabindex}
   onclick={handleClick}
   onkeypress={handleKeyPress}
