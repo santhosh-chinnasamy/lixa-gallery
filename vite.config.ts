@@ -1,5 +1,6 @@
 import { defineConfig } from 'vite';
 import { sveltekit } from '@sveltejs/kit/vite';
+// @ts-ignore
 import path from "path";
 
 // @ts-expect-error process is a nodejs global
