@@ -83,7 +83,7 @@
         <img
           src={convertFileSrc(selectedImage)}
           alt="Selected image preview"
-          class="max-h-[calc(90vh-6rem)] max-w-full rounded object-contain"
+          class="max-h-[calc(80vh-6rem)] max-w-full rounded object-contain"
         />
       </Card.Content>
       <div

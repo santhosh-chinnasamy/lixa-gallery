@@ -24,7 +24,7 @@
 </script>
 
 <Card.Root
-  class={`h-96 w-96 ${!!$favorites.has(path) ? 'border-[0.2rem] border-red-500' : ''}`}
+  class={`max-h-90 max-w-90 ${!!$favorites.has(path) ? 'border-[0.2rem] border-red-500' : ''}`}
   {tabindex}
   onclick={handleClick}
   onkeypress={handleKeyPress}
