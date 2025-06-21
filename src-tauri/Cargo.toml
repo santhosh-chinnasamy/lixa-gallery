@@ -1,6 +1,6 @@
 [package]
 name = "lixa-gallery"
-version = "0.5.0"
+version = "0.5.1"
 description = "Select your favorite photos and export"
 authors = ["santhosh-chinnasamy"]
 edition = "2021"
