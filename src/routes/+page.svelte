@@ -26,7 +26,7 @@
   {#if $isLoading}
     <p class="text-center">Loading...</p>
   {:else if $photos.length === 0}
-    <div class="flex justify-center items-center">
+    <div class="flex items-center justify-center">
       <Button on:click={loadPhotos}>Open Folder</Button>
     </div>
   {:else}
