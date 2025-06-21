@@ -1,10 +1,12 @@
 <script lang="ts">
-  import { Button } from '$lib/components/ui/button';
   import { getCurrentWindow } from '@tauri-apps/api/window';
   import type { KeyboardActions } from '../../types/events';
-  import AppFooter from './AppFooter.svelte';
+  import GithubLogo from '../icons/Github.svelte';
 
-  let { title = 'Lixa Gallery', subtitle = '', children } = $props();
+  let {
+    title = 'Lixa Gallery',
+    subtitle = 'Select your favorite photos and export',
+  } = $props();
 
   const toggleFullScreen = async () => {
     const fullscreen = await getCurrentWindow().isFullscreen();
@@ -35,7 +37,18 @@
     class="sticky top-0 z-10 flex items-center justify-between bg-gray-50 px-4 py-6 shadow-sm"
   >
     <div>
-      <h1 class="scroll-m-20 text-2xl font-semibold tracking-tight">{title}</h1>
+      <span class="flex items-center">
+        <h1 class="scroll-m-20 text-2xl font-semibold tracking-tight">
+          {title}
+        </h1>
+        <a
+          href="https://github.com/santhosh-chinnasamy/lixa-gallery"
+          target="_blank"
+          rel="noopener noreferrer"
+        >
+          <GithubLogo />
+        </a>
+      </span>
       {#if subtitle}
         <p class="text-base text-muted-foreground">{subtitle}</p>
       {/if}
@@ -48,6 +61,4 @@
   <div class="flex-1 p-4">
     <slot />
   </div>
-
-  <AppFooter />
 </main>
