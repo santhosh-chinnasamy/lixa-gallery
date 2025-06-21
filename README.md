@@ -12,7 +12,7 @@ Download latest version from [release](https://github.com/santhosh-chinnasamy/li
 
 ![Lixa Gallery Screenshot](./screenshot.png 'Lixa Gallery Screenshot')
 
-<video src="./screen-recording.mov" controls alt="Lixa Gallery Demo" title="Lixa Gallery Demo"></video>
+<video src="./screen-recording.mp4" controls alt="Lixa Gallery Demo" title="Lixa Gallery Demo"></video>
 
 ## Supports
 
