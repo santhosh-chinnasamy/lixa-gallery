@@ -15,7 +15,7 @@
 </script>
 
 <main
-  class="flex h-[calc(100vh-100px)] flex-col items-center overflow-auto p-4"
+  class="flex h-[calc(100vh-4rem)] flex-col items-center overflow-auto p-4 pb-20"
 >
   <div
     class="xs:grid-cols-1 grid grid-cols-4 gap-4 sm:grid-cols-1 md:grid-cols-3 lg:grid-cols-4"
