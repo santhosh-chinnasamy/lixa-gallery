@@ -8,11 +8,18 @@ Select your favorite photos and export
 
 Download latest version from [release](https://github.com/santhosh-chinnasamy/lixa-gallery/releases) page for your OS and run the installer.
 
+## Keyboard Shortcuts
+
+- `o` - Open folder
+- `h` - toggle image as favorite in preview mode
+- `e` - export favorites
+- `F11` - toggle fullscreen
+
 ## Screenshots / Demo
 
 ![Lixa Gallery Screenshot](./screenshot.png 'Lixa Gallery Screenshot')
 
-<video src="./screen-recording.mp4" controls alt="Lixa Gallery Demo" title="Lixa Gallery Demo"></video>
+<video src="./screen-recording.mov" controls="" alt="Lixa Gallery Demo" title="Lixa Gallery Demo" height="400" width="auto" />
 
 ## Supports
 
@@ -23,3 +30,7 @@ Download latest version from [release](https://github.com/santhosh-chinnasamy/li
 ## Contribution
 
 Please read the [contributing guidelines](CONTRIBUTING.md) to setup your development machine and proceed.
+
+## Attributions
+
+- Logo generated using svg from <a href="https://www.svgrepo.com" target="_blank">SVG Repo</a>
