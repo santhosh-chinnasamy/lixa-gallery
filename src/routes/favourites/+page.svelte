@@ -1,10 +1,14 @@
 <script lang="ts">
   import { Button } from '$lib/components/ui/button';
+  import TrashIcon from '@lucide/svelte/icons/trash-2';
   import { listen } from '@tauri-apps/api/event';
-  import AppLayout from '../../components/layout/AppLayout.svelte';
   import Gallery from '../../components/Gallery.svelte';
+  import {
+    clearFavorites,
+    exportFavorites,
+  } from '../../components/common/ImageOperations';
   import KeyboardShortcuts from '../../components/common/KeyboardShortcuts.svelte';
-  import { exportFavorites, clearFavorites } from '../../components/common/ImageOperations';
+  import AppLayout from '../../components/layout/AppLayout.svelte';
   import { favorites } from '../../stores/galleryStore';
 
   let exportButtonText = $state('Export Favourites');
@@ -35,25 +39,18 @@
 
 <KeyboardShortcuts actions={keyboardActions} />
 
-<AppLayout
-  title="Lixa Gallery"
-  subtitle="Select your favorite photos and export them"
->
-  <svelte:fragment slot="header-actions">
-    <Button variant="default" on:click={handleExport}>
+<AppLayout>
+  <div class="flex items-center justify-end">
+    <Button variant="default" onclick={handleExport} class="mr-2">
       {exportButtonText}
       {$favorites.size}
     </Button>
-    <Button variant="outline" href="/" class="no-underline">
-      All Photos
+    <Button variant="destructive" onclick={clearFavorites} class="px-3">
+      <TrashIcon />
     </Button>
-    <Button variant="destructive" on:click={clearFavorites} class="px-3">
-      🗑️
-    </Button>
-  </svelte:fragment>
-
+  </div>
   {#if $favorites.size === 0}
-    <div class="text-center">
+    <div class="flex text-center">
       <p class="mb-4 text-lg">No favorites yet</p>
       <Button variant="outline" href="/">Browse Photos</Button>
     </div>
