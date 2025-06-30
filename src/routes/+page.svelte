@@ -22,7 +22,7 @@
     </div>
   {:else}
     <div class="flex flex-col items-center justify-end">
-      <Button onclick={loadPhotos}>Choose another Folder</Button>
+      <Button onclick={loadPhotos}>Choose another folder</Button>
       <Gallery photos={$photos} />
     </div>
   {/if}

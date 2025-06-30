@@ -1,29 +1,33 @@
 <script lang="ts">
   import ImageCard from './ImageCard.svelte';
   import ImageModal from './ImageModal.svelte';
+  export let photos: string[];
 
-  let { photos } = $props();
-  let selectedImage: string | null = $state(null);
+  let selectedImage: string | null = null;
 
-  function handleImageClick(path: string) {
+  const handleImageClick = (path: string) => {
     selectedImage = path;
-  }
+  };
 
-  function handleCloseModal() {
+  const handleCloseModal = () => {
     selectedImage = null;
-  }
+  };
 </script>
 
 <main
   class="flex h-[calc(100vh-4rem)] flex-col items-center overflow-auto p-4 pb-20"
 >
-  <div
-    class="xs:grid-cols-1 grid grid-cols-4 gap-4 sm:grid-cols-1 md:grid-cols-3 lg:grid-cols-4"
-  >
-    {#each photos as path, index}
-      <ImageCard {path} tabindex={index + 1} {handleImageClick} />
-    {/each}
-  </div>
+  {#if photos.length === 0}
+    <div class="text-center text-gray-500">
+      No photos found. Choose a folder to load images.
+    </div>
+  {:else}
+    <div class="grid grid-cols-[repeat(auto-fill,minmax(200px,1fr))] gap-4">
+      {#each photos as path, index}
+        <ImageCard {path} tabindex={index + 1} {handleImageClick} />
+      {/each}
+    </div>
+  {/if}
 </main>
 
 <ImageModal {selectedImage} onClose={handleCloseModal} />

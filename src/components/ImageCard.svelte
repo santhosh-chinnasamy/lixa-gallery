@@ -3,38 +3,42 @@
   import { convertFileSrc } from '@tauri-apps/api/core';
   import { favorites } from '../stores/galleryStore';
 
-  let { path, tabindex, handleImageClick } = $props();
+  export let path: string;
+  export let tabindex: number | undefined = 0;
+  export let handleImageClick: (path: string) => void;
 
-  const handleClick = () => {
-    handleImageClick(path);
-  };
+  const handleClick = () => handleImageClick(path);
 
   const toggleFavorite = () => favorites.toggle(path);
 
   const handleKeyPress = (event: KeyboardEvent) => {
-    switch (event.key) {
-      case 'Enter':
-        handleImageClick(path);
-        break;
-      case 'l':
-        toggleFavorite();
-        break;
-    }
+    if (event.key === 'Enter') handleClick();
+    if (event.key.toLowerCase() === 'l') toggleFavorite();
   };
+
+  const isFavorite = $favorites.has(path);
 </script>
 
 <Card.Root
-  class={`max-h-90 max-w-90 ${!!$favorites.has(path) ? 'border-[0.2rem] border-red-500' : ''}`}
+  class={`relative cursor-pointer border transition-all ${
+    isFavorite ? 'border-red-500' : 'border-transparent'
+  } rounded-xl hover:shadow-lg focus:outline-none focus:ring-2 focus:ring-blue-500`}
   {tabindex}
   onclick={handleClick}
   onkeypress={handleKeyPress}
 >
-  <Card.Content>
+  <Card.Content class="aspect-[4/5] w-full">
     <img
       src={convertFileSrc(path)}
-      alt={path}
-      class="h-80 w-80 object-cover"
+      alt="Image"
       loading="lazy"
+      class="h-full w-full rounded-xl object-cover"
     />
   </Card.Content>
+
+  {#if isFavorite}
+    <div class="absolute right-2 top-2 rounded-full bg-white p-1 shadow">
+      ❤️
+    </div>
+  {/if}
 </Card.Root>
