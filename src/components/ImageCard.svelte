@@ -9,6 +9,9 @@
   export let tabindex: number | undefined = 0;
   export let handleImageClick: (path: string) => void;
 
+  $: isFavorite = $favorites.has(path);
+  const fileName = path?.split('/').pop();
+
   const handleClick = () => handleImageClick(path);
 
   const toggleFavorite = (event: Event) => {
@@ -16,12 +19,18 @@
     favorites.toggle(path);
   };
 
-  const handleKeyPress = (event: KeyboardEvent) => {
-    if (event.key === 'Enter') handleClick();
-    if (event.key.toLowerCase() === 'l') toggleFavorite(event);
-  };
+  const keyboardActions = {
+    Enter: handleClick,
+    l: toggleFavorite,
+  } as const;
 
-  $: isFavorite = $favorites.has(path);
+  function handleKeyPress(event: KeyboardEvent) {
+    const action = keyboardActions[event.key as keyof typeof keyboardActions];
+    if (action) {
+      event.preventDefault();
+      action(event);
+    }
+  }
 </script>
 
 <Card.Root
@@ -36,10 +45,10 @@
 >
   <Card.Content class="relative overflow-hidden rounded-lg p-0">
     <!-- Image container with consistent aspect ratio -->
-    <div class="aspect-[3/5] w-full overflow-hidden bg-gray-100">
+    <div class="aspect-[8/5] h-auto w-full overflow-hidden bg-gray-100">
       <img
         src={convertFileSrc(path)}
-        alt="Gallery image"
+        alt={fileName}
         loading="lazy"
         class="h-full w-full object-cover transition-transform duration-300 group-hover:scale-105"
       />
@@ -60,7 +69,7 @@
     <div
       class="absolute bottom-0 left-0 right-0 bg-gradient-to-t from-black/60 to-transparent p-3 opacity-0 transition-opacity duration-200 group-hover:opacity-100"
     >
-      <Filename selectedImage={path} />
+      <Filename name={fileName} />
     </div>
   </Card.Content>
 </Card.Root>

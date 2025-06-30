@@ -25,6 +25,7 @@
     Escape: onClose,
     ArrowLeft: showPrevious,
     ArrowRight: showNext,
+    l: toggleFavorite,
   } as const;
 
   function handleKeydown(event: KeyboardEvent) {
@@ -58,6 +59,8 @@
       onClose();
     }
   }
+
+  $: fileName = selectedImage?.split('/').pop();
 </script>
 
 <svelte:window on:keydown={handleKeydown} />
@@ -96,7 +99,7 @@
       >
         <img
           src={convertFileSrc(selectedImage)}
-          alt="Selected image preview"
+          alt={fileName}
           class="max-h-full max-w-full rounded-lg object-contain shadow-2xl"
           style="filter: drop-shadow(0 25px 25px rgb(0 0 0 / 0.5))"
           loading="lazy"
@@ -164,7 +167,7 @@
         </div>
       </div>
 
-      <Filename {selectedImage} />
+      <Filename name={fileName} />
     </div>
   </div>
 {/if}
