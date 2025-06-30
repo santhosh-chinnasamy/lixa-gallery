@@ -2,6 +2,8 @@
   import * as Card from '$lib/components/ui/card';
   import { convertFileSrc } from '@tauri-apps/api/core';
   import { favorites } from '../stores/galleryStore';
+  import Filename from './Filename.svelte';
+  import Heart from './icons/Heart.svelte';
 
   export let path: string;
   export let tabindex: number | undefined = 0;
@@ -34,7 +36,7 @@
 >
   <Card.Content class="relative overflow-hidden rounded-lg p-0">
     <!-- Image container with consistent aspect ratio -->
-    <div class="aspect-[4/5] w-full overflow-hidden bg-gray-100">
+    <div class="aspect-[3/5] w-full overflow-hidden bg-gray-100">
       <img
         src={convertFileSrc(path)}
         alt="Gallery image"
@@ -43,7 +45,6 @@
       />
     </div>
 
-    <!-- Favorite button overlay -->
     <button
       class={`absolute right-2 top-2 rounded-full p-2 shadow-md transition-all duration-200 ${
         isFavorite
@@ -53,22 +54,13 @@
       onclick={toggleFavorite}
       aria-label={isFavorite ? 'Remove from favorites' : 'Add to favorites'}
     >
-      <svg class="h-4 w-4 fill-current" viewBox="0 0 24 24">
-        <path
-          d={isFavorite
-            ? 'M12 21.35l-1.45-1.32C5.4 15.36 2 12.28 2 8.5 2 5.42 4.42 3 7.5 3c1.74 0 3.41.81 4.5 2.09C13.09 3.81 14.76 3 16.5 3 19.58 3 22 5.42 22 8.5c0 3.78-3.4 6.86-8.55 11.54L12 21.35z'
-            : 'M16.5 3c-1.74 0-3.41.81-4.5 2.09C10.91 3.81 9.24 3 7.5 3 4.42 3 2 5.42 2 8.5c0 3.78 3.4 6.86 8.55 11.54L12 21.35l1.45-1.32C18.6 15.36 22 12.28 22 8.5 22 5.42 19.58 3 16.5 3zm-4.4 15.55l-.1.1-.1-.1C7.14 14.24 4 11.39 4 8.5 4 6.5 5.5 5 7.5 5c1.54 0 3.04.99 3.57 2.36h1.87C13.46 5.99 14.96 5 16.5 5c2 0 3.5 1.5 3.5 3.5 0 2.89-3.14 5.74-7.9 10.05z'}
-        />
-      </svg>
+      <Heart {isFavorite} />
     </button>
 
-    <!-- Image info overlay (optional) -->
     <div
       class="absolute bottom-0 left-0 right-0 bg-gradient-to-t from-black/60 to-transparent p-3 opacity-0 transition-opacity duration-200 group-hover:opacity-100"
     >
-      <div class="text-xs text-white/90">
-        {path.split('/').pop()?.split('.')[0] || 'Image'}
-      </div>
+      <Filename selectedImage={path} />
     </div>
   </Card.Content>
 </Card.Root>
