@@ -40,21 +40,22 @@
 <KeyboardShortcuts actions={keyboardActions} />
 
 <AppLayout>
-  <div class="flex items-center justify-end">
-    <Button variant="default" onclick={handleExport} class="mr-2">
-      {exportButtonText}
-      {$favorites.size}
-    </Button>
-    <Button variant="destructive" onclick={clearFavorites} class="px-3">
-      <TrashIcon />
-    </Button>
-  </div>
   {#if $favorites.size === 0}
-    <div class="flex text-center">
-      <p class="mb-4 text-lg">No favorites yet</p>
-      <Button variant="outline" href="/">Browse Photos</Button>
+    <div class="flex flex-col items-center justify-end">
+      <p class="mb-4 text-lg">No favorites</p>
+      <Button href="/">Home</Button>
     </div>
   {:else}
+    <div class="flex items-center justify-end">
+      <Button variant="default" onclick={handleExport} class="mr-2">
+        {exportButtonText}
+        {$favorites.size}
+      </Button>
+      <Button variant="destructive" onclick={clearFavorites} class="px-3">
+        <TrashIcon />
+      </Button>
+    </div>
+
     <Gallery photos={Array.from($favorites)} />
   {/if}
 </AppLayout>
