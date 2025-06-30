@@ -48,11 +48,11 @@
     }
   }
 
-  @media (min-width: 768px) {
+/*   @media (min-width: 768px) {
     .auto-fill-grid {
       grid-template-columns: repeat(auto-fill, minmax(220px, 1fr));
     }
-  }
+  } */
 
   @media (min-width: 1024px) {
     .auto-fill-grid {

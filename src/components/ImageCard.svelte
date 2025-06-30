@@ -9,7 +9,7 @@
   export let tabindex: number | undefined = 0;
   export let handleImageClick: (path: string) => void;
 
-  $: isFavorite = $favorites.has(path);
+  $: isFavourite = $favorites.has(path);
   const fileName = path?.split('/').pop();
 
   const handleClick = () => handleImageClick(path);
@@ -34,11 +34,7 @@
 </script>
 
 <Card.Root
-  class={`group relative cursor-pointer transition-all duration-200 ease-in-out hover:scale-[1.02] hover:shadow-lg focus:outline-none focus:ring-2 focus:ring-blue-500 focus:ring-offset-2 ${
-    isFavorite
-      ? 'ring-2 ring-red-400 ring-offset-2'
-      : 'hover:ring-1 hover:ring-gray-200'
-  }`}
+  class={`group relative cursor-pointer transition-all duration-200 ease-in-out hover:scale-[1.02] hover:shadow-lg focus:outline-none focus:ring-2 focus:ring-blue-500 focus:ring-offset-2`}
   {tabindex}
   onclick={handleClick}
   onkeypress={handleKeyPress}
@@ -56,14 +52,14 @@
 
     <button
       class={`absolute right-2 top-2 rounded-full p-2 shadow-md transition-all duration-200 ${
-        isFavorite
+        isFavourite
           ? 'bg-red-50 text-red-500 hover:bg-red-100'
           : 'bg-white/80 text-gray-400 opacity-0 hover:bg-white hover:text-red-500 group-hover:opacity-100'
       } backdrop-blur-sm`}
       onclick={toggleFavorite}
-      aria-label={isFavorite ? 'Remove from favorites' : 'Add to favorites'}
+      aria-label={isFavourite ? 'Remove from favorites' : 'Add to favorites'}
     >
-      <Heart {isFavorite} />
+      <Heart {isFavourite} />
     </button>
 
     <div

@@ -46,7 +46,7 @@
       <Button href="/">Home</Button>
     </div>
   {:else}
-    <div class="flex items-center justify-end">
+    <div class="fixed right-4 top-4 mb-[4rem] flex items-center">
       <Button variant="default" onclick={handleExport} class="mr-2">
         {exportButtonText}
         {$favorites.size}
@@ -55,7 +55,7 @@
         <TrashIcon />
       </Button>
     </div>
-
+    <br />
     <Gallery photos={Array.from($favorites)} />
   {/if}
 </AppLayout>

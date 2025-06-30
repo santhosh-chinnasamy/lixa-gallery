@@ -11,7 +11,7 @@ Download latest version from [release](https://github.com/santhosh-chinnasamy/li
 ## Keyboard Shortcuts
 
 - `o` - Open folder
-- `h` - toggle image as favorite in preview mode
+- `l` - toggle image as favorite in preview mode or toggle favorite view in gallery mode
 - `e` - export favorites
 - `F11` - toggle fullscreen
 
