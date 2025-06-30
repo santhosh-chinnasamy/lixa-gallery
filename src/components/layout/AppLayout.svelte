@@ -29,8 +29,9 @@
 <svelte:window onkeydown={handleKeydown} />
 <Sidebar.Provider>
   <AppSidebar />
-  <Sidebar.Trigger />
-  <main class="flex min-h-screen max-w-[100vw] m-auto justify-center items-center">
+  <main
+    class="m-auto flex min-h-screen max-w-[100vw] items-center justify-center"
+  >
     <div class="flex flex-1 flex-col p-4">
       <slot />
     </div>

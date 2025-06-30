@@ -19,7 +19,7 @@
   $: currentIndex = selectedImage ? photoSource.indexOf(selectedImage) : -1;
   $: canShowPrevious = currentIndex > 0;
   $: canShowNext = currentIndex < photoSource.length - 1;
-  $: isFavorite = selectedImage ? $favorites.has(selectedImage) : false;
+  $: isFavourite = selectedImage ? $favorites.has(selectedImage) : false;
 
   const keyboardActions = {
     Escape: onClose,
@@ -138,16 +138,16 @@
             onclick={toggleFavorite}
             class={cn(
               'h-10 w-10 rounded-full transition-colors',
-              isFavorite
+              isFavourite
                 ? 'bg-red-500/20 text-red-400 hover:bg-red-500/30'
                 : 'text-white hover:bg-white/20 hover:text-red-400',
             )}
-            aria-label={isFavorite
+            aria-label={isFavourite
               ? 'Remove from favorites'
               : 'Add to favorites'}
-            aria-pressed={isFavorite}
+            aria-pressed={isFavourite}
           >
-            <Heart {isFavorite} />
+            <Heart {isFavourite} />
           </Button>
 
           <!-- Next button -->

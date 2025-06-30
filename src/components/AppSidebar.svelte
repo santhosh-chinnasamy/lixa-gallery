@@ -62,6 +62,7 @@
             {/snippet}
           </Sidebar.MenuButton>
         </Sidebar.MenuItem>
+        <Sidebar.Trigger />
       </Sidebar.Menu>
     </Sidebar.Content>
   </Sidebar.Footer>
