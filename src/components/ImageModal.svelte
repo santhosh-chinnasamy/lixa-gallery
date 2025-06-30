@@ -4,10 +4,16 @@
   import { convertFileSrc } from '@tauri-apps/api/core';
   import { fade, scale } from 'svelte/transition';
   import { favorites, photos } from '../stores/galleryStore';
+  import Filename from './Filename.svelte';
+  import Heart from './icons/Heart.svelte';
+  import ArrowRight from './icons/ArrowRight.svelte';
+  import { page } from '$app/state';
+  import ArrowLeft from './icons/ArrowLeft.svelte';
+  import Close from './icons/Close.svelte';
 
   export let selectedImage: string | null;
   export let onClose: () => void;
-  export let source: 'all' | 'favorites' = 'all';
+  export let source = page.url.pathname === '/' ? 'all' : 'favorites';
 
   $: photoSource = source === 'favorites' ? Array.from($favorites) : $photos;
   $: currentIndex = selectedImage ? photoSource.indexOf(selectedImage) : -1;
@@ -19,10 +25,11 @@
     Escape: onClose,
     ArrowLeft: showPrevious,
     ArrowRight: showNext,
-    h: toggleFavorite,
   } as const;
 
   function handleKeydown(event: KeyboardEvent) {
+    if (!selectedImage) return;
+
     const action = keyboardActions[event.key as keyof typeof keyboardActions];
     if (action) {
       event.preventDefault();
@@ -53,11 +60,9 @@
   }
 </script>
 
-// ImageModal.svelte
 <svelte:window on:keydown={handleKeydown} />
 
 {#if selectedImage}
-  <!-- Modal backdrop -->
   <div
     class="fixed inset-0 z-50 flex items-center justify-center bg-black/95 p-4"
     role="dialog"
@@ -75,24 +80,12 @@
       onclick={onClose}
       aria-label="Close preview"
     >
-      <svg
-        class="h-5 w-5"
-        fill="none"
-        stroke="currentColor"
-        viewBox="0 0 24 24"
-      >
-        <path
-          stroke-linecap="round"
-          stroke-linejoin="round"
-          stroke-width="2"
-          d="M6 18L18 6M6 6l12 12"
-        />
-      </svg>
+      <Close />
     </Button>
 
     <!-- Main modal content -->
     <div
-      class="relative flex h-full max-h-[95vh] w-full max-w-7xl flex-col"
+      class="relative flex h-full max-h-[95vh] w-full max-w-7xl flex-col bg-white/10"
       in:scale={{ duration: 200, start: 0.95 }}
       out:scale={{ duration: 150, start: 0.95 }}
       on:click|stopPropagation
@@ -106,13 +99,14 @@
           alt="Selected image preview"
           class="max-h-full max-w-full rounded-lg object-contain shadow-2xl"
           style="filter: drop-shadow(0 25px 25px rgb(0 0 0 / 0.5))"
+          loading="lazy"
         />
       </div>
 
       <!-- Control bar -->
       <div class="mt-4 flex shrink-0 items-center justify-center">
         <div
-          class="flex items-center gap-2 rounded-full bg-black/60 p-2 backdrop-blur-sm"
+          class="flex items-center gap-2 rounded-full bg-white/20 p-2 backdrop-blur-sm"
         >
           <!-- Previous button -->
           <Button
@@ -126,19 +120,7 @@
             )}
             aria-label="Previous image"
           >
-            <svg
-              class="h-5 w-5"
-              fill="none"
-              stroke="currentColor"
-              viewBox="0 0 24 24"
-            >
-              <path
-                stroke-linecap="round"
-                stroke-linejoin="round"
-                stroke-width="2"
-                d="M15 19l-7-7 7-7"
-              />
-            </svg>
+            <ArrowLeft />
           </Button>
 
           <!-- Image counter -->
@@ -162,13 +144,7 @@
               : 'Add to favorites'}
             aria-pressed={isFavorite}
           >
-            <svg class="h-5 w-5 fill-current" viewBox="0 0 24 24">
-              <path
-                d={isFavorite
-                  ? 'M12 21.35l-1.45-1.32C5.4 15.36 2 12.28 2 8.5 2 5.42 4.42 3 7.5 3c1.74 0 3.41.81 4.5 2.09C13.09 3.81 14.76 3 16.5 3 19.58 3 22 5.42 22 8.5c0 3.78-3.4 6.86-8.55 11.54L12 21.35z'
-                  : 'M16.5 3c-1.74 0-3.41.81-4.5 2.09C10.91 3.81 9.24 3 7.5 3 4.42 3 2 5.42 2 8.5c0 3.78 3.4 6.86 8.55 11.54L12 21.35l1.45-1.32C18.6 15.36 22 12.28 22 8.5 22 5.42 19.58 3 16.5 3zm-4.4 15.55l-.1.1-.1-.1C7.14 14.24 4 11.39 4 8.5 4 6.5 5.5 5 7.5 5c1.54 0 3.04.99 3.57 2.36h1.87C13.46 5.99 14.96 5 16.5 5c2 0 3.5 1.5 3.5 3.5 0 2.89-3.14 5.74-7.9 10.05z'}
-              />
-            </svg>
+            <Heart {isFavorite} />
           </Button>
 
           <!-- Next button -->
@@ -183,29 +159,12 @@
             )}
             aria-label="Next image"
           >
-            <svg
-              class="h-5 w-5"
-              fill="none"
-              stroke="currentColor"
-              viewBox="0 0 24 24"
-            >
-              <path
-                stroke-linecap="round"
-                stroke-linejoin="round"
-                stroke-width="2"
-                d="M9 5l7 7-7 7"
-              />
-            </svg>
+            <ArrowRight />
           </Button>
         </div>
       </div>
 
-      <!-- Image info (filename) -->
-      <div class="mt-2 text-center">
-        <div class="text-sm text-white/70">
-          {selectedImage?.split('/').pop() || 'Unknown'}
-        </div>
-      </div>
+      <Filename {selectedImage} />
     </div>
   </div>
 {/if}
