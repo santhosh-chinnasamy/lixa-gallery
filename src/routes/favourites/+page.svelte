@@ -46,7 +46,7 @@
       <Button href="/">Home</Button>
     </div>
   {:else}
-    <div class="fixed right-4 top-4 mb-[4rem] flex items-center">
+    <div class="fixed right-4 top-4 mb-[4rem] flex items-center z-10">
       <Button variant="default" onclick={handleExport} class="mr-2">
         {exportButtonText}
         {$favorites.size}
