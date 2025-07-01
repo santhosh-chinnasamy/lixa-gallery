@@ -41,7 +41,7 @@
 >
   <Card.Content class="relative overflow-hidden rounded-lg p-0">
     <!-- Image container with consistent aspect ratio -->
-    <div class="aspect-[8/5] h-auto w-full overflow-hidden bg-gray-100">
+    <div class="aspect-[1/1] h-auto w-full overflow-hidden bg-gray-100">
       <img
         src={convertFileSrc(path)}
         alt={fileName}

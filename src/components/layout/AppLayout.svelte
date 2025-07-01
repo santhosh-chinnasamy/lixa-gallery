@@ -3,6 +3,7 @@
   import { getCurrentWindow } from '@tauri-apps/api/window';
   import type { KeyboardActions } from '../../types/events';
   import AppSidebar from '../AppSidebar.svelte';
+  import { page } from '$app/state';
 
   const toggleFullScreen = async () => {
     const fullscreen = await getCurrentWindow().isFullscreen();
@@ -24,13 +25,16 @@
       );
     }
   };
+  $: isHomePage = page.url.pathname === '/';
 </script>
 
 <svelte:window onkeydown={handleKeydown} />
 <Sidebar.Provider>
   <AppSidebar />
   <Sidebar.Trigger />
-  <main class="flex min-h-screen max-w-[100vw] m-auto justify-center items-center">
+  <main
+    class={`m-auto flex min-h-screen max-w-[100vw] justify-center ${isHomePage && 'items-center'}`}
+  >
     <div class="flex flex-1 flex-col p-4">
       <slot />
     </div>

@@ -1,4 +1,5 @@
 <script lang="ts">
+  import { page } from '$app/state';
   import * as Sidebar from '$lib/components/ui/sidebar';
   import GithubIcon from '@lucide/svelte/icons/github';
   import InboxIcon from '@lucide/svelte/icons/heart';
@@ -27,7 +28,9 @@
         <Sidebar.Menu>
           {#each items as item (item.title)}
             <Sidebar.MenuItem>
-              <Sidebar.MenuButton isActive>
+              <Sidebar.MenuButton
+                class={`${page.url.pathname === item.url ? 'bg-black/15' : ''}`}
+              >
                 {#snippet child({ props })}
                   <a href={item.url} {...props} title={item.title}>
                     <item.icon size={32} />
