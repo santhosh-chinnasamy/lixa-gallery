@@ -10,16 +10,18 @@ Download latest version from [release](https://github.com/santhosh-chinnasamy/li
 
 ## Keyboard Shortcuts
 
-- `o` - Open folder
-- `l` - toggle image as favorite in preview mode or toggle favorite view in gallery mode
+- `o` - Open / Select folder
+- `l` - toggle image as favorite in preview mode or in gallery mode
 - `e` - export favorites
 - `F11` - toggle fullscreen
 
 ## Screenshots / Demo
 
-![Lixa Gallery Screenshot](./screenshot.png 'Lixa Gallery Screenshot')
+[![Demo Video](https://img.shields.io/badge/Demo%20Video-Youtube-FF0000?style=plastic&logo=youtube&logoColor=FF0000&link=https://youtu.be/F1yKYnQ873I)](https://youtu.be/F1yKYnQ873I)
 
-<video src="./screen-recording.mp4" controls="" alt="Lixa Gallery Demo" title="Lixa Gallery Demo" height="400" width="auto" />
+![Lixa Gallery Screenshot](./assets/screen-3.png 'Lixa Gallery Screenshot')
+
+<video src="./assets/demo.mp4" controls="" alt="Lixa Gallery Demo" title="Lixa Gallery Demo" height="400" width="auto" />
 
 ## Supports
 
