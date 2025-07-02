@@ -2,6 +2,7 @@
 
 Select your favorite photos and export
 
+![Lixa Gallery Logo](./src-tauri/icons/128x128.png 'Lixa Gallery Logo')
 ## Installation
 
 [![GitHub release (latest by date)](https://img.shields.io/github/v/release/santhosh-chinnasamy/lixa-gallery?label=Latest%20Version)](https://github.com/santhosh-chinnasamy/lixa-gallery/releases/latest)
