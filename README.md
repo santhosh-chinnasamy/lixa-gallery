@@ -22,8 +22,6 @@ Download latest version from [release](https://github.com/santhosh-chinnasamy/li
 
 ![Lixa Gallery Screenshot](./assets/screen-3.png 'Lixa Gallery Screenshot')
 
-<video src="./assets/demo.mp4" controls="" alt="Lixa Gallery Demo" title="Lixa Gallery Demo" height="400" width="auto" />
-
 ## Supports
 
 - [x] Mac
@@ -37,3 +35,6 @@ Please read the [contributing guidelines](CONTRIBUTING.md) to setup your develop
 ## Attributions
 
 - Logo generated using svg from <a href="https://www.svgrepo.com" target="_blank">SVG Repo</a>
+
+
+<video src="./assets/demo.mp4" controls="" alt="Lixa Gallery Demo" title="Lixa Gallery Demo" height="400" width="auto" />
