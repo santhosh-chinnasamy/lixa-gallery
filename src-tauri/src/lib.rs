@@ -6,6 +6,7 @@ use std::{
     path::PathBuf,
 };
 use tauri::{App, AppHandle, Emitter, Manager as _};
+mod converter;
 
 type Db = Pool<Sqlite>;
 
@@ -20,11 +21,24 @@ struct Favourite {
 
 // Learn more about Tauri commands at https://tauri.app/develop/calling-rust/
 #[tauri::command]
-fn scan_folder(path: &str) -> Result<Vec<String>, String> {
-    let mut result = Vec::new();
+fn scan_folder(app: AppHandle, path: &str) -> Result<Vec<String>, String> {
+    // let mut result = Vec::new();
+
+    let mut thumbnail_path = app.path().app_data_dir().expect("failed to get data_dir");
+    thumbnail_path.push(".thumbnails");
+    if !thumbnail_path.exists() {
+        fs::create_dir_all(&thumbnail_path)
+            .map_err(|e| format!("Failed to create thumbnail directory: {}", e))?;
+    }
 
     let path = PathBuf::from(path);
-    match fs::read_dir(path) {
+    let result: Result<Vec<String>, String> = converter::convert_images(
+        &path.display().to_string(),
+        thumbnail_path.display().to_string(),
+    );
+    return Ok(result?)
+    // call convert_images to process images in the folder
+    /*  match fs::read_dir(path) {
         Ok(entries) => {
             for entry in entries {
                 match entry {
@@ -45,7 +59,7 @@ fn scan_folder(path: &str) -> Result<Vec<String>, String> {
             Ok(result)
         }
         Err(e) => Err(format!("Error reading folder: {}", e)),
-    }
+    } */
 }
 
 #[tauri::command]
