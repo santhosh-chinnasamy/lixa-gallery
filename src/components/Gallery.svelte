@@ -1,4 +1,5 @@
 <script lang="ts">
+  import { createVirtualizer } from '@tanstack/svelte-virtual';
   import ImageCard from './ImageCard.svelte';
   import ImageModal from './ImageModal.svelte';
   export let photos: string[];
@@ -12,10 +13,19 @@
   const handleCloseModal = () => {
     selectedImage = null;
   };
+
+  let virtualListEl: HTMLDivElement;
+
+  $: virtualizer = createVirtualizer<HTMLDivElement, HTMLDivElement>({
+    count: photos.length,
+    getScrollElement: () => virtualListEl,
+    estimateSize: () => 10,
+    overscan: 20,
+  });
 </script>
 
 <main class="flex-1 overflow-auto">
-  <div class="h-full p-3 sm:p-4 md:p-6">
+  <div class="h-full p-3 sm:p-4 md:p-6" bind:this={virtualListEl}>
     {#if photos.length === 0}
       <div class="flex h-full items-center justify-center">
         <div class="text-center text-gray-500">
@@ -25,9 +35,18 @@
       </div>
     {:else}
       <!-- Responsive grid that adapts to container width -->
-      <div class="auto-fill-grid grid gap-3 sm:gap-4 md:gap-6">
-        {#each photos as path, index}
-          <ImageCard {path} tabindex={index + 1} {handleImageClick} />
+      <div
+        class="auto-fill-grid grid gap-3 sm:gap-4 md:gap-6"
+        style="position: relative; height: {$virtualizer.getTotalSize() < 100
+          ? $virtualizer.getTotalSize() * 10
+          : $virtualizer.getTotalSize()}px; width: 100%;"
+      >
+        {#each $virtualizer.getVirtualItems() as row (row.index)}
+          <ImageCard
+            path={photos[row.index]}
+            tabindex={row.index + 1}
+            {handleImageClick}
+          />
         {/each}
       </div>
     {/if}
@@ -47,13 +66,6 @@
       grid-template-columns: repeat(auto-fill, minmax(200px, 1fr));
     }
   }
-
-/*   @media (min-width: 768px) {
-    .auto-fill-grid {
-      grid-template-columns: repeat(auto-fill, minmax(220px, 1fr));
-    }
-  } */
-
   @media (min-width: 1024px) {
     .auto-fill-grid {
       grid-template-columns: repeat(auto-fill, minmax(240px, 1fr));
