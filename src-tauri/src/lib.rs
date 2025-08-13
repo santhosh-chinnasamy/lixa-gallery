@@ -190,6 +190,8 @@ async fn setup_db(app: &App) -> Db {
         .await
         .expect("Error running DB migrations");
 
+    sqlx::query("PRAGMA journal_mode=WAL;").execute(&db).await;
+
     db
 }
 
