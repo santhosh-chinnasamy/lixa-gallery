@@ -1,7 +1,8 @@
 import { invoke } from '@tauri-apps/api/core';
 import { get, writable } from 'svelte/store';
+import type { PhotoMetadata } from '../types/photo';
 
-export const photos = writable<string[]>([]);
+export const photos = writable<PhotoMetadata[]>([]);
 export const isLoading = writable(false);
 
 type FavoriteStore = Set<string>;

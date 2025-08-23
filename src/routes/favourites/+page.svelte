@@ -9,7 +9,10 @@
   } from '../../components/common/ImageOperations';
   import KeyboardShortcuts from '../../components/common/KeyboardShortcuts.svelte';
   import AppLayout from '../../components/layout/AppLayout.svelte';
-  import { favorites } from '../../stores/galleryStore';
+  import { favorites, photos } from '../../stores/galleryStore';
+  
+  // Filter photos to only show favorites
+  const favoritePhotos = $derived($photos.filter(photo => $favorites.has(photo.path)));
 
   let exportButtonText = $state('Export Favourites');
 
@@ -56,6 +59,6 @@
       </Button>
     </div>
     <br />
-    <Gallery photos={Array.from($favorites)} />
+    <Gallery photos={favoritePhotos} />
   {/if}
 </AppLayout>

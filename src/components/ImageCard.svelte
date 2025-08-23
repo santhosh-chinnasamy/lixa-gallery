@@ -4,19 +4,21 @@
   import { favorites } from '../stores/galleryStore';
   import Filename from './Filename.svelte';
   import Heart from './icons/Heart.svelte';
+  import type { PhotoMetadata } from '../types/photo';
 
-  export let path: string;
+  export let photo: PhotoMetadata;
   export let tabindex: number | undefined = 0;
-  export let handleImageClick: (path: string) => void;
+  export let handleImageClick: (photo: PhotoMetadata) => void;
 
-  $: isFavourite = $favorites.has(path);
-  const fileName = path?.split('/').pop();
+  $: isFavourite = $favorites.has(photo.path);
+  $: fileName = photo.metadata.name;
+  $: thumbnailSrc = photo.thumbnail_path;
 
-  const handleClick = () => handleImageClick(path);
+  const handleClick = () => handleImageClick(photo);
 
   const toggleFavorite = (event: Event) => {
     event.stopPropagation();
-    favorites.toggle(path);
+    favorites.toggle(photo.path);
   };
 
   const keyboardActions = {
@@ -43,7 +45,7 @@
     <!-- Image container with consistent aspect ratio -->
     <div class="aspect-[1/1] h-auto w-full overflow-hidden bg-gray-100">
       <img
-        src={convertFileSrc(path)}
+        src={convertFileSrc(thumbnailSrc)}
         alt={fileName}
         loading="lazy"
         class="h-full w-full object-cover transition-transform duration-300 group-hover:scale-105"

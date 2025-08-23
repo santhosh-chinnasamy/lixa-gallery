@@ -1,6 +1,7 @@
 import { invoke } from '@tauri-apps/api/core';
 import { open } from '@tauri-apps/plugin-dialog';
 import { photos, isLoading, favorites } from '../../stores/galleryStore';
+import type { PhotoMetadata } from '../../types/photo';
 
 export async function loadPhotos() {
   try {
@@ -9,14 +10,14 @@ export async function loadPhotos() {
       multiple: false,
       directory: true,
     });
-    
+
     if (!folder) {
       isLoading.set(false);
       photos.set([]);
       return;
     }
-    
-    const loadedPhotos: string[] = await invoke('scan_folder', {
+
+    const loadedPhotos: PhotoMetadata[] = await invoke('scan_folder', {
       path: folder,
     });
     photos.set(loadedPhotos);

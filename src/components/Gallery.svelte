@@ -1,12 +1,14 @@
 <script lang="ts">
   import ImageCard from './ImageCard.svelte';
   import ImageModal from './ImageModal.svelte';
-  export let photos: string[];
+  import type { PhotoMetadata } from '../types/photo';
+  
+  export let photos: PhotoMetadata[];
 
-  let selectedImage: string | null = null;
+  let selectedImage: PhotoMetadata | null = null;
 
-  const handleImageClick = (path: string) => {
-    selectedImage = path;
+  const handleImageClick = (photo: PhotoMetadata) => {
+    selectedImage = photo;
   };
 
   const handleCloseModal = () => {
@@ -26,8 +28,8 @@
     {:else}
       <!-- Responsive grid that adapts to container width -->
       <div class="auto-fill-grid grid gap-3 sm:gap-4 md:gap-6">
-        {#each photos as path, index}
-          <ImageCard {path} tabindex={index + 1} {handleImageClick} />
+        {#each photos as photo, index}
+          <ImageCard {photo} tabindex={index + 1} {handleImageClick} />
         {/each}
       </div>
     {/if}
