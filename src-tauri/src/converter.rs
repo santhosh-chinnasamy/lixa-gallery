@@ -2,7 +2,7 @@ use crate::state::AppState;
 use anyhow::Result;
 use log::{error, info};
 use rayon::prelude::*;
-use sqlx::Row;
+use sqlx::{QueryBuilder, Row, Sqlite};
 use std::{
     collections::HashMap,
     fs,
@@ -38,11 +38,13 @@ pub async fn convert_images(
 ) -> Result<Vec<PhotoMetadata>, String> {
     let folder_path = PathBuf::from(folder);
 
+    let t0 = std::time::Instant::now();
     // Step 1: Get all image files from directory
     let entries: Vec<_> = match fs::read_dir(&folder_path) {
         Ok(dir) => dir.filter_map(|e| e.ok()).collect(),
         Err(e) => return Err(format!("Failed to read directory: {}", e)),
     };
+    log::info!("enumerate took: {:?}", t0.elapsed());
 
     let image_files: Vec<PathBuf> = entries
         .into_iter()
@@ -66,12 +68,14 @@ pub async fn convert_images(
             }
         })
         .collect();
+    log::info!("filter took: {:?}", t0.elapsed());
 
     // Step 2: Check database for existing photos and compare mtime/size
     let scan_result = check_cached_photos(&image_files, &db, folder)
         .await
         .map_err(|e| format!("Database check failed: {}", e))?;
 
+    log::info!("check_cached_photos took: {:?}", t0.elapsed());
     info!(
         "Found {} cached photos, {} need processing",
         scan_result.cached_photos.len(),
@@ -94,6 +98,8 @@ pub async fn convert_images(
             )
             .collect();
 
+        log::info!("convert_image took: {:?}", t0.elapsed());
+
         // Step 4: Batch insert all processed photos into database
         if !processed_photos.is_empty() {
             if let Err(e) = batch_insert_photos(&processed_photos, &db).await {
@@ -101,10 +107,14 @@ pub async fn convert_images(
             }
         }
 
+        log::info!("batch_insert_photos took: {:?}", t0.elapsed());
+
         processed_photos
     } else {
         Vec::new()
     };
+
+    log::info!("convert_images took: {:?}", t0.elapsed());
 
     // Step 4: Combine cached and newly processed photos
     let mut all_photos = scan_result.cached_photos;
@@ -119,11 +129,10 @@ async fn check_cached_photos(
     folder: &str,
 ) -> Result<PhotoScanResult, sqlx::Error> {
     // Only fetch rows for this folder
-    let prefix = if folder.ends_with(std::path::MAIN_SEPARATOR) {
-        folder.to_string()
-    } else {
-        format!("{}{}", folder, std::path::MAIN_SEPARATOR)
-    };
+    let mut prefix = folder.to_string();
+    if !prefix.ends_with(std::path::MAIN_SEPARATOR) {
+        prefix.push(std::path::MAIN_SEPARATOR);
+    }
 
     // Get all photos from database for this directory
     let rows = sqlx::query(
@@ -194,26 +203,45 @@ async fn batch_insert_photos(
     photos: &[PhotoMetadata],
     db: &tauri::State<'_, AppState>,
 ) -> Result<(), sqlx::Error> {
-    for photo in photos {
-        sqlx::query(
-            "INSERT OR REPLACE INTO photos (path, name, thumbnail_path, mtime, ctime, size) VALUES (?, ?, ?, ?, ?, ?)"
-        )
-        .bind(&photo.path)
-        .bind(&photo.metadata.name)
-        .bind(&photo.thumbnail_path)
-        .bind(photo.metadata.modified as i64)
-        .bind(photo.metadata.created as i64)
-        .bind(photo.metadata.size as i64)
-        .execute(&db.db)
-        .await?;
+    if photos.is_empty() {
+        return Ok(());
     }
-    Ok(())
+
+    let mut tx = db.db.begin().await?;
+
+    const CHUNK: usize = 1_000;
+    for chunk in photos.chunks(CHUNK) {
+        let mut qb: QueryBuilder<Sqlite> = QueryBuilder::new(
+            "INSERT INTO photos (path, name, thumbnail_path, mtime, ctime, size) ",
+        );
+        qb.push_values(chunk, |mut b, p| {
+            b.push_bind(&p.path)
+                .push_bind(&p.metadata.name)
+                .push_bind(&p.thumbnail_path)
+                .push_bind(p.metadata.modified as i64)
+                .push_bind(p.metadata.created as i64)
+                .push_bind(p.metadata.size as i64);
+        });
+        qb.push(
+            " ON CONFLICT(path) DO UPDATE SET
+                name=excluded.name,
+                thumbnail_path=excluded.thumbnail_path,
+                mtime=excluded.mtime,
+                ctime=excluded.ctime,
+                size=excluded.size
+              WHERE photos.mtime <> excluded.mtime
+                 OR photos.size  <> excluded.size
+                 OR photos.thumbnail_path <> excluded.thumbnail_path
+                 OR photos.name  <> excluded.name",
+        );
+
+        qb.build().execute(&mut *tx).await?;
+    }
+
+    tx.commit().await
 }
 
 fn convert_image(file_path: &Path, thumbnail_path: &str) -> anyhow::Result<PhotoMetadata> {
-    // Log which file is being processed to easily find the problematic one.
-    info!("Attempting to convert: {}", file_path.display());
-
     let img = image::open(file_path)?; // Use '?' to propagate errors, not unwrap()
 
     // Get original dimensions
