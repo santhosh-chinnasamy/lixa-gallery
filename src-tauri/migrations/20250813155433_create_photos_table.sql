@@ -10,7 +10,7 @@ CREATE TABLE
         created_at INTEGER DEFAULT (unixepoch ()) -- time when the photo was added to Lixa
     );
 
-CREATE INDEX IF NOT EXISTS idx_photos_path ON photos (path);
+CREATE UNIQUE INDEX IF NOT EXISTS idx_photos_path ON photos (path);
 
 CREATE INDEX IF NOT EXISTS idx_photos_size ON photos (size);
 
