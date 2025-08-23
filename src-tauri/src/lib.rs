@@ -1,8 +1,11 @@
 use futures::TryStreamExt;
-use sqlx::{migrate::MigrateDatabase, sqlite::SqlitePoolOptions, Sqlite};
+use sqlx::{
+    sqlite::{SqliteConnectOptions, SqliteJournalMode, SqlitePoolOptions, SqliteSynchronous},
+    SqlitePool,
+};
 use std::{
     fs::{self},
-    path::PathBuf,
+    path::PathBuf, str::FromStr,
 };
 use tauri::{App, AppHandle, Emitter, Manager as _};
 
@@ -14,6 +17,7 @@ use crate::{converter::PhotoMetadata, state::Favourite};
 #[tauri::command]
 async fn scan_folder(
     app: AppHandle,
+    db: tauri::State<'_, state::AppState>,
     path: &str,
 ) -> Result<Vec<PhotoMetadata>, String> {
     let mut thumbnail_path = app.path().app_data_dir().expect("failed to get data_dir");
@@ -27,6 +31,7 @@ async fn scan_folder(
     let result: Vec<PhotoMetadata> = converter::convert_images(
         &folder_path.display().to_string(),
         thumbnail_path.display().to_string(),
+        db,
     )
     .await?;
     return Ok(result);
@@ -124,48 +129,57 @@ async fn clear_favourites(db: tauri::State<'_, state::AppState>) -> Result<(), S
     Ok(())
 }
 
-async fn setup_db(app: &App) -> state::Db {
-    let mut path = app.path().app_data_dir().expect("failed to get data_dir");
+async fn setup_db(app: &App) -> SqlitePool {
+    let mut dir = app.path().app_data_dir().expect("failed to get data_dir");
+    std::fs::create_dir_all(&dir).expect("error creating app data dir");
 
-    match std::fs::create_dir_all(path.clone()) {
-        Ok(_) => {}
-        Err(err) => {
-            panic!("error creating directory {}", err);
-        }
-    };
+    let mut db_path = PathBuf::from(&dir);
+    db_path.push(format!("{}.db", env!("CARGO_PKG_NAME")));
 
-    path.push(env!("CARGO_PKG_NAME").to_string() + ".db");
+    let opts: SqliteConnectOptions = SqliteConnectOptions::from_str(db_path.to_str().unwrap())
+        .unwrap()
+        .create_if_missing(true)
+        .journal_mode(SqliteJournalMode::Wal)
+        .synchronous(SqliteSynchronous::Normal)
+        .foreign_keys(true);
 
-    Sqlite::create_database(
-        format!(
-            "sqlite:///{}",
-            path.to_str().expect("path should be something")
-        )
-        .as_str(),
-    )
-    .await
-    .expect("failed to create database");
-
-    let db = SqlitePoolOptions::new()
-        .connect(
-            format!(
-                "sqlite:///{}",
-                path.to_str().expect("path should be something")
-            )
-            .as_str(),
-        )
+    let pool = sqlx::sqlite::SqlitePoolOptions::new()
+        .max_connections(4) // small pool is best
+        .acquire_timeout(std::time::Duration::from_secs(10))
+        .after_connect(|conn, _meta| {
+            Box::pin(async move {
+                // Apply to every pooled connection
+                sqlx::query("PRAGMA busy_timeout = 5000;")
+                    .execute(&mut *conn)
+                    .await?;
+                sqlx::query("PRAGMA temp_store = MEMORY;")
+                    .execute(&mut *conn)
+                    .await?;
+                sqlx::query("PRAGMA cache_size = -40000;")
+                    .execute(&mut *conn)
+                    .await?; // ~40MB
+                sqlx::query("PRAGMA wal_autocheckpoint = 1000;")
+                    .execute(&mut *conn)
+                    .await?;
+                // Optional (platform‑dependent help):
+                sqlx::query("PRAGMA mmap_size = 268435456;")
+                    .execute(&mut *conn)
+                    .await?; // 256MB
+                Ok::<_, sqlx::Error>(())
+            })
+        })
+        .connect_with(opts)
         .await
-        .unwrap();
+        .expect("failed to connect sqlite");
 
-    log::info!("DB path: {:?}", path);
     sqlx::migrate!("./migrations")
-        .run(&db)
+        .run(&pool)
         .await
-        .expect("Error running DB migrations");
+        .expect("migrations");
+    let _ = sqlx::query("PRAGMA optimize;").execute(&pool).await;
 
-    let _ = sqlx::query("PRAGMA journal_mode=WAL;").execute(&db).await;
-
-    db
+    log::info!("DB path: {}", db_path.display());
+    pool
 }
 
 #[cfg_attr(mobile, tauri::mobile_entry_point)]
