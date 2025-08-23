@@ -1,11 +1,12 @@
 use futures::TryStreamExt;
 use sqlx::{
-    sqlite::{SqliteConnectOptions, SqliteJournalMode, SqlitePoolOptions, SqliteSynchronous},
+    sqlite::{SqliteConnectOptions, SqliteJournalMode, SqliteSynchronous},
     SqlitePool,
 };
 use std::{
     fs::{self},
-    path::PathBuf, str::FromStr,
+    path::PathBuf,
+    str::FromStr,
 };
 use tauri::{App, AppHandle, Emitter, Manager as _};
 
@@ -87,23 +88,25 @@ async fn export_favourites(
 
 #[tauri::command]
 async fn add_favourite(db: tauri::State<'_, state::AppState>, path: String) -> Result<(), String> {
-    println!("path: {}", path);
-    sqlx::query("INSERT INTO favourites (path) VALUES (?1)")
-        .bind(path)
-        .execute(&db.db)
-        .await
-        .map_err(|e| format!("Error adding favourite: {}", e))?;
+    sqlx::query(
+        "INSERT INTO favourites (path) VALUES (?1)
+             ON CONFLICT(path) DO NOTHING",
+    )
+    .bind(path)
+    .execute(&db.db)
+    .await
+    .map_err(|e| format!("Error adding favourite: {}", e))?;
+
     Ok(())
 }
 
 #[tauri::command]
 async fn get_favourites(db: tauri::State<'_, state::AppState>) -> Result<Vec<Favourite>, String> {
-    let favourites: Vec<Favourite> =
-        sqlx::query_as::<_, Favourite>("SELECT DISTINCT(path) FROM favourites")
-            .fetch(&db.db)
-            .try_collect()
-            .await
-            .map_err(|e| format!("Failed to get favourites {}", e))?;
+    let favourites: Vec<Favourite> = sqlx::query_as::<_, Favourite>("SELECT path FROM favourites")
+        .fetch(&db.db)
+        .try_collect()
+        .await
+        .map_err(|e| format!("Failed to get favourites {}", e))?;
     Ok(favourites)
 }
 
