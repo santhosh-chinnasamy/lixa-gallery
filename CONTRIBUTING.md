@@ -107,6 +107,12 @@ cd lixa-gallery
 - Describe your changes clearly in the pull request and link any related issues.
 - The PR will be merged once you have the sign-off of at least one other developer/maintainer.
 
+## How to create Migrations
+
+```bash
+cd src-tauri && sqlx migrate add <migration file name> && cd -
+```
+
 ## License
 
 By contributing to Lixa Gallery, you agree that your contributions will be licensed under the [MIT License](./LICENSE).
