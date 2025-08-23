@@ -10,16 +10,20 @@
   import { page } from '$app/state';
   import ArrowLeft from './icons/ArrowLeft.svelte';
   import Close from './icons/Close.svelte';
+  import type { PhotoMetadata } from '../types/photo';
 
-  export let selectedImage: string | null;
+  export let selectedImage: PhotoMetadata | null;
   export let onClose: () => void;
   export let source = page.url.pathname === '/' ? 'all' : 'favorites';
 
-  $: photoSource = source === 'favorites' ? Array.from($favorites) : $photos;
-  $: currentIndex = selectedImage ? photoSource.indexOf(selectedImage) : -1;
+  // For favorites, we need to find photos by path since favorites store paths
+  $: photoSource = source === 'favorites' 
+    ? $photos.filter(photo => $favorites.has(photo.path))
+    : $photos;
+  $: currentIndex = selectedImage ? photoSource.findIndex(photo => photo.path === selectedImage!.path) : -1;
   $: canShowPrevious = currentIndex > 0;
   $: canShowNext = currentIndex < photoSource.length - 1;
-  $: isFavourite = selectedImage ? $favorites.has(selectedImage) : false;
+  $: isFavourite = selectedImage ? $favorites.has(selectedImage.path) : false;
 
   const keyboardActions = {
     Escape: onClose,
@@ -39,7 +43,7 @@
   }
 
   function toggleFavorite() {
-    if (selectedImage) favorites.toggle(selectedImage);
+    if (selectedImage) favorites.toggle(selectedImage.path);
   }
 
   function showPrevious() {
@@ -60,7 +64,7 @@
     }
   }
 
-  $: fileName = selectedImage?.split('/').pop();
+  $: fileName = selectedImage?.metadata.name;
 </script>
 
 <svelte:window on:keydown={handleKeydown} />
@@ -71,7 +75,9 @@
     role="dialog"
     aria-modal="true"
     aria-label="Image preview"
+    tabindex="-1"
     on:click={handleBackdropClick}
+    on:keydown={handleKeydown}
     in:fade={{ duration: 200 }}
     out:fade={{ duration: 150 }}
   >
@@ -92,13 +98,16 @@
       in:scale={{ duration: 200, start: 0.95 }}
       out:scale={{ duration: 150, start: 0.95 }}
       on:click|stopPropagation
+      on:keydown={handleKeydown}
+      role="button"
+      tabindex="0"
     >
       <!-- Image container -->
       <div
         class="flex flex-1 items-center justify-center overflow-hidden rounded-lg"
       >
         <img
-          src={convertFileSrc(selectedImage)}
+          src={convertFileSrc(selectedImage.path)}
           alt={fileName}
           class="max-h-full max-w-full rounded-lg object-contain shadow-2xl"
           style="filter: drop-shadow(0 25px 25px rgb(0 0 0 / 0.5))"
