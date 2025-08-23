@@ -1,29 +1,21 @@
 use futures::TryStreamExt;
-use serde::{Deserialize, Serialize};
-use sqlx::{migrate::MigrateDatabase, prelude::FromRow, sqlite::SqlitePoolOptions, Pool, Sqlite};
+use sqlx::{migrate::MigrateDatabase, sqlite::SqlitePoolOptions, Sqlite};
 use std::{
     fs::{self},
     path::PathBuf,
 };
 use tauri::{App, AppHandle, Emitter, Manager as _};
+
 mod converter;
-
-type Db = Pool<Sqlite>;
-
-struct AppState {
-    db: Db,
-}
-
-#[derive(Debug, Serialize, Deserialize, FromRow)]
-struct Favourite {
-    path: String,
-}
+mod state;
+use crate::{converter::PhotoMetadata, state::Favourite};
 
 // Learn more about Tauri commands at https://tauri.app/develop/calling-rust/
 #[tauri::command]
-fn scan_folder(app: AppHandle, path: &str) -> Result<Vec<String>, String> {
-    // let mut result = Vec::new();
-
+async fn scan_folder(
+    app: AppHandle,
+    path: &str,
+) -> Result<Vec<PhotoMetadata>, String> {
     let mut thumbnail_path = app.path().app_data_dir().expect("failed to get data_dir");
     thumbnail_path.push(".thumbnails");
     if !thumbnail_path.exists() {
@@ -31,41 +23,19 @@ fn scan_folder(app: AppHandle, path: &str) -> Result<Vec<String>, String> {
             .map_err(|e| format!("Failed to create thumbnail directory: {}", e))?;
     }
 
-    let path = PathBuf::from(path);
-    let result: Result<Vec<String>, String> = converter::convert_images(
-        &path.display().to_string(),
+    let folder_path = PathBuf::from(path);
+    let result: Vec<PhotoMetadata> = converter::convert_images(
+        &folder_path.display().to_string(),
         thumbnail_path.display().to_string(),
-    );
-    return Ok(result?)
-    // call convert_images to process images in the folder
-    /*  match fs::read_dir(path) {
-        Ok(entries) => {
-            for entry in entries {
-                match entry {
-                    Ok(entry) => {
-                        let file_path = entry.path();
-                        // Filter for image extensions only
-                        if let Some(ext) = file_path.extension().and_then(|s| s.to_str()) {
-                            let ext = ext.to_lowercase();
-                            if ["jpg", "jpeg", "png", "webp", "bmp", "gif"].contains(&ext.as_str())
-                            {
-                                result.push(file_path.display().to_string());
-                            }
-                        }
-                    }
-                    Err(e) => eprintln!("Error reading entry: {}", e),
-                }
-            }
-            Ok(result)
-        }
-        Err(e) => Err(format!("Error reading folder: {}", e)),
-    } */
+    )
+    .await?;
+    return Ok(result);
 }
 
 #[tauri::command]
 async fn export_favourites(
     app: AppHandle,
-    db: tauri::State<'_, AppState>,
+    db: tauri::State<'_, state::AppState>,
     destination: &str,
 ) -> Result<(), String> {
     let favourites = get_favourites(db).await?;
@@ -111,7 +81,7 @@ async fn export_favourites(
 }
 
 #[tauri::command]
-async fn add_favourite(db: tauri::State<'_, AppState>, path: String) -> Result<(), String> {
+async fn add_favourite(db: tauri::State<'_, state::AppState>, path: String) -> Result<(), String> {
     println!("path: {}", path);
     sqlx::query("INSERT INTO favourites (path) VALUES (?1)")
         .bind(path)
@@ -122,7 +92,7 @@ async fn add_favourite(db: tauri::State<'_, AppState>, path: String) -> Result<(
 }
 
 #[tauri::command]
-async fn get_favourites(db: tauri::State<'_, AppState>) -> Result<Vec<Favourite>, String> {
+async fn get_favourites(db: tauri::State<'_, state::AppState>) -> Result<Vec<Favourite>, String> {
     let favourites: Vec<Favourite> =
         sqlx::query_as::<_, Favourite>("SELECT DISTINCT(path) FROM favourites")
             .fetch(&db.db)
@@ -133,7 +103,10 @@ async fn get_favourites(db: tauri::State<'_, AppState>) -> Result<Vec<Favourite>
 }
 
 #[tauri::command]
-async fn remove_favourite(db: tauri::State<'_, AppState>, path: String) -> Result<(), String> {
+async fn remove_favourite(
+    db: tauri::State<'_, state::AppState>,
+    path: String,
+) -> Result<(), String> {
     sqlx::query("DELETE FROM favourites WHERE path = ?1")
         .bind(path)
         .execute(&db.db)
@@ -143,7 +116,7 @@ async fn remove_favourite(db: tauri::State<'_, AppState>, path: String) -> Resul
 }
 
 #[tauri::command]
-async fn clear_favourites(db: tauri::State<'_, AppState>) -> Result<(), String> {
+async fn clear_favourites(db: tauri::State<'_, state::AppState>) -> Result<(), String> {
     sqlx::query("DELETE FROM favourites")
         .execute(&db.db)
         .await
@@ -151,7 +124,7 @@ async fn clear_favourites(db: tauri::State<'_, AppState>) -> Result<(), String> 
     Ok(())
 }
 
-async fn setup_db(app: &App) -> Db {
+async fn setup_db(app: &App) -> state::Db {
     let mut path = app.path().app_data_dir().expect("failed to get data_dir");
 
     match std::fs::create_dir_all(path.clone()) {
@@ -190,7 +163,7 @@ async fn setup_db(app: &App) -> Db {
         .await
         .expect("Error running DB migrations");
 
-    sqlx::query("PRAGMA journal_mode=WAL;").execute(&db).await;
+    let _ = sqlx::query("PRAGMA journal_mode=WAL;").execute(&db).await;
 
     db
 }
@@ -219,7 +192,7 @@ pub fn run() {
         .setup(|app| {
             tauri::async_runtime::block_on(async move {
                 let db = setup_db(&app).await;
-                app.manage(AppState { db });
+                app.manage(state::AppState { db });
             });
             Ok(())
         })
