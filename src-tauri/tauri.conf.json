@@ -24,7 +24,7 @@
       "assetProtocol": {
         "enable": true,
         "scope": [
-          "*",  "**/.thumbnails/**"
+          "*",  "**/.thumbnails/**", "**/.local/**/.thumbnails/**"
         ]
       }
     }
