@@ -49,16 +49,30 @@
       <Button href="/">Home</Button>
     </div>
   {:else}
-    <div class="fixed right-4 top-4 mb-[4rem] flex items-center z-10">
-      <Button variant="default" onclick={handleExport} class="mr-2">
-        {exportButtonText}
-        {$favorites.size}
-      </Button>
-      <Button variant="destructive" onclick={clearFavorites} class="px-3">
-        <TrashIcon />
-      </Button>
+    <!-- Action buttons container -->
+    <div class="sticky top-4 z-10 mb-4 flex justify-center px-4">
+      <div class="flex items-center gap-2 rounded-lg bg-background/80 p-2 shadow-sm backdrop-blur-sm border">
+        <Button 
+          variant="outline" 
+          onclick={handleExport}
+          class="text-sm font-medium"
+        >
+          {exportButtonText}
+          <span class="ml-1 rounded-full bg-primary/10 px-2 py-0.5 text-xs">
+            {$favorites.size}
+          </span>
+        </Button>
+        <Button 
+          variant="destructive" 
+          onclick={clearFavorites}
+          size="sm"
+          class="px-3"
+        >
+          <TrashIcon class="h-4 w-4" />
+        </Button>
+      </div>
     </div>
-    <br />
+    
     <Gallery photos={favoritePhotos} />
   {/if}
 </AppLayout>
