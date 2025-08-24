@@ -4,17 +4,26 @@
   import { listen } from '@tauri-apps/api/event';
   import Gallery from '../../components/Gallery.svelte';
   import {
-    clearFavorites,
     exportFavorites,
   } from '../../components/common/ImageOperations';
   import KeyboardShortcuts from '../../components/common/KeyboardShortcuts.svelte';
   import AppLayout from '../../components/layout/AppLayout.svelte';
+  import ConfirmationModal from '../../components/modals/ConfirmationModal.svelte';
   import { favorites, photos } from '../../stores/galleryStore';
   
   // Filter photos to only show favorites
   const favoritePhotos = $derived($photos.filter(photo => $favorites.has(photo.path)));
 
   let exportButtonText = $state('Export Favourites');
+  let showDeleteConfirmation = $state(false);
+
+  async function handleClearFavorites() {
+    await favorites.clear();
+  }
+
+  function showDeleteModal() {
+    showDeleteConfirmation = true;
+  }
 
   const keyboardActions = {
     e: handleExport,
@@ -64,7 +73,7 @@
         </Button>
         <Button 
           variant="destructive" 
-          onclick={clearFavorites}
+          onclick={showDeleteModal}
           size="sm"
           class="px-3"
         >
@@ -76,3 +85,15 @@
     <Gallery photos={favoritePhotos} />
   {/if}
 </AppLayout>
+
+<ConfirmationModal 
+  bind:open={showDeleteConfirmation}
+  title="Clear All Favourites"
+  description="Are you sure you want to clear all favourites? This action cannot be undone."
+  confirmText="Clear All"
+  cancelText="Cancel"
+  variant="destructive"
+  icon={TrashIcon}
+  onConfirm={handleClearFavorites}
+  onCancel={() => { showDeleteConfirmation = false; }}
+/>
