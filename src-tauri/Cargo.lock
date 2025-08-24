@@ -2589,7 +2589,7 @@ checksum = "23fb14cb19457329c82206317a5663005a4d404783dc74f4252769b0d5f42856"
 
 [[package]]
 name = "lixa-gallery"
-version = "0.7.0"
+version = "0.6.0"
 dependencies = [
  "anyhow",
  "futures",
