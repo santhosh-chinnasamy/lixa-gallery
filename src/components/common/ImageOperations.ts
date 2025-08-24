@@ -28,6 +28,36 @@ export async function loadPhotos() {
   }
 }
 
+export async function loadPhotosWithModal(onModalOpen: () => void, onModalClose: () => void) {
+  try {
+    onModalOpen();
+    isLoading.set(true);
+    
+    const folder = await open({
+      multiple: false,
+      directory: true,
+    });
+
+    if (!folder) {
+      isLoading.set(false);
+      photos.set([]);
+      onModalClose();
+      return;
+    }
+
+    const loadedPhotos: PhotoMetadata[] = await invoke('scan_folder', {
+      path: folder,
+    });
+    photos.set(loadedPhotos);
+    onModalClose();
+  } catch (error) {
+    console.error('Failed to load photos:', error);
+    onModalClose();
+  } finally {
+    isLoading.set(false);
+  }
+}
+
 export async function exportFavorites() {
   try {
     const destination = await open({
