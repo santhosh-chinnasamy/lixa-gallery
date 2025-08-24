@@ -25,6 +25,11 @@
   $: canShowNext = currentIndex < photoSource.length - 1;
   $: isFavourite = selectedImage ? $favorites.has(selectedImage.path) : false;
 
+  // Image preloading and loading states
+  let imageLoaded = false;
+  let imageError = false;
+  let preloadedImages = new Map<string, HTMLImageElement>();
+
   const keyboardActions = {
     Escape: onClose,
     ArrowLeft: showPrevious,
@@ -49,12 +54,16 @@
   function showPrevious() {
     if (canShowPrevious) {
       selectedImage = photoSource[currentIndex - 1];
+      imageLoaded = false;
+      imageError = false;
     }
   }
 
   function showNext() {
     if (canShowNext) {
       selectedImage = photoSource[currentIndex + 1];
+      imageLoaded = false;
+      imageError = false;
     }
   }
 
@@ -62,6 +71,45 @@
     if (event.target === event.currentTarget) {
       onClose();
     }
+  }
+
+  function handleImageLoad() {
+    imageLoaded = true;
+    imageError = false;
+  }
+
+  function handleImageError() {
+    imageError = true;
+    imageLoaded = false;
+  }
+
+  // Preload adjacent images
+  function preloadAdjacentImages() {
+    if (!selectedImage || currentIndex === -1) return;
+
+    const indicesToPreload = [];
+    if (canShowPrevious) indicesToPreload.push(currentIndex - 1);
+    if (canShowNext) indicesToPreload.push(currentIndex + 1);
+    
+    // Preload next 2 images in each direction for smoother navigation
+    if (currentIndex - 2 >= 0) indicesToPreload.push(currentIndex - 2);
+    if (currentIndex + 2 < photoSource.length) indicesToPreload.push(currentIndex + 2);
+
+    indicesToPreload.forEach(index => {
+      const photo = photoSource[index];
+      if (photo && !preloadedImages.has(photo.path)) {
+        const img = new Image();
+        img.src = convertFileSrc(photo.path);
+        preloadedImages.set(photo.path, img);
+      }
+    });
+  }
+
+  // Reactive statement to preload when selectedImage changes
+  $: if (selectedImage) {
+    imageLoaded = false;
+    imageError = false;
+    preloadAdjacentImages();
   }
 
   $: fileName = selectedImage?.metadata.name;
@@ -104,14 +152,35 @@
     >
       <!-- Image container -->
       <div
-        class="flex flex-1 items-center justify-center overflow-hidden rounded-lg"
+        class="flex flex-1 items-center justify-center overflow-hidden rounded-lg relative"
       >
+        <!-- Loading spinner -->
+        {#if !imageLoaded && !imageError}
+          <div class="absolute inset-0 flex items-center justify-center bg-black/20 backdrop-blur-sm">
+            <div class="animate-spin rounded-full h-12 w-12 border-b-2 border-white"></div>
+          </div>
+        {/if}
+
+        <!-- Error state -->
+        {#if imageError}
+          <div class="absolute inset-0 flex items-center justify-center bg-black/20 backdrop-blur-sm">
+            <div class="text-white text-center">
+              <div class="text-lg mb-2">Failed to load image</div>
+              <div class="text-sm text-white/70">{fileName}</div>
+            </div>
+          </div>
+        {/if}
+
+        <!-- Main image -->
         <img
           src={convertFileSrc(selectedImage.path)}
           alt={fileName}
-          class="max-h-full max-w-full rounded-lg object-contain shadow-2xl"
+          class={`max-h-full max-w-full rounded-lg object-contain shadow-2xl transition-opacity duration-300 ${
+            imageLoaded ? 'opacity-100' : 'opacity-0'
+          }`}
           style="filter: drop-shadow(0 25px 25px rgb(0 0 0 / 0.5))"
-          loading="lazy"
+          on:load={handleImageLoad}
+          on:error={handleImageError}
         />
       </div>
 
@@ -127,7 +196,7 @@
             disabled={!canShowPrevious}
             onclick={showPrevious}
             class={cn(
-              'h-10 w-10 rounded-full text-white hover:bg-white/20 disabled:opacity-30',
+              'h-10 w-10 rounded-full text-white hover:bg-white/20 disabled:opacity-30 transition-all duration-200',
               !canShowPrevious && 'cursor-not-allowed',
             )}
             aria-label="Previous image"
@@ -146,7 +215,7 @@
             size="icon"
             onclick={toggleFavorite}
             class={cn(
-              'h-10 w-10 rounded-full transition-colors',
+              'h-10 w-10 rounded-full transition-all duration-200',
               isFavourite
                 ? 'bg-red-500/20 text-red-400 hover:bg-red-500/30'
                 : 'text-white hover:bg-white/20 hover:text-red-400',
@@ -166,7 +235,7 @@
             disabled={!canShowNext}
             onclick={showNext}
             class={cn(
-              'h-10 w-10 rounded-full text-white hover:bg-white/20 disabled:opacity-30',
+              'h-10 w-10 rounded-full text-white hover:bg-white/20 disabled:opacity-30 transition-all duration-200',
               !canShowNext && 'cursor-not-allowed',
             )}
             aria-label="Next image"

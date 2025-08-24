@@ -29,7 +29,7 @@
 </script>
 
 <svelte:window onkeydown={handleKeydown} />
-<Sidebar.Provider>
+<Sidebar.Provider open={false}>
   <AppSidebar />
   <Sidebar.Trigger />
   <main

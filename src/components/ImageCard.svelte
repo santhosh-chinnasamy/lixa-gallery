@@ -5,14 +5,20 @@
   import Filename from './Filename.svelte';
   import Heart from './icons/Heart.svelte';
   import type { PhotoMetadata } from '../types/photo';
+  import { onMount } from 'svelte';
 
   export let photo: PhotoMetadata;
   export let tabindex: number | undefined = 0;
   export let handleImageClick: (photo: PhotoMetadata) => void;
+  export let isVisible = true; // For intersection observer
 
   $: isFavourite = $favorites.has(photo.path);
   $: fileName = photo.metadata.name;
   $: thumbnailSrc = photo.thumbnail_path;
+
+  let imageElement: HTMLImageElement;
+  let imageLoaded = false;
+  let imageError = false;
 
   const handleClick = () => handleImageClick(photo);
 
@@ -33,6 +39,16 @@
       action(event);
     }
   }
+
+  function handleImageLoad() {
+    imageLoaded = true;
+    imageError = false;
+  }
+
+  function handleImageError() {
+    imageError = true;
+    imageLoaded = false;
+  }
 </script>
 
 <Card.Root
@@ -44,11 +60,34 @@
   <Card.Content class="relative overflow-hidden rounded-lg p-0">
     <!-- Image container with consistent aspect ratio -->
     <div class="aspect-[1/1] h-auto w-full overflow-hidden bg-gray-100">
+      <!-- Loading placeholder -->
+      {#if !imageLoaded && !imageError}
+        <div class="flex h-full w-full items-center justify-center bg-gray-200 animate-pulse">
+          <div class="text-gray-400 text-sm">Loading...</div>
+        </div>
+      {/if}
+
+      <!-- Error placeholder -->
+      {#if imageError}
+        <div class="flex h-full w-full items-center justify-center bg-gray-100">
+          <div class="text-gray-500 text-xs text-center p-2">
+            <div>Failed to load</div>
+            <div class="text-gray-400">{fileName}</div>
+          </div>
+        </div>
+      {/if}
+
+      <!-- Actual image -->
       <img
+        bind:this={imageElement}
         src={convertFileSrc(thumbnailSrc)}
         alt={fileName}
-        loading="lazy"
-        class="h-full w-full object-cover transition-transform duration-300 group-hover:scale-105"
+        loading={isVisible ? "eager" : "lazy"}
+        class={`h-full w-full object-cover transition-all duration-300 group-hover:scale-105 ${
+          imageLoaded ? 'opacity-100' : 'opacity-0'
+        }`}
+        onload={handleImageLoad}
+        onerror={handleImageError}
       />
     </div>
 
