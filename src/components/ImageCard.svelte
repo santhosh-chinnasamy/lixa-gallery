@@ -10,7 +10,12 @@
   export let photo: PhotoMetadata;
   export let tabindex: number | undefined = 0;
   export let handleImageClick: (photo: PhotoMetadata) => void;
+  export let trackImageElement: ((path: string, element: HTMLImageElement) => void) | undefined = undefined;
   export let isVisible = true; // For intersection observer
+  export let globalIndex: number | undefined = undefined;
+  
+  // Use globalIndex for accessibility or other purposes if needed
+  $: ariaLabel = globalIndex !== undefined ? `Image ${globalIndex + 1}` : fileName;
 
   $: isFavourite = $favorites.has(photo.path);
   $: fileName = photo.metadata.name;
@@ -43,6 +48,9 @@
   function handleImageLoad() {
     imageLoaded = true;
     imageError = false;
+    if (trackImageElement && imageElement) {
+      trackImageElement(photo.path, imageElement);
+    }
   }
 
   function handleImageError() {
@@ -81,7 +89,7 @@
       <img
         bind:this={imageElement}
         src={convertFileSrc(thumbnailSrc)}
-        alt={fileName}
+        alt={ariaLabel}
         loading={isVisible ? "eager" : "lazy"}
         class={`h-full w-full object-cover transition-all duration-300 group-hover:scale-105 ${
           imageLoaded ? 'opacity-100' : 'opacity-0'

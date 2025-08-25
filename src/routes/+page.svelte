@@ -5,16 +5,30 @@
   import KeyboardShortcuts from '../components/common/KeyboardShortcuts.svelte';
   import AppLayout from '../components/layout/AppLayout.svelte';
   import FolderLoadingModal from '../components/modals/FolderLoadingModal.svelte';
+  import PerformanceMonitor from '../components/PerformanceMonitor.svelte';
   import { isLoading, photos } from '../stores/galleryStore';
+  import { allPhotos, paginationControls } from '../stores/paginationStore';
 
   let showFolderModal = $state(false);
 
   function handleLoadPhotos() {
     loadPhotosWithModal(
       () => { showFolderModal = true; },
-      () => { showFolderModal = false; }
+      () => { 
+        showFolderModal = false;
+        // Update pagination store with new photos
+        allPhotos.set($photos);
+        paginationControls.reset();
+      }
     );
   }
+
+  // Sync photos with pagination store using $effect
+  $effect(() => {
+    if ($photos.length > 0) {
+      allPhotos.set($photos);
+    }
+  });
 
   const keyboardActions = {
     o: handleLoadPhotos,
@@ -54,3 +68,5 @@
   onSelectFolder={handleLoadPhotos}
   onCancel={() => { showFolderModal = false; }}
 />
+
+<PerformanceMonitor />
