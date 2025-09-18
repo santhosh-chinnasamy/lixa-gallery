@@ -35,7 +35,7 @@ async fn scan_folder(
         db,
     )
     .await?;
-    return Ok(result);
+    Ok(result)
 }
 
 #[tauri::command]
@@ -133,7 +133,7 @@ async fn clear_favourites(db: tauri::State<'_, state::AppState>) -> Result<(), S
 }
 
 async fn setup_db(app: &App) -> SqlitePool {
-    let mut dir = app.path().app_data_dir().expect("failed to get data_dir");
+    let dir = app.path().app_data_dir().expect("failed to get data_dir");
     std::fs::create_dir_all(&dir).expect("error creating app data dir");
 
     let mut db_path = PathBuf::from(&dir);
@@ -208,7 +208,7 @@ pub fn run() {
         ])
         .setup(|app| {
             tauri::async_runtime::block_on(async move {
-                let db = setup_db(&app).await;
+                let db = setup_db(app).await;
                 app.manage(state::AppState { db });
             });
             Ok(())
