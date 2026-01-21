@@ -27,6 +27,7 @@ dist-ssr
 /build
 /.svelte-kit
 /package
+/target
 .env
 .env.*
 !.env.example
