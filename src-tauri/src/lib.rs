@@ -32,7 +32,11 @@ pub fn run() {
 
             tauri::async_runtime::block_on(async move {
                 let pool = db::setup_db(app_data_dir, pkg_name).await;
-                app_handle.manage(AppState { db: pool });
+
+                let gallery = app::gallery_service::GalleryService::new(pool.clone());
+                let favourite = app::favourite_service::FavouriteService::new(pool);
+
+                app_handle.manage(AppState { gallery, favourite });
             });
             Ok(())
         })

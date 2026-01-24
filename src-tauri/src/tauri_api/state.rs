@@ -1,7 +1,6 @@
-use sqlx::{Pool, Sqlite};
-
-pub type Db = Pool<Sqlite>;
+use crate::app::{favourite_service::FavouriteService, gallery_service::GalleryService};
 
 pub struct AppState {
-    pub db: Db,
+    pub gallery: GalleryService,
+    pub favourite: FavouriteService,
 }
