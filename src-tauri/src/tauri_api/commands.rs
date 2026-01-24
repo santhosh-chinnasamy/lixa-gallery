@@ -1,4 +1,3 @@
-use crate::app::{favourite_service, gallery_service};
 use crate::domain::models::{Favourite, PhotoMetadata};
 use crate::tauri_api::state::AppState;
 use std::fs;
@@ -17,7 +16,9 @@ pub async fn scan_folder(
             .map_err(|e| format!("Failed to create thumbnail directory: {}", e))?;
     }
 
-    gallery_service::scan_folder(&state.db, path, &thumbnail_path.to_string_lossy())
+    state
+        .gallery
+        .scan_folder(path, &thumbnail_path.to_string_lossy())
         .await
         .map_err(|e| e.to_string())
 }
@@ -28,35 +29,45 @@ pub async fn export_favourites(
     state: State<'_, AppState>,
     destination: &str,
 ) -> Result<(), String> {
-    favourite_service::export_favourites(app, &state.db, destination)
+    state
+        .favourite
+        .export_favourites(app, destination)
         .await
         .map_err(|e| e.to_string())
 }
 
 #[tauri::command]
 pub async fn add_favourite(state: State<'_, AppState>, path: String) -> Result<(), String> {
-    favourite_service::add_favourite(&state.db, path)
+    state
+        .favourite
+        .add_favourite(path)
         .await
         .map_err(|e| e.to_string())
 }
 
 #[tauri::command]
 pub async fn get_favourites(state: State<'_, AppState>) -> Result<Vec<Favourite>, String> {
-    favourite_service::get_favourites(&state.db)
+    state
+        .favourite
+        .get_favourites()
         .await
         .map_err(|e| e.to_string())
 }
 
 #[tauri::command]
 pub async fn remove_favourite(state: State<'_, AppState>, path: String) -> Result<(), String> {
-    favourite_service::remove_favourite(&state.db, path)
+    state
+        .favourite
+        .remove_favourite(path)
         .await
         .map_err(|e| e.to_string())
 }
 
 #[tauri::command]
 pub async fn clear_favourites(state: State<'_, AppState>) -> Result<(), String> {
-    favourite_service::clear_favourites(&state.db)
+    state
+        .favourite
+        .clear_favourites()
         .await
         .map_err(|e| e.to_string())
 }
