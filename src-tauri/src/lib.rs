@@ -30,13 +30,24 @@ pub fn run() {
                 .expect("failed to get data_dir");
             let pkg_name = env!("CARGO_PKG_NAME");
 
+            let mut thumbnail_path = app_data_dir.clone();
+            thumbnail_path.push(".thumbnails");
+            if !thumbnail_path.exists() {
+                std::fs::create_dir_all(&thumbnail_path)
+                    .expect("failed to create thumbnail directory");
+            }
+
             tauri::async_runtime::block_on(async move {
                 let pool = db::setup_db(app_data_dir, pkg_name).await;
 
                 let gallery = app::gallery_service::GalleryService::new(pool.clone());
                 let favourite = app::favourite_service::FavouriteService::new(pool);
 
-                app_handle.manage(AppState { gallery, favourite });
+                app_handle.manage(AppState {
+                    gallery,
+                    favourite,
+                    thumbnail_path: thumbnail_path.to_string_lossy().to_string(),
+                });
             });
             Ok(())
         })

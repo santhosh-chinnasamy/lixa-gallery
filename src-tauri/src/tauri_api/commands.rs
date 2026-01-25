@@ -1,24 +1,15 @@
 use crate::domain::models::{Favourite, PhotoMetadata};
 use crate::tauri_api::state::AppState;
-use std::fs;
-use tauri::{AppHandle, Manager, State};
+use tauri::{AppHandle, State};
 
 #[tauri::command]
 pub async fn scan_folder(
-    app: AppHandle,
     state: State<'_, AppState>,
     path: &str,
 ) -> Result<Vec<PhotoMetadata>, String> {
-    let mut thumbnail_path = app.path().app_data_dir().expect("failed to get data_dir");
-    thumbnail_path.push(".thumbnails");
-    if !thumbnail_path.exists() {
-        fs::create_dir_all(&thumbnail_path)
-            .map_err(|e| format!("Failed to create thumbnail directory: {}", e))?;
-    }
-
     state
         .gallery
-        .scan_folder(path, &thumbnail_path.to_string_lossy())
+        .scan_folder(path, &state.thumbnail_path)
         .await
         .map_err(|e| e.to_string())
 }
