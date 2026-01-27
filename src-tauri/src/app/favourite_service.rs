@@ -1,20 +1,19 @@
 use crate::domain::models::Favourite;
-use crate::infra::db;
-use sqlx::SqlitePool;
-use std::{fs, path::PathBuf};
+use crate::domain::repos::FavouriteRepository;
+use std::{fs, path::PathBuf, sync::Arc};
 use tauri::{AppHandle, Emitter};
 
 pub struct FavouriteService {
-    pool: SqlitePool,
+    favourite_repo: Arc<dyn FavouriteRepository>,
 }
 
 impl FavouriteService {
-    pub fn new(pool: SqlitePool) -> Self {
-        Self { pool }
+    pub fn new(favourite_repo: Arc<dyn FavouriteRepository>) -> Self {
+        Self { favourite_repo }
     }
 
     pub async fn export_favourites(&self, app: AppHandle, destination: &str) -> anyhow::Result<()> {
-        let favourites = db::get_favourites(&self.pool).await?;
+        let favourites = self.favourite_repo.get_favourites().await?;
         let files = favourites.into_iter().map(|f| f.path).collect::<Vec<_>>();
 
         let mut counter = 0;
@@ -44,18 +43,18 @@ impl FavouriteService {
     }
 
     pub async fn add_favourite(&self, path: String) -> anyhow::Result<()> {
-        db::add_favourite(&self.pool, path).await
+        self.favourite_repo.add_favourite(path).await
     }
 
     pub async fn get_favourites(&self) -> anyhow::Result<Vec<Favourite>> {
-        db::get_favourites(&self.pool).await
+        self.favourite_repo.get_favourites().await
     }
 
     pub async fn remove_favourite(&self, path: String) -> anyhow::Result<()> {
-        db::remove_favourite(&self.pool, path).await
+        self.favourite_repo.remove_favourite(path).await
     }
 
     pub async fn clear_favourites(&self) -> anyhow::Result<()> {
-        db::clear_favourites(&self.pool).await
+        self.favourite_repo.clear_favourites().await
     }
 }
