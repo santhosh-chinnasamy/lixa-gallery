@@ -1,4 +1,6 @@
 use crate::domain::models::{Favourite, PhotoMetadata};
+use crate::domain::repos::{FavouriteRepository, PhotoRepository};
+use futures::future::BoxFuture;
 use sqlx::{
     sqlite::{SqliteConnectOptions, SqliteJournalMode, SqliteSynchronous},
     QueryBuilder, Row, Sqlite, SqlitePool,
@@ -52,109 +54,147 @@ pub async fn setup_db(app_data_dir: PathBuf, pkg_name: &str) -> SqlitePool {
     pool
 }
 
-pub async fn get_cached_photos_for_path(
-    pool: &SqlitePool,
-    prefix: &str,
-) -> anyhow::Result<Vec<(String, String, i64, i64)>> {
-    let rows = sqlx::query(
-        "SELECT path, thumbnail_path, mtime, size
-             FROM photos
-             WHERE path LIKE ?1 || '%'",
-    )
-    .bind(prefix)
-    .fetch_all(pool)
-    .await?;
+pub struct SqlitePhotoRepository {
+    pool: SqlitePool,
+}
 
-    let result = rows
-        .into_iter()
-        .map(|row| {
-            (
-                row.get("path"),
-                row.get("thumbnail_path"),
-                row.get("mtime"),
-                row.get("size"),
+impl SqlitePhotoRepository {
+    pub fn new(pool: SqlitePool) -> Self {
+        Self { pool }
+    }
+}
+
+impl PhotoRepository for SqlitePhotoRepository {
+    fn get_cached_photos_for_path<'a>(
+        &'a self,
+        prefix: &'a str,
+    ) -> BoxFuture<'a, anyhow::Result<Vec<(String, String, i64, i64)>>> {
+        Box::pin(async move {
+            let rows = sqlx::query(
+                "SELECT path, thumbnail_path, mtime, size
+                 FROM photos
+                 WHERE path LIKE ?1 || '%'",
             )
+            .bind(prefix)
+            .fetch_all(&self.pool)
+            .await?;
+
+            let result = rows
+                .into_iter()
+                .map(|row| {
+                    (
+                        row.get("path"),
+                        row.get("thumbnail_path"),
+                        row.get("mtime"),
+                        row.get("size"),
+                    )
+                })
+                .collect();
+
+            Ok(result)
         })
-        .collect();
-
-    Ok(result)
-}
-
-pub async fn batch_insert_photos(
-    pool: &SqlitePool,
-    photos: &[PhotoMetadata],
-) -> anyhow::Result<()> {
-    if photos.is_empty() {
-        return Ok(());
     }
 
-    let mut tx = pool.begin().await?;
+    fn batch_insert_photos<'a>(
+        &'a self,
+        photos: &'a [PhotoMetadata],
+    ) -> BoxFuture<'a, anyhow::Result<()>> {
+        Box::pin(async move {
+            if photos.is_empty() {
+                return Ok(());
+            }
 
-    const CHUNK: usize = 1_000;
-    for chunk in photos.chunks(CHUNK) {
-        let mut qb: QueryBuilder<Sqlite> = QueryBuilder::new(
-            "INSERT INTO photos (path, name, thumbnail_path, mtime, ctime, size) ",
-        );
-        qb.push_values(chunk, |mut b, p| {
-            b.push_bind(&p.path)
-                .push_bind(&p.metadata.name)
-                .push_bind(&p.thumbnail_path)
-                .push_bind(p.metadata.modified as i64)
-                .push_bind(p.metadata.created as i64)
-                .push_bind(p.metadata.size as i64);
-        });
-        qb.push(
-            " ON CONFLICT(path) DO UPDATE SET
-                name=excluded.name,
-                thumbnail_path=excluded.thumbnail_path,
-                mtime=excluded.mtime,
-                ctime=excluded.ctime,
-                size=excluded.size
-              WHERE photos.mtime <> excluded.mtime
-                 OR photos.size  <> excluded.size
-                 OR photos.thumbnail_path <> excluded.thumbnail_path
-                 OR photos.name  <> excluded.name",
-        );
+            let mut tx = self.pool.begin().await?;
 
-        qb.build().execute(&mut *tx).await?;
+            const CHUNK: usize = 1_000;
+            for chunk in photos.chunks(CHUNK) {
+                let mut qb: QueryBuilder<Sqlite> = QueryBuilder::new(
+                    "INSERT INTO photos (path, name, thumbnail_path, mtime, ctime, size) ",
+                );
+                qb.push_values(chunk, |mut b, p| {
+                    b.push_bind(&p.path)
+                        .push_bind(&p.metadata.name)
+                        .push_bind(&p.thumbnail_path)
+                        .push_bind(p.metadata.modified as i64)
+                        .push_bind(p.metadata.created as i64)
+                        .push_bind(p.metadata.size as i64);
+                });
+                qb.push(
+                    " ON CONFLICT(path) DO UPDATE SET
+                        name=excluded.name,
+                        thumbnail_path=excluded.thumbnail_path,
+                        mtime=excluded.mtime,
+                        ctime=excluded.ctime,
+                        size=excluded.size
+                      WHERE photos.mtime <> excluded.mtime
+                         OR photos.size  <> excluded.size
+                         OR photos.thumbnail_path <> excluded.thumbnail_path
+                         OR photos.name  <> excluded.name",
+                );
+
+                qb.build().execute(&mut *tx).await?;
+            }
+
+            tx.commit().await?;
+            Ok(())
+        })
+    }
+}
+
+pub struct SqliteFavouriteRepository {
+    pool: SqlitePool,
+}
+
+impl SqliteFavouriteRepository {
+    pub fn new(pool: SqlitePool) -> Self {
+        Self { pool }
+    }
+}
+
+impl FavouriteRepository for SqliteFavouriteRepository {
+    fn add_favourite(&self, path: String) -> BoxFuture<'_, anyhow::Result<()>> {
+        Box::pin(async move {
+            sqlx::query("INSERT INTO favourites (path) VALUES (?1) ON CONFLICT(path) DO NOTHING")
+                .bind(path)
+                .execute(&self.pool)
+                .await?;
+            Ok(())
+        })
     }
 
-    tx.commit().await?;
-    Ok(())
-}
+    fn get_favourites(&self) -> BoxFuture<'_, anyhow::Result<Vec<Favourite>>> {
+        Box::pin(async move {
+            let rows = sqlx::query("SELECT path FROM favourites")
+                .fetch_all(&self.pool)
+                .await?;
 
-pub async fn add_favourite(pool: &SqlitePool, path: String) -> anyhow::Result<()> {
-    sqlx::query("INSERT INTO favourites (path) VALUES (?1) ON CONFLICT(path) DO NOTHING")
-        .bind(path)
-        .execute(pool)
-        .await?;
-    Ok(())
-}
+            let favourites = rows
+                .into_iter()
+                .map(|row| Favourite {
+                    path: row.get("path"),
+                })
+                .collect();
 
-pub async fn get_favourites(pool: &SqlitePool) -> anyhow::Result<Vec<Favourite>> {
-    let rows = sqlx::query("SELECT path FROM favourites")
-        .fetch_all(pool)
-        .await?;
-
-    let favourites = rows
-        .into_iter()
-        .map(|row| Favourite {
-            path: row.get("path"),
+            Ok(favourites)
         })
-        .collect();
+    }
 
-    Ok(favourites)
-}
+    fn remove_favourite(&self, path: String) -> BoxFuture<'_, anyhow::Result<()>> {
+        Box::pin(async move {
+            sqlx::query("DELETE FROM favourites WHERE path = ?1")
+                .bind(path)
+                .execute(&self.pool)
+                .await?;
+            Ok(())
+        })
+    }
 
-pub async fn remove_favourite(pool: &SqlitePool, path: String) -> anyhow::Result<()> {
-    sqlx::query("DELETE FROM favourites WHERE path = ?1")
-        .bind(path)
-        .execute(pool)
-        .await?;
-    Ok(())
-}
-
-pub async fn clear_favourites(pool: &SqlitePool) -> anyhow::Result<()> {
-    sqlx::query("DELETE FROM favourites").execute(pool).await?;
-    Ok(())
+    fn clear_favourites(&self) -> BoxFuture<'_, anyhow::Result<()>> {
+        Box::pin(async move {
+            sqlx::query("DELETE FROM favourites")
+                .execute(&self.pool)
+                .await?;
+            Ok(())
+        })
+    }
 }

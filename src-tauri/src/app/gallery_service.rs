@@ -1,19 +1,20 @@
 use crate::domain::models::PhotoMetadata;
-use crate::infra::{db, fs_ops, image_proc};
+use crate::domain::repos::PhotoRepository;
+use crate::infra::{fs_ops, image_proc};
 use rayon::prelude::*;
-use sqlx::SqlitePool;
 use std::{
     collections::HashMap,
     path::{Path, PathBuf},
+    sync::Arc,
 };
 
 pub struct GalleryService {
-    pool: SqlitePool,
+    photo_repo: Arc<dyn PhotoRepository>,
 }
 
 impl GalleryService {
-    pub fn new(pool: SqlitePool) -> Self {
-        Self { pool }
+    pub fn new(photo_repo: Arc<dyn PhotoRepository>) -> Self {
+        Self { photo_repo }
     }
 
     pub async fn scan_folder(
@@ -29,7 +30,7 @@ impl GalleryService {
             prefix.push(std::path::MAIN_SEPARATOR);
         }
 
-        let cached_rows = db::get_cached_photos_for_path(&self.pool, &prefix).await?;
+        let cached_rows = self.photo_repo.get_cached_photos_for_path(&prefix).await?;
         let db_lookup: HashMap<String, (String, i64, i64)> = cached_rows
             .into_iter()
             .map(|(path, thumb, mtime, size)| (path, (thumb, mtime, size)))
@@ -65,7 +66,9 @@ impl GalleryService {
                 .collect();
 
             if !processed_photos.is_empty() {
-                db::batch_insert_photos(&self.pool, &processed_photos).await?;
+                self.photo_repo
+                    .batch_insert_photos(&processed_photos)
+                    .await?;
             }
             all_photos.extend(processed_photos);
         }
