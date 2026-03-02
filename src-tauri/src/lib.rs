@@ -42,8 +42,10 @@ pub fn run() {
 
                 let photo_repo = std::sync::Arc::new(db::SqlitePhotoRepository::new(pool.clone()));
                 let favourite_repo = std::sync::Arc::new(db::SqliteFavouriteRepository::new(pool));
+                let image_processor = std::sync::Arc::new(infra::image::ImageProcessor);
 
-                let gallery = app::gallery_service::GalleryService::new(photo_repo);
+                let gallery =
+                    app::gallery_service::GalleryService::new(photo_repo, image_processor);
                 let favourite = app::favourite_service::FavouriteService::new(favourite_repo);
 
                 app_handle.manage(AppState {

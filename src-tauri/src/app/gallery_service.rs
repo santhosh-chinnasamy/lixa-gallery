@@ -1,6 +1,7 @@
+use crate::domain::image::ImageProcessor;
 use crate::domain::models::PhotoMetadata;
 use crate::domain::repos::PhotoRepository;
-use crate::infra::{fs_ops, image_proc};
+use crate::infra::fs_ops;
 use rayon::prelude::*;
 use std::{
     collections::HashMap,
@@ -10,11 +11,18 @@ use std::{
 
 pub struct GalleryService {
     photo_repo: Arc<dyn PhotoRepository>,
+    image_processor: Arc<dyn ImageProcessor>,
 }
 
 impl GalleryService {
-    pub fn new(photo_repo: Arc<dyn PhotoRepository>) -> Self {
-        Self { photo_repo }
+    pub fn new(
+        photo_repo: Arc<dyn PhotoRepository>,
+        image_processor: Arc<dyn ImageProcessor>,
+    ) -> Self {
+        Self {
+            photo_repo,
+            image_processor,
+        }
     }
 
     pub async fn scan_folder(
@@ -62,7 +70,11 @@ impl GalleryService {
         if !needs_processing.is_empty() {
             let processed_photos: Vec<PhotoMetadata> = needs_processing
                 .par_iter()
-                .filter_map(|file_path| image_proc::convert_image(file_path, thumbnail_path).ok())
+                .filter_map(|file_path| {
+                    self.image_processor
+                        .convert_image(file_path, thumbnail_path)
+                        .ok()
+                })
                 .collect();
 
             if !processed_photos.is_empty() {
