@@ -40,13 +40,17 @@ pub fn run() {
             tauri::async_runtime::block_on(async move {
                 let pool = db::setup_db(app_data_dir, pkg_name).await;
 
+                let fs = std::sync::Arc::new(infra::fs_ops::LocalFileSystem);
                 let photo_repo = std::sync::Arc::new(db::SqlitePhotoRepository::new(pool.clone()));
                 let favourite_repo = std::sync::Arc::new(db::SqliteFavouriteRepository::new(pool));
                 let image_processor = std::sync::Arc::new(infra::image::ImageProcessor);
 
-                let gallery =
-                    app::gallery_service::GalleryService::new(photo_repo, image_processor);
-                let favourite = app::favourite_service::FavouriteService::new(favourite_repo);
+                let gallery = app::gallery_service::GalleryService::new(
+                    photo_repo,
+                    image_processor,
+                    fs.clone(),
+                );
+                let favourite = app::favourite_service::FavouriteService::new(favourite_repo, fs);
 
                 app_handle.manage(AppState {
                     gallery,

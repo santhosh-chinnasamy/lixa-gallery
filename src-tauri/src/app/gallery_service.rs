@@ -1,7 +1,7 @@
+use crate::domain::fs::FileSystem;
 use crate::domain::image::ImageProcessor;
 use crate::domain::models::PhotoMetadata;
 use crate::domain::repos::PhotoRepository;
-use crate::infra::fs_ops;
 use rayon::prelude::*;
 use std::{
     collections::HashMap,
@@ -12,16 +12,19 @@ use std::{
 pub struct GalleryService {
     photo_repo: Arc<dyn PhotoRepository>,
     image_processor: Arc<dyn ImageProcessor>,
+    fs: Arc<dyn FileSystem>,
 }
 
 impl GalleryService {
     pub fn new(
         photo_repo: Arc<dyn PhotoRepository>,
         image_processor: Arc<dyn ImageProcessor>,
+        fs: Arc<dyn FileSystem>,
     ) -> Self {
         Self {
             photo_repo,
             image_processor,
+            fs,
         }
     }
 
@@ -31,7 +34,7 @@ impl GalleryService {
         thumbnail_path: &str,
     ) -> anyhow::Result<Vec<PhotoMetadata>> {
         let folder_path = PathBuf::from(folder);
-        let image_files = fs_ops::list_images_in_dir(&folder_path)?;
+        let image_files = self.fs.list_images_in_dir(&folder_path)?;
 
         let mut prefix = folder.to_string();
         if !prefix.ends_with(std::path::MAIN_SEPARATOR) {
@@ -49,7 +52,7 @@ impl GalleryService {
 
         for file_path in image_files {
             let path_str = file_path.to_string_lossy().to_string();
-            if let Ok(current_metadata) = fs_ops::get_file_metadata(&file_path) {
+            if let Ok(current_metadata) = self.fs.get_file_metadata(&file_path) {
                 if let Some((thumbnail_path, db_mtime, db_size)) = db_lookup.get(&path_str) {
                     if current_metadata.modified as i64 == *db_mtime
                         && current_metadata.size as i64 == *db_size

@@ -1,18 +1,24 @@
+use crate::domain::events::EventHub;
+use crate::domain::fs::FileSystem;
 use crate::domain::models::Favourite;
 use crate::domain::repos::FavouriteRepository;
-use std::{fs, path::PathBuf, sync::Arc};
-use tauri::{AppHandle, Emitter};
+use std::{path::PathBuf, sync::Arc};
 
 pub struct FavouriteService {
     favourite_repo: Arc<dyn FavouriteRepository>,
+    fs: Arc<dyn FileSystem>,
 }
 
 impl FavouriteService {
-    pub fn new(favourite_repo: Arc<dyn FavouriteRepository>) -> Self {
-        Self { favourite_repo }
+    pub fn new(favourite_repo: Arc<dyn FavouriteRepository>, fs: Arc<dyn FileSystem>) -> Self {
+        Self { favourite_repo, fs }
     }
 
-    pub async fn export_favourites(&self, app: AppHandle, destination: &str) -> anyhow::Result<()> {
+    pub async fn export_favourites(
+        &self,
+        events: &dyn EventHub,
+        destination: &str,
+    ) -> anyhow::Result<()> {
         let favourites = self.favourite_repo.get_favourites().await?;
         let files = favourites.into_iter().map(|f| f.path).collect::<Vec<_>>();
 
@@ -25,18 +31,20 @@ impl FavouriteService {
 
             let destination_path = PathBuf::from(destination).join(name);
 
-            let canonical_src = fs::canonicalize(&file_path)?;
-            let canonical_dst =
-                fs::canonicalize(&destination_path).unwrap_or(destination_path.clone());
+            let canonical_src = self.fs.canonicalize(&file)?;
+            let canonical_dst = self
+                .fs
+                .canonicalize(&destination_path)
+                .unwrap_or(destination_path.clone());
 
             if canonical_src == canonical_dst {
                 continue;
             }
 
-            fs::copy(&file_path, &destination_path)?;
+            self.fs.copy(&file, &destination_path)?;
 
             counter += 1;
-            app.emit("export-progress", counter)?;
+            events.emit_progress("export-progress", counter)?;
         }
 
         Ok(())
