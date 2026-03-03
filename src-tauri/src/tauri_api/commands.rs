@@ -1,4 +1,5 @@
-use crate::domain::models::{Favourite, PhotoMetadata};
+use crate::app::models::{Favourite, PhotoMetadata};
+use crate::tauri_api::events::TauriEventHub;
 use crate::tauri_api::state::AppState;
 use tauri::{AppHandle, State};
 
@@ -20,9 +21,10 @@ pub async fn export_favourites(
     state: State<'_, AppState>,
     destination: &str,
 ) -> Result<(), String> {
+    let events = TauriEventHub::new(app);
     state
         .favourite
-        .export_favourites(app, destination)
+        .export_favourites(&events, destination)
         .await
         .map_err(|e| e.to_string())
 }
