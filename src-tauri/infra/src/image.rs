@@ -1,6 +1,6 @@
-use crate::domain::image::ImageProcessor as ImageProcessorTrait;
-use crate::domain::models::PhotoMetadata;
-use crate::infra::fs_ops;
+use crate::fs_ops;
+use gallery_core::image::ImageProcessor as ImageProcessorTrait;
+use gallery_core::models::PhotoMetadata;
 use std::path::{Path, PathBuf};
 
 pub struct ImageProcessor;

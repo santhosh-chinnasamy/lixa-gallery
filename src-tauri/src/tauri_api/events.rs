@@ -1,4 +1,4 @@
-use crate::domain::events::EventHub;
+use gallery_core::events::EventHub;
 use tauri::{AppHandle, Emitter};
 
 pub struct TauriEventHub {

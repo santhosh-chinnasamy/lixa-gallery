@@ -1,0 +1,11 @@
+[package]
+name = "services"
+version.workspace = true
+edition.workspace = true
+
+[dependencies]
+gallery-core = { path = "../gallery-core" }
+anyhow = { workspace = true }
+futures = { workspace = true }
+log = { workspace = true }
+rayon = "1.11.0"

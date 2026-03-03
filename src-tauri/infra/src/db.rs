@@ -1,6 +1,6 @@
-use crate::domain::models::{Favourite, PhotoMetadata};
-use crate::domain::repos::{FavouriteRepository, PhotoRepository};
 use futures::future::BoxFuture;
+use gallery_core::models::{Favourite, PhotoMetadata};
+use gallery_core::repos::{FavouriteRepository, PhotoRepository};
 use sqlx::{
     sqlite::{SqliteConnectOptions, SqliteJournalMode, SqliteSynchronous},
     QueryBuilder, Row, Sqlite, SqlitePool,

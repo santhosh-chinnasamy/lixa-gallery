@@ -1,4 +1,4 @@
 pub mod favourite_service;
 pub mod gallery_service;
 
-pub use crate::domain::models;
+pub use gallery_core::models;

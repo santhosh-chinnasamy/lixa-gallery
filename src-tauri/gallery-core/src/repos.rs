@@ -1,4 +1,4 @@
-use crate::domain::models::{Favourite, PhotoMetadata};
+use crate::models::{Favourite, PhotoMetadata};
 use futures::future::BoxFuture;
 
 pub trait PhotoRepository: Send + Sync {

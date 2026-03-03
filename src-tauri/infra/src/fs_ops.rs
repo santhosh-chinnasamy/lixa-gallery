@@ -1,5 +1,5 @@
-use crate::domain::fs::FileSystem;
-use crate::domain::models::FileMetadata;
+use gallery_core::fs::FileSystem;
+use gallery_core::models::FileMetadata;
 use std::{
     fs,
     path::{Path, PathBuf},
