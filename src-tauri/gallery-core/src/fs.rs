@@ -1,4 +1,4 @@
-use crate::domain::models::FileMetadata;
+use crate::models::FileMetadata;
 use std::path::{Path, PathBuf};
 
 pub trait FileSystem: Send + Sync {

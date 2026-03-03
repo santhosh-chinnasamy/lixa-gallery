@@ -1,0 +1,9 @@
+[package]
+name = "gallery-core"
+version.workspace = true
+edition.workspace = true
+
+[dependencies]
+serde = { workspace = true }
+futures = { workspace = true }
+anyhow = { workspace = true }

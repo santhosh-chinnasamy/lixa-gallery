@@ -1,7 +1,7 @@
-use crate::domain::fs::FileSystem;
-use crate::domain::image::ImageProcessor;
-use crate::domain::models::PhotoMetadata;
-use crate::domain::repos::PhotoRepository;
+use gallery_core::fs::FileSystem;
+use gallery_core::image::ImageProcessor;
+use gallery_core::models::PhotoMetadata;
+use gallery_core::repos::PhotoRepository;
 use rayon::prelude::*;
 use std::{
     collections::HashMap,
