@@ -1,4 +1,4 @@
-use crate::domain::models::PhotoMetadata;
+use crate::models::PhotoMetadata;
 use std::path::Path;
 
 pub trait ImageProcessor: Send + Sync {

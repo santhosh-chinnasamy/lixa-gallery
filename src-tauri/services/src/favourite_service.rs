@@ -1,7 +1,7 @@
-use crate::domain::events::EventHub;
-use crate::domain::fs::FileSystem;
-use crate::domain::models::Favourite;
-use crate::domain::repos::FavouriteRepository;
+use gallery_core::events::EventHub;
+use gallery_core::fs::FileSystem;
+use gallery_core::models::Favourite;
+use gallery_core::repos::FavouriteRepository;
 use std::{path::PathBuf, sync::Arc};
 
 pub struct FavouriteService {

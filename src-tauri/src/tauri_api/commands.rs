@@ -1,6 +1,6 @@
-use crate::app::models::{Favourite, PhotoMetadata};
 use crate::tauri_api::events::TauriEventHub;
 use crate::tauri_api::state::AppState;
+use services::models::{Favourite, PhotoMetadata};
 use tauri::{AppHandle, State};
 
 #[tauri::command]

@@ -1,12 +1,9 @@
 use tauri::Manager;
 
-pub mod app;
-pub mod domain;
-pub mod infra;
 pub mod tauri_api;
 
-use crate::infra::db;
 use crate::tauri_api::{commands, state::AppState};
+use infra::db;
 
 #[cfg_attr(mobile, tauri::mobile_entry_point)]
 pub fn run() {
@@ -45,12 +42,13 @@ pub fn run() {
                 let favourite_repo = std::sync::Arc::new(db::SqliteFavouriteRepository::new(pool));
                 let image_processor = std::sync::Arc::new(infra::image::ImageProcessor);
 
-                let gallery = app::gallery_service::GalleryService::new(
+                let gallery = services::gallery_service::GalleryService::new(
                     photo_repo,
                     image_processor,
                     fs.clone(),
                 );
-                let favourite = app::favourite_service::FavouriteService::new(favourite_repo, fs);
+                let favourite =
+                    services::favourite_service::FavouriteService::new(favourite_repo, fs);
 
                 app_handle.manage(AppState {
                     gallery,

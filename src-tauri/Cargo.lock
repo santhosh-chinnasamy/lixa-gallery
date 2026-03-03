@@ -1554,6 +1554,15 @@ dependencies = [
 ]
 
 [[package]]
+name = "gallery-core"
+version = "0.6.1"
+dependencies = [
+ "anyhow",
+ "futures",
+ "serde",
+]
+
+[[package]]
 name = "gdk"
 version = "0.18.2"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -2273,6 +2282,21 @@ dependencies = [
 ]
 
 [[package]]
+name = "infra"
+version = "0.6.1"
+dependencies = [
+ "anyhow",
+ "futures",
+ "gallery-core",
+ "glob",
+ "image",
+ "log",
+ "rayon",
+ "sqlx",
+ "webp",
+]
+
+[[package]]
 name = "interpolate_name"
 version = "0.2.4"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -2585,20 +2609,18 @@ version = "0.6.1"
 dependencies = [
  "anyhow",
  "futures",
- "glob",
- "image",
+ "gallery-core",
+ "infra",
  "log",
- "rayon",
  "serde",
  "serde_json",
- "sqlx",
+ "services",
  "tauri",
  "tauri-build",
  "tauri-plugin-dialog",
  "tauri-plugin-log",
  "tauri-plugin-opener",
  "tokio",
- "webp",
 ]
 
 [[package]]
@@ -4450,6 +4472,17 @@ dependencies = [
  "proc-macro2",
  "quote",
  "syn 2.0.106",
+]
+
+[[package]]
+name = "services"
+version = "0.6.1"
+dependencies = [
+ "anyhow",
+ "futures",
+ "gallery-core",
+ "log",
+ "rayon",
 ]
 
 [[package]]

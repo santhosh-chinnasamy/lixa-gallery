@@ -1,4 +1,4 @@
-use crate::app::{favourite_service::FavouriteService, gallery_service::GalleryService};
+use services::{favourite_service::FavouriteService, gallery_service::GalleryService};
 
 pub struct AppState {
     pub gallery: GalleryService,
