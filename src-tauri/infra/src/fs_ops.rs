@@ -82,3 +82,39 @@ pub fn get_file_metadata<P: AsRef<Path>>(path: P) -> std::io::Result<FileMetadat
 pub fn list_images_in_dir(dir: &Path) -> std::io::Result<Vec<PathBuf>> {
     LocalFileSystem.list_images_in_dir(dir)
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use std::fs::File;
+    use tempfile::tempdir;
+
+    #[test]
+    fn test_list_images_in_dir() {
+        let dir = tempdir().unwrap();
+        let file_path = dir.path().join("test.jpg");
+        File::create(&file_path).unwrap();
+
+        let other_path = dir.path().join("test.txt");
+        File::create(&other_path).unwrap();
+
+        let fs = LocalFileSystem;
+        let images = fs.list_images_in_dir(dir.path()).unwrap();
+
+        assert_eq!(images.len(), 1);
+        assert_eq!(images[0].file_name().unwrap(), "test.jpg");
+    }
+
+    #[test]
+    fn test_get_file_metadata() {
+        let dir = tempdir().unwrap();
+        let file_path = dir.path().join("meta.png");
+        File::create(&file_path).unwrap();
+
+        let fs = LocalFileSystem;
+        let metadata = fs.get_file_metadata(&file_path).unwrap();
+
+        assert_eq!(metadata.name, "meta.png");
+        assert!(metadata.size == 0);
+    }
+}
