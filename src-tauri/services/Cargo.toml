@@ -9,3 +9,8 @@ anyhow = { workspace = true }
 futures = { workspace = true }
 log = { workspace = true }
 rayon = "1.11.0"
+
+[dev-dependencies]
+tokio = { version = "1", features = ["full"] }
+serde_json = "1"
+
