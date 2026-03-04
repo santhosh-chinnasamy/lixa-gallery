@@ -45,10 +45,7 @@ pub async fn setup_db(app_data_dir: PathBuf, pkg_name: &str) -> SqlitePool {
         .await
         .expect("failed to connect sqlite");
 
-    sqlx::migrate!("./migrations")
-        .run(&pool)
-        .await
-        .expect("migrations");
+    sqlx::migrate!().run(&pool).await.expect("migrations");
     let _ = sqlx::query("PRAGMA optimize;").execute(&pool).await;
 
     pool
@@ -196,5 +193,60 @@ impl FavouriteRepository for SqliteFavouriteRepository {
                 .await?;
             Ok(())
         })
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use gallery_core::models::FileMetadata;
+    use tempfile::tempdir;
+
+    async fn setup_test_db() -> SqlitePool {
+        let pool = SqlitePool::connect("sqlite::memory:").await.unwrap();
+        sqlx::migrate!().run(&pool).await.expect("migrations");
+        pool
+    }
+
+    #[tokio::test]
+    async fn test_favourite_repo() {
+        let pool = setup_test_db().await;
+        let repo = SqliteFavouriteRepository::new(pool);
+
+        repo.add_favourite("test/path.jpg".to_string())
+            .await
+            .unwrap();
+        let favs = repo.get_favourites().await.unwrap();
+        assert_eq!(favs.len(), 1);
+        assert_eq!(favs[0].path, "test/path.jpg");
+
+        repo.remove_favourite("test/path.jpg".to_string())
+            .await
+            .unwrap();
+        let favs = repo.get_favourites().await.unwrap();
+        assert_eq!(favs.len(), 0);
+    }
+
+    #[tokio::test]
+    async fn test_photo_repo() {
+        let pool = setup_test_db().await;
+        let repo = SqlitePhotoRepository::new(pool);
+
+        let photos = vec![PhotoMetadata {
+            metadata: FileMetadata {
+                name: "img.jpg".to_string(),
+                modified: 100,
+                created: 100,
+                size: 500,
+            },
+            thumbnail_path: "thumb".to_string(),
+            path: "img.jpg".to_string(),
+        }];
+
+        repo.batch_insert_photos(&photos).await.unwrap();
+
+        let cached = repo.get_cached_photos_for_path("").await.unwrap();
+        assert_eq!(cached.len(), 1);
+        assert_eq!(cached[0].0, "img.jpg");
     }
 }

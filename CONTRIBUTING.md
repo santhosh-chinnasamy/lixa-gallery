@@ -32,6 +32,8 @@ yarn tauri dev
   - [Improving Documentation](#improving-documentation)
   - [Contributing Code](#contributing-code)
 - [Setting Up the Development Environment](#setting-up-the-development-environment)
+- [Testing](#testing)
+- [How to create Migrations](#how-to-create-migrations)
 - [Creating a Pull Request](#creating-a-pull-request)
 - [License](#license)
 
@@ -106,6 +108,33 @@ cd lixa-gallery
 - Open a pull request from your fork’s branch to the `main` branch of the Lixa Gallery repository.
 - Describe your changes clearly in the pull request and link any related issues.
 - The PR will be merged once you have the sign-off of at least one other developer/maintainer.
+
+## Testing
+
+We use a multi-layered testing strategy to ensure the architectural correctness and reliability of the application.
+
+### Running All Tests
+
+To run all Rust tests across the entire workspace:
+
+```bash
+cd src-tauri
+cargo test --workspace
+```
+
+### Running Crate-Specific Tests
+
+- **Domain Logic**: `cargo test -p gallery-core`
+- **Application Services**: `cargo test -p services`
+- **Infrastructure**: `cargo test -p infra`
+
+### Test Layers
+
+1. **`gallery-core` (Unit Tests)**: Pure tests for domain models and data structures.
+2. **`services` (Mocked Tests)**: Business logic tests using "fake" implementations of repositories and file systems to avoid side effects.
+3. **`infra` (Integration Tests)**: Real-world validation of SQLite repositories (using in-memory DB) and Local File System operations (using temporary directories).
+
+---
 
 ## How to create Migrations
 
