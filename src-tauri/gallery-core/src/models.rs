@@ -1,4 +1,21 @@
 use serde::{Deserialize, Serialize};
+use thiserror::Error;
+
+#[derive(Error, Debug)]
+pub enum GalleryError {
+    #[error("IO error: {0}")]
+    Io(#[from] std::io::Error),
+    #[error("Database error: {0}")]
+    Db(String),
+    #[error("Invalid path: {0}")]
+    InvalidPath(String),
+    #[error("Image processing error: {0}")]
+    Image(String),
+    #[error("Unknown error: {0}")]
+    Unknown(String),
+}
+
+pub type Result<T> = std::result::Result<T, GalleryError>;
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct FileMetadata {

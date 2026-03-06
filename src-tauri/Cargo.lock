@@ -1558,9 +1558,11 @@ name = "gallery-core"
 version = "0.6.1"
 dependencies = [
  "anyhow",
+ "async-trait",
  "futures",
  "serde",
  "serde_json",
+ "thiserror 2.0.16",
 ]
 
 [[package]]
@@ -2288,6 +2290,7 @@ name = "infra"
 version = "0.6.1"
 dependencies = [
  "anyhow",
+ "async-trait",
  "futures",
  "gallery-core",
  "glob",
@@ -4476,6 +4479,7 @@ name = "services"
 version = "0.6.1"
 dependencies = [
  "anyhow",
+ "async-trait",
  "futures",
  "gallery-core",
  "log",

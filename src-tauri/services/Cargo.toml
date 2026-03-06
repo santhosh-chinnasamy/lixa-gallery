@@ -9,6 +9,9 @@ anyhow = { workspace = true }
 futures = { workspace = true }
 log = { workspace = true }
 rayon = "1.11.0"
+async-trait = { workspace = true }
+tokio = { version = "1", features = ["rt"] }
+
 
 [dev-dependencies]
 tokio = { version = "1", features = ["full"] }
