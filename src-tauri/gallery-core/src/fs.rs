@@ -1,9 +1,11 @@
-use crate::models::FileMetadata;
+use crate::models::{FileMetadata, Result};
+use async_trait::async_trait;
 use std::path::{Path, PathBuf};
 
+#[async_trait]
 pub trait FileSystem: Send + Sync {
-    fn get_file_metadata(&self, path: &Path) -> std::io::Result<FileMetadata>;
-    fn list_images_in_dir(&self, dir: &Path) -> std::io::Result<Vec<PathBuf>>;
-    fn copy(&self, from: &Path, to: &Path) -> std::io::Result<u64>;
-    fn canonicalize(&self, path: &Path) -> std::io::Result<PathBuf>;
+    async fn get_file_metadata(&self, path: &Path) -> Result<FileMetadata>;
+    async fn list_images_in_dir(&self, dir: &Path) -> Result<Vec<PathBuf>>;
+    async fn copy(&self, from: &Path, to: &Path) -> Result<u64>;
+    async fn canonicalize(&self, path: &Path) -> Result<PathBuf>;
 }

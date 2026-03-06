@@ -1,6 +1,6 @@
 use gallery_core::events::EventHub;
 use gallery_core::fs::FileSystem;
-use gallery_core::models::Favourite;
+use gallery_core::models::{Favourite, GalleryError, Result};
 use gallery_core::repos::FavouriteRepository;
 use std::{path::PathBuf, sync::Arc};
 
@@ -14,55 +14,54 @@ impl FavouriteService {
         Self { favourite_repo, fs }
     }
 
-    pub async fn export_favourites(
-        &self,
-        events: &dyn EventHub,
-        destination: &str,
-    ) -> anyhow::Result<()> {
+    pub async fn export_favourites(&self, events: &dyn EventHub, destination: &str) -> Result<()> {
         let favourites = self.favourite_repo.get_favourites().await?;
-        let files = favourites.into_iter().map(|f| f.path).collect::<Vec<_>>();
 
         let mut counter = 0;
-        for file_path in files {
+        for fav in favourites {
+            let file_path = fav.path;
             let file = PathBuf::from(&file_path);
             let name = file
                 .file_name()
-                .ok_or_else(|| anyhow::anyhow!("Invalid path: {}", file_path))?;
+                .ok_or_else(|| GalleryError::InvalidPath(file_path.clone()))?;
 
             let destination_path = PathBuf::from(destination).join(name);
 
-            let canonical_src = self.fs.canonicalize(&file)?;
+            let canonical_src = self.fs.canonicalize(&file).await?;
             let canonical_dst = self
                 .fs
                 .canonicalize(&destination_path)
+                .await
                 .unwrap_or(destination_path.clone());
 
             if canonical_src == canonical_dst {
                 continue;
             }
 
-            self.fs.copy(&file, &destination_path)?;
+            self.fs.copy(&file, &destination_path).await?;
 
             counter += 1;
-            events.emit_progress("export-progress", counter)?;
+            events
+                .emit_progress("export-progress", counter)
+                .map_err(|e| GalleryError::Unknown(e.to_string()))?;
         }
 
         Ok(())
     }
 
-    pub async fn add_favourite(&self, path: String) -> anyhow::Result<()> {
+    pub async fn add_favourite(&self, path: String) -> Result<()> {
         self.favourite_repo.add_favourite(path).await
     }
 
-    pub async fn get_favourites(&self) -> anyhow::Result<Vec<Favourite>> {
+    pub async fn get_favourites(&self) -> Result<Vec<Favourite>> {
         self.favourite_repo.get_favourites().await
     }
 
-    pub async fn remove_favourite(&self, path: String) -> anyhow::Result<()> {
+    pub async fn remove_favourite(&self, path: String) -> Result<()> {
         self.favourite_repo.remove_favourite(path).await
     }
 
-    pub async fn clear_favourites(&self) -> anyhow::Result<()> {
+    pub async fn clear_favourites(&self) -> Result<()> {
         self.favourite_repo.clear_favourites().await
     }
 }
