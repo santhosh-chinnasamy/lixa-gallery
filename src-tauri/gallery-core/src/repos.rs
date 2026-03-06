@@ -1,20 +1,23 @@
-use crate::models::{Favourite, PhotoMetadata};
-use futures::future::BoxFuture;
+use crate::models::{Favourite, PhotoMetadata, Result};
+use async_trait::async_trait;
 
-pub trait PhotoRepository: Send + Sync {
-    fn get_cached_photos_for_path<'a>(
-        &'a self,
-        prefix: &'a str,
-    ) -> BoxFuture<'a, anyhow::Result<Vec<(String, String, i64, i64)>>>;
-    fn batch_insert_photos<'a>(
-        &'a self,
-        photos: &'a [PhotoMetadata],
-    ) -> BoxFuture<'a, anyhow::Result<()>>;
+pub struct CachedPhotoRecord {
+    pub path: String,
+    pub thumbnail_path: String,
+    pub mtime: i64,
+    pub size: i64,
 }
 
+#[async_trait]
+pub trait PhotoRepository: Send + Sync {
+    async fn get_cached_photos_for_path(&self, prefix: &str) -> Result<Vec<CachedPhotoRecord>>;
+    async fn batch_insert_photos(&self, photos: &[PhotoMetadata]) -> Result<()>;
+}
+
+#[async_trait]
 pub trait FavouriteRepository: Send + Sync {
-    fn add_favourite(&self, path: String) -> BoxFuture<'_, anyhow::Result<()>>;
-    fn get_favourites(&self) -> BoxFuture<'_, anyhow::Result<Vec<Favourite>>>;
-    fn remove_favourite(&self, path: String) -> BoxFuture<'_, anyhow::Result<()>>;
-    fn clear_favourites(&self) -> BoxFuture<'_, anyhow::Result<()>>;
+    async fn add_favourite(&self, path: String) -> Result<()>;
+    async fn get_favourites(&self) -> Result<Vec<Favourite>>;
+    async fn remove_favourite(&self, path: String) -> Result<()>;
+    async fn clear_favourites(&self) -> Result<()>;
 }

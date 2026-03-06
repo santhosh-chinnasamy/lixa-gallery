@@ -47,6 +47,9 @@ anyhow = "1.0.98"
 serde = { version = "1", features = ["derive"] }
 futures = "0.3.31"
 log = "0.4"
+thiserror = "2"
+async-trait = "0.1"
+
 
 [profile.dev]
 debug = 0

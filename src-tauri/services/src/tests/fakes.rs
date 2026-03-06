@@ -1,9 +1,9 @@
-use futures::future::BoxFuture;
+use async_trait::async_trait;
 use gallery_core::events::EventHub;
 use gallery_core::fs::FileSystem;
 use gallery_core::image::ImageProcessor;
-use gallery_core::models::{Favourite, FileMetadata, PhotoMetadata};
-use gallery_core::repos::{FavouriteRepository, PhotoRepository};
+use gallery_core::models::{Favourite, FileMetadata, GalleryError, PhotoMetadata, Result};
+use gallery_core::repos::{CachedPhotoRecord, FavouriteRepository, PhotoRepository};
 use std::path::{Path, PathBuf};
 use std::sync::Mutex;
 
@@ -11,17 +11,23 @@ pub struct FakeFileSystem {
     pub files: Mutex<Vec<(PathBuf, FileMetadata)>>,
 }
 
+#[async_trait]
 impl FileSystem for FakeFileSystem {
-    fn get_file_metadata(&self, path: &Path) -> std::io::Result<FileMetadata> {
+    async fn get_file_metadata(&self, path: &Path) -> Result<FileMetadata> {
         let files = self.files.lock().unwrap();
         files
             .iter()
             .find(|(p, _)| p == path)
             .map(|(_, m)| m.clone())
-            .ok_or_else(|| std::io::Error::new(std::io::ErrorKind::NotFound, "not found"))
+            .ok_or_else(|| {
+                GalleryError::Io(std::io::Error::new(
+                    std::io::ErrorKind::NotFound,
+                    "not found",
+                ))
+            })
     }
 
-    fn list_images_in_dir(&self, dir: &Path) -> std::io::Result<Vec<PathBuf>> {
+    async fn list_images_in_dir(&self, dir: &Path) -> Result<Vec<PathBuf>> {
         let files = self.files.lock().unwrap();
         Ok(files
             .iter()
@@ -30,17 +36,18 @@ impl FileSystem for FakeFileSystem {
             .collect())
     }
 
-    fn copy(&self, _from: &Path, _to: &Path) -> std::io::Result<u64> {
+    async fn copy(&self, _from: &Path, _to: &Path) -> Result<u64> {
         Ok(0)
     }
-    fn canonicalize(&self, path: &Path) -> std::io::Result<PathBuf> {
+    async fn canonicalize(&self, path: &Path) -> Result<PathBuf> {
         Ok(path.to_path_buf())
     }
 }
 
 pub struct FakeImageProcessor;
+#[async_trait]
 impl ImageProcessor for FakeImageProcessor {
-    fn convert_image(&self, path: &Path, _thumb_dir: &str) -> anyhow::Result<PhotoMetadata> {
+    async fn convert_image(&self, path: &Path, _thumb_dir: &str) -> Result<PhotoMetadata> {
         Ok(PhotoMetadata {
             metadata: FileMetadata {
                 name: path.file_name().unwrap().to_string_lossy().to_string(),
@@ -58,36 +65,25 @@ pub struct FakePhotoRepository {
     pub photos: Mutex<Vec<PhotoMetadata>>,
 }
 
+#[async_trait]
 impl PhotoRepository for FakePhotoRepository {
-    fn get_cached_photos_for_path<'a>(
-        &'a self,
-        _prefix: &'a str,
-    ) -> BoxFuture<'a, anyhow::Result<Vec<(String, String, i64, i64)>>> {
-        Box::pin(async move {
-            let photos = self.photos.lock().unwrap();
-            Ok(photos
-                .iter()
-                .map(|p| {
-                    (
-                        p.path.clone(),
-                        p.thumbnail_path.clone(),
-                        p.metadata.modified as i64,
-                        p.metadata.size as i64,
-                    )
-                })
-                .collect())
-        })
+    async fn get_cached_photos_for_path(&self, _prefix: &str) -> Result<Vec<CachedPhotoRecord>> {
+        let photos = self.photos.lock().unwrap();
+        Ok(photos
+            .iter()
+            .map(|p| CachedPhotoRecord {
+                path: p.path.clone(),
+                thumbnail_path: p.thumbnail_path.clone(),
+                mtime: p.metadata.modified as i64,
+                size: p.metadata.size as i64,
+            })
+            .collect())
     }
 
-    fn batch_insert_photos<'a>(
-        &'a self,
-        photos: &'a [PhotoMetadata],
-    ) -> BoxFuture<'a, anyhow::Result<()>> {
-        Box::pin(async move {
-            let mut existing = self.photos.lock().unwrap();
-            existing.extend(photos.to_vec());
-            Ok(())
-        })
+    async fn batch_insert_photos(&self, photos: &[PhotoMetadata]) -> Result<()> {
+        let mut existing = self.photos.lock().unwrap();
+        existing.extend(photos.to_vec());
+        Ok(())
     }
 }
 
@@ -102,26 +98,21 @@ pub struct FakeFavouriteRepository {
     pub favourites: Mutex<Vec<Favourite>>,
 }
 
+#[async_trait]
 impl FavouriteRepository for FakeFavouriteRepository {
-    fn add_favourite(&self, path: String) -> BoxFuture<'_, anyhow::Result<()>> {
-        Box::pin(async move {
-            self.favourites.lock().unwrap().push(Favourite { path });
-            Ok(())
-        })
+    async fn add_favourite(&self, path: String) -> Result<()> {
+        self.favourites.lock().unwrap().push(Favourite { path });
+        Ok(())
     }
-    fn get_favourites(&self) -> BoxFuture<'_, anyhow::Result<Vec<Favourite>>> {
-        Box::pin(async move { Ok(self.favourites.lock().unwrap().clone()) })
+    async fn get_favourites(&self) -> Result<Vec<Favourite>> {
+        Ok(self.favourites.lock().unwrap().clone())
     }
-    fn remove_favourite(&self, path: String) -> BoxFuture<'_, anyhow::Result<()>> {
-        Box::pin(async move {
-            self.favourites.lock().unwrap().retain(|f| f.path != path);
-            Ok(())
-        })
+    async fn remove_favourite(&self, path: String) -> Result<()> {
+        self.favourites.lock().unwrap().retain(|f| f.path != path);
+        Ok(())
     }
-    fn clear_favourites(&self) -> BoxFuture<'_, anyhow::Result<()>> {
-        Box::pin(async move {
-            self.favourites.lock().unwrap().clear();
-            Ok(())
-        })
+    async fn clear_favourites(&self) -> Result<()> {
+        self.favourites.lock().unwrap().clear();
+        Ok(())
     }
 }

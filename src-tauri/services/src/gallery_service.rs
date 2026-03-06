@@ -1,8 +1,7 @@
 use gallery_core::fs::FileSystem;
 use gallery_core::image::ImageProcessor;
-use gallery_core::models::PhotoMetadata;
+use gallery_core::models::{PhotoMetadata, Result};
 use gallery_core::repos::PhotoRepository;
-use rayon::prelude::*;
 use std::{
     collections::HashMap,
     path::{Path, PathBuf},
@@ -32,9 +31,9 @@ impl GalleryService {
         &self,
         folder: &str,
         thumbnail_path: &str,
-    ) -> anyhow::Result<Vec<PhotoMetadata>> {
+    ) -> Result<Vec<PhotoMetadata>> {
         let folder_path = PathBuf::from(folder);
-        let image_files = self.fs.list_images_in_dir(&folder_path)?;
+        let image_files = self.fs.list_images_in_dir(&folder_path).await?;
 
         let mut prefix = folder.to_string();
         if !prefix.ends_with(std::path::MAIN_SEPARATOR) {
@@ -44,7 +43,12 @@ impl GalleryService {
         let cached_rows = self.photo_repo.get_cached_photos_for_path(&prefix).await?;
         let db_lookup: HashMap<String, (String, i64, i64)> = cached_rows
             .into_iter()
-            .map(|(path, thumb, mtime, size)| (path, (thumb, mtime, size)))
+            .map(|record| {
+                (
+                    record.path,
+                    (record.thumbnail_path, record.mtime, record.size),
+                )
+            })
             .collect();
 
         let mut needs_processing = Vec::new();
@@ -52,7 +56,7 @@ impl GalleryService {
 
         for file_path in image_files {
             let path_str = file_path.to_string_lossy().to_string();
-            if let Ok(current_metadata) = self.fs.get_file_metadata(&file_path) {
+            if let Ok(current_metadata) = self.fs.get_file_metadata(&file_path).await {
                 if let Some((thumbnail_path, db_mtime, db_size)) = db_lookup.get(&path_str) {
                     if current_metadata.modified as i64 == *db_mtime
                         && current_metadata.size as i64 == *db_size
@@ -60,7 +64,7 @@ impl GalleryService {
                     {
                         all_photos.push(PhotoMetadata {
                             metadata: current_metadata,
-                            thumbnail_path: thumbnail_path.clone(),
+                            thumbnail_path: thumbnail_path.to_string(),
                             path: path_str,
                         });
                         continue;
@@ -71,14 +75,19 @@ impl GalleryService {
         }
 
         if !needs_processing.is_empty() {
-            let processed_photos: Vec<PhotoMetadata> = needs_processing
-                .par_iter()
-                .filter_map(|file_path| {
-                    self.image_processor
-                        .convert_image(file_path, thumbnail_path)
-                        .ok()
-                })
-                .collect();
+            let processor = self.image_processor.clone();
+            let thumb_path = thumbnail_path.to_string();
+
+            // Collect processed photos. Since convert_image is async, we handle it sequentially or with join_all.
+            // But Rayon was used before, implying parallel processing is desired.
+            // Since convert_image now internalizes spawn_blocking, we can use join_all or a stream.
+
+            let mut processed_photos = Vec::new();
+            for file_path in needs_processing {
+                if let Ok(photo) = processor.convert_image(&file_path, &thumb_path).await {
+                    processed_photos.push(photo);
+                }
+            }
 
             if !processed_photos.is_empty() {
                 self.photo_repo
