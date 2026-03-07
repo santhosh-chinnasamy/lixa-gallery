@@ -1,14 +1,64 @@
 <script lang="ts">
   import ImageCard from './ImageCard.svelte';
   import ImageModal from './ImageModal.svelte';
+  import ControlBar from './ControlBar.svelte';
   import type { PhotoMetadata } from '../types/photo';
   import { onMount } from 'svelte';
+  import {
+    searchQuery,
+    showImagesOnly,
+    sortBy,
+    sortOrder,
+    gridSize,
+  } from '../stores/galleryStore';
 
-  let { photos = [] }: { photos: PhotoMetadata[] } = $props();
+  let {
+    photos = [],
+    onLoadPhotos,
+  }: { photos: PhotoMetadata[]; onLoadPhotos?: () => void } = $props();
 
   let selectedImage = $state<PhotoMetadata | null>(null);
   let galleryContainer = $state<HTMLElement | null>(null);
   let visibleImages = $state(new Set<number>());
+
+  let processedPhotos = $derived.by(() => {
+    let result = [...photos];
+
+    if ($showImagesOnly) {
+      result = result.filter(
+        (p) =>
+          !p.metadata.name.toLowerCase().endsWith('.xmp') &&
+          !p.metadata.name.toLowerCase().endsWith('.txt') &&
+          !p.metadata.name.toLowerCase().endsWith('.json') &&
+          !p.metadata.name.toLowerCase().endsWith('.dng'),
+      ); // Just rudimentary extension checks for "images only"
+    }
+
+    if ($searchQuery.trim()) {
+      const q = $searchQuery.toLowerCase();
+      result = result.filter((p) => p.metadata.name.toLowerCase().includes(q));
+    }
+
+    result.sort((a, b) => {
+      let comparison = 0;
+      switch ($sortBy) {
+        case 'name':
+          comparison = a.metadata.name.localeCompare(b.metadata.name);
+          break;
+        case 'date':
+          comparison =
+            (a.metadata.created || a.metadata.modified) -
+            (b.metadata.created || b.metadata.modified);
+          break;
+        case 'size':
+          comparison = a.metadata.size - b.metadata.size;
+          break;
+      }
+      return $sortOrder === 'asc' ? comparison : -comparison;
+    });
+
+    return result;
+  });
 
   const handleImageClick = (photo: PhotoMetadata) => {
     selectedImage = photo;
@@ -64,43 +114,57 @@
   });
 </script>
 
-<main
-  class="custom-scrollbar flex-1 overflow-auto scroll-smooth"
-  bind:this={galleryContainer}
+<div
+  class="relative flex h-full flex-col"
+  style="--grid-item-size: {$gridSize}px"
 >
-  <div class="h-full p-2 sm:p-3 md:p-4 lg:p-6 xl:p-8">
-    {#if photos.length === 0}
-      <div class="flex h-full min-h-[400px] items-center justify-center">
-        <div
-          class="animate-in fade-in slide-in-from-bottom-4 text-center text-muted-foreground duration-700"
-        >
-          <div class="mb-2 text-lg font-medium">No photos in this folder</div>
-          <p class="text-sm">
-            This directory doesn't appear to contain any supported image files.
-          </p>
-        </div>
-      </div>
-    {:else}
-      <div
-        class="grid w-full auto-rows-fr grid-cols-2 justify-items-center gap-2 xs:grid-cols-3 xs:gap-3 sm:grid-cols-4 sm:gap-4 md:grid-cols-5 md:gap-4 lg:grid-cols-6 lg:gap-5 xl:grid-cols-7 xl:gap-6 2xl:grid-cols-8 2xl:gap-6"
-      >
-        {#each photos as photo, index (photo.path)}
+  <ControlBar {onLoadPhotos} />
+  <main
+    class="custom-scrollbar flex-1 overflow-auto scroll-smooth"
+    bind:this={galleryContainer}
+  >
+    <div class="h-full p-2 sm:p-3 md:p-4 lg:p-6 xl:p-8">
+      {#if processedPhotos.length === 0}
+        <div class="flex h-full min-h-[400px] items-center justify-center">
           <div
-            data-index={index}
-            class="w-full max-w-[180px] xs:max-w-[160px] sm:max-w-[170px] md:max-w-[180px] lg:max-w-[190px] xl:max-w-[200px] 2xl:max-w-[220px]"
+            class="animate-in fade-in slide-in-from-bottom-4 text-center text-muted-foreground duration-700"
           >
-            <ImageCard
-              {photo}
-              tabindex={index + 1}
-              {handleImageClick}
-              isVisible={visibleImages.has(index) || index < 12}
-            />
+            <div class="mb-2 text-lg font-medium">No results found</div>
+            <p class="text-sm">
+              {#if photos.length === 0}
+                This directory doesn't appear to contain any supported files.
+              {:else}
+                No files match your current search and filter criteria.
+              {/if}
+            </p>
           </div>
-        {/each}
-      </div>
-    {/if}
-  </div>
-</main>
+        </div>
+      {:else}
+        <div
+          class="grid w-full auto-rows-fr justify-items-center gap-3 sm:gap-4 md:gap-5"
+          style="grid-template-columns: repeat(auto-fill, minmax(var(--grid-item-size), 1fr));"
+        >
+          {#each processedPhotos as photo, index (photo.path)}
+            <div
+              data-index={index}
+              class="flex w-full justify-center"
+              style="max-width: calc(var(--grid-item-size) * 1.5);"
+            >
+              <div class="w-full max-w-full">
+                <ImageCard
+                  {photo}
+                  tabindex={index + 1}
+                  {handleImageClick}
+                  isVisible={visibleImages.has(index) || index < 12}
+                />
+              </div>
+            </div>
+          {/each}
+        </div>
+      {/if}
+    </div>
+  </main>
+</div>
 
 <ImageModal {selectedImage} onClose={handleCloseModal} />
 
