@@ -1,5 +1,6 @@
 <script lang="ts">
   import { Button } from '$lib/components/ui/button';
+  import LandingPage from '../components/LandingPage.svelte';
   import Gallery from '../components/Gallery.svelte';
   import { loadPhotosWithModal } from '../components/common/ImageOperations';
   import KeyboardShortcuts from '../components/common/KeyboardShortcuts.svelte';
@@ -26,12 +27,12 @@
 
 <KeyboardShortcuts actions={keyboardActions} />
 
-{#if $isLoading}
-  <p class="text-center">Loading...</p>
-{:else if $photos.length === 0}
-  <div class="flex items-center justify-center">
-    <Button onclick={handleLoadPhotos}>Open Folder</Button>
+{#if $isLoading && $photos.length === 0}
+  <div class="flex h-full items-center justify-center">
+    <p class="animate-pulse text-muted-foreground">Initializing workspace...</p>
   </div>
+{:else if $photos.length === 0}
+  <LandingPage />
 {:else}
   <!-- Action buttons container -->
   <div class="sticky top-4 z-10 mb-4 flex justify-center px-4">
