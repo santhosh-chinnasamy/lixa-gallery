@@ -4,6 +4,40 @@ import type { PhotoMetadata } from '../types/photo';
 
 export const photos = writable<PhotoMetadata[]>([]);
 export const isLoading = writable(false);
+export const currentFolder = writable<string | null>(null);
+
+function createRecentFoldersStore() {
+  const STORAGE_KEY = 'recent_folders';
+  const initialValue = JSON.parse(
+    typeof localStorage !== 'undefined'
+      ? localStorage.getItem(STORAGE_KEY) || '[]'
+      : '[]'
+  );
+  const { subscribe, set, update } = writable<string[]>(initialValue);
+
+  return {
+    subscribe,
+    add: (path: string) =>
+      update((folders) => {
+        const newFolders = [path, ...folders.filter((f) => f !== path)].slice(
+          0,
+          5
+        );
+        if (typeof localStorage !== 'undefined') {
+          localStorage.setItem(STORAGE_KEY, JSON.stringify(newFolders));
+        }
+        return newFolders;
+      }),
+    clear: () => {
+      if (typeof localStorage !== 'undefined') {
+        localStorage.removeItem(STORAGE_KEY);
+      }
+      set([]);
+    },
+  };
+}
+
+export const recentFolders = createRecentFoldersStore();
 
 type FavoriteStore = Set<string>;
 
