@@ -1,0 +1,130 @@
+<script lang="ts">
+  import { folderTree, currentFolder } from '../stores/galleryStore';
+  import { loadSubfolder } from './common/ImageOperations';
+  import ChevronRight from '@lucide/svelte/icons/chevron-right';
+  import Folder from '@lucide/svelte/icons/folder';
+  import FolderOpen from '@lucide/svelte/icons/folder-open';
+  import { cn } from '$lib/utils';
+  import type { FolderNode } from '../stores/galleryStore';
+
+  let expandedPaths = $state(new Set<string>());
+
+  function toggleExpand(path: string, event: MouseEvent) {
+    event.stopPropagation();
+    const newExpanded = new Set(expandedPaths);
+    if (newExpanded.has(path)) {
+      newExpanded.delete(path);
+    } else {
+      newExpanded.add(path);
+    }
+    expandedPaths = newExpanded;
+  }
+
+  function handleFolderClick(path: string) {
+    loadSubfolder(path);
+  }
+</script>
+
+{#snippet FolderItem(node: FolderNode, depth: number)}
+  {@const isExpanded = expandedPaths.has(node.path)}
+  {@const isActive = $currentFolder === node.path}
+  {@const hasChildren = node.children && node.children.length > 0}
+
+  <div class="flex flex-col">
+    <div
+      class={cn(
+        'group flex w-full items-center gap-1 rounded-md px-1 py-0.5 transition-colors',
+        isActive
+          ? 'bg-primary/10 font-medium text-primary'
+          : 'text-muted-foreground hover:bg-accent',
+      )}
+      style={`padding-left: ${depth * 12 + 4}px`}
+    >
+      {#if hasChildren}
+        <button
+          onclick={(e) => toggleExpand(node.path, e)}
+          class="shrink-0 rounded p-0.5 opacity-70 transition-opacity hover:bg-black/5 group-hover:opacity-100 dark:hover:bg-white/5"
+          aria-label={isExpanded ? 'Collapse' : 'Expand'}
+        >
+          <ChevronRight
+            size={14}
+            class={cn(
+              'transition-transform duration-200',
+              isExpanded && 'rotate-90',
+            )}
+          />
+        </button>
+      {:else}
+        <div class="w-[22px] shrink-0"></div>
+      {/if}
+
+      <button
+        onclick={() => handleFolderClick(node.path)}
+        class="flex min-w-0 flex-grow items-center gap-2 py-1 text-left text-sm"
+      >
+        {#if isActive || isExpanded}
+          <FolderOpen
+            size={16}
+            class={cn(
+              'shrink-0',
+              isActive ? 'text-primary' : 'text-muted-foreground/70',
+            )}
+          />
+        {:else}
+          <Folder size={16} class="shrink-0 text-muted-foreground/70" />
+        {/if}
+        <span class="truncate">{node.name}</span>
+      </button>
+    </div>
+
+    {#if isExpanded && hasChildren}
+      <div class="flex flex-col">
+        {#each node.children as child (child.path)}
+          {@render FolderItem(child, depth + 1)}
+        {/each}
+      </div>
+    {/if}
+  </div>
+{/snippet}
+
+<div
+  class="custom-scrollbar flex h-full w-full select-none flex-col overflow-y-auto border-r bg-sidebar"
+>
+  <div
+    class="sticky top-0 z-10 flex items-center justify-between border-b bg-sidebar/50 px-4 py-3 backdrop-blur-sm"
+  >
+    <h3
+      class="text-xs font-semibold uppercase tracking-wider text-muted-foreground/70"
+    >
+      Explorer
+    </h3>
+  </div>
+
+  <div class="px-1 py-2">
+    {#if $folderTree}
+      {@render FolderItem($folderTree, 0)}
+    {:else}
+      <div class="px-4 py-8 text-center">
+        <p class="text-xs italic text-muted-foreground">
+          No folder tree loaded
+        </p>
+      </div>
+    {/if}
+  </div>
+</div>
+
+<style>
+  .custom-scrollbar::-webkit-scrollbar {
+    width: 4px;
+  }
+  .custom-scrollbar::-webkit-scrollbar-track {
+    background: transparent;
+  }
+  .custom-scrollbar::-webkit-scrollbar-thumb {
+    background: rgba(0, 0, 0, 0.1);
+    border-radius: 10px;
+  }
+  :global(.dark) .custom-scrollbar::-webkit-scrollbar-thumb {
+    background: rgba(255, 255, 255, 0.1);
+  }
+</style>
