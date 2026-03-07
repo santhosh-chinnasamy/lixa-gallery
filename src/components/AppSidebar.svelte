@@ -16,6 +16,7 @@
   } from '../stores/galleryStore';
   import { loadPath } from './common/ImageOperations';
   import { goto } from '$app/navigation';
+  import FolderExplorer from './FolderExplorer.svelte';
 
   let isRecentOpen = $state(true);
 
@@ -192,6 +193,18 @@
         </Sidebar.Menu>
       </Sidebar.GroupContent>
     </Sidebar.Group>
+
+    {#if $currentFolder}
+      <Sidebar.Group class="mt-4 flex flex-grow flex-col overflow-hidden">
+        <Sidebar.GroupLabel
+          class="px-4 text-xs font-semibold uppercase tracking-wider text-muted-foreground/70"
+          >Workspace</Sidebar.GroupLabel
+        >
+        <Sidebar.GroupContent class="flex-grow overflow-y-auto">
+          <FolderExplorer inSidebar={true} />
+        </Sidebar.GroupContent>
+      </Sidebar.Group>
+    {/if}
   </Sidebar.Content>
 
   <Sidebar.Footer class="border-t p-4">
