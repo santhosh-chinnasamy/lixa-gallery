@@ -1,6 +1,7 @@
 <script lang="ts">
   import { Button } from '$lib/components/ui/button';
   import TrashIcon from '@lucide/svelte/icons/trash-2';
+  import HeartIcon from '@lucide/svelte/icons/heart';
   import { listen } from '@tauri-apps/api/event';
   import Gallery from '../../components/Gallery.svelte';
   import { exportFavorites } from '../../components/common/ImageOperations';
@@ -51,9 +52,22 @@
 <KeyboardShortcuts actions={keyboardActions} />
 
 {#if $favorites.size === 0}
-  <div class="flex flex-col items-center justify-end">
-    <p class="mb-4 text-lg">No favorites</p>
-    <Button href="/">Home</Button>
+  <div
+    class="flex h-[80vh] flex-col items-center justify-center p-4 text-center"
+  >
+    <div
+      class="mb-6 flex h-20 w-20 items-center justify-center rounded-2xl bg-primary/10 text-primary"
+    >
+      <HeartIcon size={40} strokeWidth={1.5} />
+    </div>
+    <h2 class="text-2xl font-bold tracking-tight text-foreground">
+      No Favourites Yet
+    </h2>
+    <p class="mt-2 max-w-xs leading-relaxed text-muted-foreground">
+      Browse your library and mark your best shots with a heart to see them
+      here.
+    </p>
+    <Button href="/" variant="outline" class="mt-8">Back to Library</Button>
   </div>
 {:else}
   <!-- Action buttons container -->
