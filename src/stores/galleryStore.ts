@@ -13,6 +13,27 @@ export const isLoading = writable(false);
 export const currentFolder = writable<string | null>(null);
 export const folderTree = writable<FolderNode | null>(null);
 
+function createExpandedFoldersStore() {
+  const { subscribe, update, set } = writable<Set<string>>(new Set());
+  return {
+    subscribe,
+    toggle: (path: string) => update(s => {
+      const newSet = new Set(s);
+      if (newSet.has(path)) newSet.delete(path);
+      else newSet.add(path);
+      return newSet;
+    }),
+    expand: (path: string) => update(s => {
+      const newSet = new Set(s);
+      newSet.add(path);
+      return newSet;
+    }),
+    clear: () => set(new Set())
+  };
+}
+
+export const expandedFolders = createExpandedFoldersStore();
+
 function createExplorerWidthStore() {
   const STORAGE_KEY = 'explorer_width';
   const initialValue = Number(
@@ -122,6 +143,7 @@ export function clearPhotos() {
   photos.set([]);
   currentFolder.set(null);
   folderTree.set(null);
+  expandedFolders.clear();
 }
 
 export async function loadFolderTree(path: string) {

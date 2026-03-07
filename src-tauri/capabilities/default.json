@@ -10,6 +10,7 @@
     "core:window:allow-set-fullscreen",
     "opener:default",
     "dialog:default",
-    "log:default"
+    "log:default",
+    "core:path:default"
   ]
 }

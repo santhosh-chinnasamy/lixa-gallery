@@ -1,5 +1,9 @@
 <script lang="ts">
-  import { folderTree, currentFolder } from '../stores/galleryStore';
+  import {
+    folderTree,
+    currentFolder,
+    expandedFolders,
+  } from '../stores/galleryStore';
   import { loadSubfolder } from './common/ImageOperations';
   import ChevronRight from '@lucide/svelte/icons/chevron-right';
   import Folder from '@lucide/svelte/icons/folder';
@@ -7,17 +11,9 @@
   import { cn } from '$lib/utils';
   import type { FolderNode } from '../stores/galleryStore';
 
-  let expandedPaths = $state(new Set<string>());
-
   function toggleExpand(path: string, event: MouseEvent) {
     event.stopPropagation();
-    const newExpanded = new Set(expandedPaths);
-    if (newExpanded.has(path)) {
-      newExpanded.delete(path);
-    } else {
-      newExpanded.add(path);
-    }
-    expandedPaths = newExpanded;
+    expandedFolders.toggle(path);
   }
 
   function handleFolderClick(path: string) {
@@ -26,7 +22,7 @@
 </script>
 
 {#snippet FolderItem(node: FolderNode, depth: number)}
-  {@const isExpanded = expandedPaths.has(node.path)}
+  {@const isExpanded = $expandedFolders.has(node.path)}
   {@const isActive = $currentFolder === node.path}
   {@const hasChildren = node.children && node.children.length > 0}
 
@@ -78,7 +74,7 @@
     </div>
 
     {#if isExpanded && hasChildren}
-      <div class="flex flex-col">
+      <div class="ml-[10px] flex flex-col border-l border-border/40">
         {#each node.children as child (child.path)}
           {@render FolderItem(child, depth + 1)}
         {/each}
@@ -88,7 +84,7 @@
 {/snippet}
 
 <div
-  class="custom-scrollbar flex h-full w-full select-none flex-col overflow-y-auto border-r bg-sidebar"
+  class="custom-scrollbar flex h-full w-full select-none flex-col overflow-y-auto border-r bg-sidebar pb-20"
 >
   <div
     class="sticky top-0 z-10 flex items-center justify-between border-b bg-sidebar/50 px-4 py-3 backdrop-blur-sm"
