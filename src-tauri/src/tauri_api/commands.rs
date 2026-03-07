@@ -64,3 +64,15 @@ pub async fn clear_favourites(state: State<'_, AppState>) -> Result<(), String> 
         .await
         .map_err(|e| e.to_string())
 }
+
+#[tauri::command]
+pub async fn get_folder_tree(
+    state: State<'_, AppState>,
+    path: &str,
+) -> Result<gallery_core::models::FolderNode, String> {
+    state
+        .gallery
+        .get_folder_tree(path)
+        .await
+        .map_err(|e| e.to_string())
+}

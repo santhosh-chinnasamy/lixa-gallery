@@ -17,7 +17,8 @@ pub fn run() {
             commands::add_favourite,
             commands::remove_favourite,
             commands::get_favourites,
-            commands::clear_favourites
+            commands::clear_favourites,
+            commands::get_folder_tree
         ])
         .setup(|app| {
             let app_handle = app.handle().clone();

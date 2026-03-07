@@ -1,6 +1,7 @@
+use async_recursion::async_recursion;
 use gallery_core::fs::FileSystem;
 use gallery_core::image::ImageProcessor;
-use gallery_core::models::{PhotoMetadata, Result};
+use gallery_core::models::{FolderNode, PhotoMetadata, Result};
 use gallery_core::repos::PhotoRepository;
 use std::{
     collections::HashMap,
@@ -78,10 +79,6 @@ impl GalleryService {
             let processor = self.image_processor.clone();
             let thumb_path = thumbnail_path.to_string();
 
-            // Collect processed photos. Since convert_image is async, we handle it sequentially or with join_all.
-            // But Rayon was used before, implying parallel processing is desired.
-            // Since convert_image now internalizes spawn_blocking, we can use join_all or a stream.
-
             let mut processed_photos = Vec::new();
             for file_path in needs_processing {
                 if let Ok(photo) = processor.convert_image(&file_path, &thumb_path).await {
@@ -98,5 +95,29 @@ impl GalleryService {
         }
 
         Ok(all_photos)
+    }
+
+    #[async_recursion]
+    pub async fn get_folder_tree(&self, root: &str) -> Result<FolderNode> {
+        let root_path = Path::new(root);
+        let name = root_path
+            .file_name()
+            .and_then(|s| s.to_str())
+            .unwrap_or(root)
+            .to_string();
+
+        let mut children = Vec::new();
+        let subfolders = self.fs.list_subfolders(root_path).await?;
+        for folder in subfolders {
+            let path_str = folder.to_string_lossy().to_string();
+            let child = self.get_folder_tree(&path_str).await?;
+            children.push(child);
+        }
+
+        Ok(FolderNode {
+            name,
+            path: root.to_string(),
+            children,
+        })
     }
 }

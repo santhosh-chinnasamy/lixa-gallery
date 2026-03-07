@@ -33,6 +33,13 @@ pub struct PhotoMetadata {
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct FolderNode {
+    pub name: String,
+    pub path: String,
+    pub children: Vec<FolderNode>,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct Favourite {
     pub path: String,
 }
