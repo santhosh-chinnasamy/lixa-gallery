@@ -89,5 +89,10 @@ function createFavoritesStore() {
 
 export const favorites = createFavoritesStore();
 
+export function clearPhotos() {
+  photos.set([]);
+  currentFolder.set(null);
+}
+
 // Initialize favorites when the store is created
 favorites.initialize();
