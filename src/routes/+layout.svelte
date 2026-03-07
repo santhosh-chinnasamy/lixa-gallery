@@ -28,12 +28,13 @@
 </script>
 
 <svelte:window onkeydown={handleKeydown} />
-<Sidebar.Provider open={false}>
-  <AppSidebar />
-  <Sidebar.Trigger />
-  <main class={`m-auto flex min-h-screen max-w-[100vw] justify-center`}>
-    <div class="flex flex-1 flex-col p-4">
-      <slot />
-    </div>
-  </main>
+<Sidebar.Provider open={true}>
+  <div class="flex min-h-screen w-full bg-background font-sans antialiased text-foreground">
+    <AppSidebar />
+    <main class="flex-1 flex flex-col min-w-0 overflow-hidden">
+      <div class="flex-1 overflow-y-auto p-6 lg:p-10">
+        <slot />
+      </div>
+    </main>
+  </div>
 </Sidebar.Provider>
