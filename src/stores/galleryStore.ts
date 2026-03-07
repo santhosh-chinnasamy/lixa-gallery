@@ -13,6 +13,37 @@ export const isLoading = writable(false);
 export const currentFolder = writable<string | null>(null);
 export const folderTree = writable<FolderNode | null>(null);
 
+export type SortOption = 'name' | 'date' | 'size';
+export type SortOrder = 'asc' | 'desc';
+
+export const searchQuery = writable<string>('');
+export const showImagesOnly = writable<boolean>(false);
+export const sortBy = writable<SortOption>('name');
+export const sortOrder = writable<SortOrder>('asc');
+
+function createGridSizeStore() {
+  const STORAGE_KEY = 'grid_size';
+  const initialValue = Number(
+    typeof localStorage !== 'undefined'
+      ? localStorage.getItem(STORAGE_KEY) || '180'
+      : '180'
+  );
+  const { subscribe, set } = writable<number>(initialValue);
+
+  return {
+    subscribe,
+    set: (size: number) => {
+      const clampedSize = Math.max(100, Math.min(400, size));
+      if (typeof localStorage !== 'undefined') {
+        localStorage.setItem(STORAGE_KEY, clampedSize.toString());
+      }
+      set(clampedSize);
+    },
+  };
+}
+
+export const gridSize = createGridSizeStore();
+
 function createExpandedFoldersStore() {
   const { subscribe, update, set } = writable<Set<string>>(new Set());
   return {

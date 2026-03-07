@@ -11,6 +11,8 @@
   import { cn } from '$lib/utils';
   import type { FolderNode } from '../stores/galleryStore';
 
+  const { inSidebar = false }: { inSidebar?: boolean } = $props();
+
   function toggleExpand(path: string, event: MouseEvent) {
     event.stopPropagation();
     expandedFolders.toggle(path);
@@ -83,27 +85,13 @@
   </div>
 {/snippet}
 
-<div
-  class="custom-scrollbar flex h-full w-full select-none flex-col overflow-y-auto border-r bg-sidebar pb-20"
->
-  <div
-    class="sticky top-0 z-10 flex items-center justify-between border-b bg-sidebar/50 px-4 py-3 backdrop-blur-sm"
-  >
-    <h3
-      class="text-xs font-semibold uppercase tracking-wider text-muted-foreground/70"
-    >
-      Explorer
-    </h3>
-  </div>
-
+<div class="custom-scrollbar flex w-full select-none flex-col pb-20">
   <div class="px-1 py-2">
     {#if $folderTree}
       {@render FolderItem($folderTree, 0)}
     {:else}
-      <div class="px-4 py-8 text-center">
-        <p class="text-xs italic text-muted-foreground">
-          No folder tree loaded
-        </p>
+      <div class="px-4 py-4 text-center">
+        <p class="text-xs italic text-muted-foreground">No folder loaded</p>
       </div>
     {/if}
   </div>
