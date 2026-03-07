@@ -1,7 +1,23 @@
 import { invoke } from '@tauri-apps/api/core';
 import { open } from '@tauri-apps/plugin-dialog';
-import { photos, isLoading, favorites } from '../../stores/galleryStore';
+import { photos, isLoading, favorites, currentFolder, recentFolders } from '../../stores/galleryStore';
 import type { PhotoMetadata } from '../../types/photo';
+
+export async function loadPath(folderPath: string) {
+  try {
+    isLoading.set(true);
+    const loadedPhotos: PhotoMetadata[] = await invoke('scan_folder', {
+      path: folderPath,
+    });
+    photos.set(loadedPhotos);
+    currentFolder.set(folderPath);
+    recentFolders.add(folderPath);
+  } catch (error) {
+    console.error('Failed to load photos from path:', error);
+  } finally {
+    isLoading.set(false);
+  }
+}
 
 export async function loadPhotos() {
   try {
@@ -13,17 +29,12 @@ export async function loadPhotos() {
 
     if (!folder) {
       isLoading.set(false);
-      photos.set([]);
       return;
     }
 
-    const loadedPhotos: PhotoMetadata[] = await invoke('scan_folder', {
-      path: folder,
-    });
-    photos.set(loadedPhotos);
+    await loadPath(folder);
   } catch (error) {
     console.error('Failed to load photos:', error);
-  } finally {
     isLoading.set(false);
   }
 }
@@ -32,7 +43,7 @@ export async function loadPhotosWithModal(onModalOpen: () => void, onModalClose:
   try {
     onModalOpen();
     isLoading.set(true);
-    
+
     const folder = await open({
       multiple: false,
       directory: true,
@@ -40,20 +51,15 @@ export async function loadPhotosWithModal(onModalOpen: () => void, onModalClose:
 
     if (!folder) {
       isLoading.set(false);
-      photos.set([]);
       onModalClose();
       return;
     }
 
-    const loadedPhotos: PhotoMetadata[] = await invoke('scan_folder', {
-      path: folder,
-    });
-    photos.set(loadedPhotos);
+    await loadPath(folder);
     onModalClose();
   } catch (error) {
     console.error('Failed to load photos:', error);
     onModalClose();
-  } finally {
     isLoading.set(false);
   }
 }
