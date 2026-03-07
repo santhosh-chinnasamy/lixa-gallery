@@ -32,6 +32,17 @@ impl FileSystem for FakeFileSystem {
         Ok(files
             .iter()
             .filter(|(p, _)| p.parent().map(|parent| parent == dir).unwrap_or(false))
+            .filter(|(p, _)| p.is_file()) // Simplified for fake
+            .map(|(p, _)| p.clone())
+            .collect())
+    }
+
+    async fn list_subfolders(&self, dir: &Path) -> Result<Vec<PathBuf>> {
+        let files = self.files.lock().unwrap();
+        Ok(files
+            .iter()
+            .filter(|(p, _)| p.parent().map(|parent| parent == dir).unwrap_or(false))
+            .filter(|(p, _)| p.is_dir()) // Simplified for fake
             .map(|(p, _)| p.clone())
             .collect())
     }

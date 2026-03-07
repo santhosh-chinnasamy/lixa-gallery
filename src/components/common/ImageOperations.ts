@@ -1,9 +1,9 @@
 import { invoke } from '@tauri-apps/api/core';
 import { open } from '@tauri-apps/plugin-dialog';
-import { photos, isLoading, favorites, currentFolder, recentFolders } from '../../stores/galleryStore';
+import { photos, isLoading, favorites, currentFolder, recentFolders, loadFolderTree } from '../../stores/galleryStore';
 import type { PhotoMetadata } from '../../types/photo';
 
-export async function loadPath(folderPath: string) {
+export async function loadPath(folderPath: string, isRoot = true) {
   try {
     isLoading.set(true);
     const loadedPhotos: PhotoMetadata[] = await invoke('scan_folder', {
@@ -11,12 +11,19 @@ export async function loadPath(folderPath: string) {
     });
     photos.set(loadedPhotos);
     currentFolder.set(folderPath);
-    recentFolders.add(folderPath);
+    if (isRoot) {
+      recentFolders.add(folderPath);
+      await loadFolderTree(folderPath);
+    }
   } catch (error) {
     console.error('Failed to load photos from path:', error);
   } finally {
     isLoading.set(false);
   }
+}
+
+export async function loadSubfolder(path: string) {
+  await loadPath(path, false);
 }
 
 export async function loadPhotos() {

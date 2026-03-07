@@ -10,6 +10,7 @@ futures = { workspace = true }
 log = { workspace = true }
 rayon = "1.11.0"
 async-trait = { workspace = true }
+async-recursion = { workspace = true }
 tokio = { version = "1", features = ["rt"] }
 
 

@@ -2,9 +2,38 @@ import { invoke } from '@tauri-apps/api/core';
 import { get, writable } from 'svelte/store';
 import type { PhotoMetadata } from '../types/photo';
 
+export interface FolderNode {
+  name: string;
+  path: string;
+  children: FolderNode[];
+}
+
 export const photos = writable<PhotoMetadata[]>([]);
 export const isLoading = writable(false);
 export const currentFolder = writable<string | null>(null);
+export const folderTree = writable<FolderNode | null>(null);
+
+function createExplorerWidthStore() {
+  const STORAGE_KEY = 'explorer_width';
+  const initialValue = Number(
+    typeof localStorage !== 'undefined'
+      ? localStorage.getItem(STORAGE_KEY) || '250'
+      : '250'
+  );
+  const { subscribe, set } = writable<number>(initialValue);
+
+  return {
+    subscribe,
+    set: (width: number) => {
+      if (typeof localStorage !== 'undefined') {
+        localStorage.setItem(STORAGE_KEY, width.toString());
+      }
+      set(width);
+    },
+  };
+}
+
+export const explorerWidth = createExplorerWidthStore();
 
 function createRecentFoldersStore() {
   const STORAGE_KEY = 'recent_folders';
@@ -92,6 +121,16 @@ export const favorites = createFavoritesStore();
 export function clearPhotos() {
   photos.set([]);
   currentFolder.set(null);
+  folderTree.set(null);
+}
+
+export async function loadFolderTree(path: string) {
+  try {
+    const tree = await invoke<FolderNode>('get_folder_tree', { path });
+    folderTree.set(tree);
+  } catch (error) {
+    console.error('Error loading folder tree:', error);
+  }
 }
 
 // Initialize favorites when the store is created

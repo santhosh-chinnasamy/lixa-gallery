@@ -66,6 +66,19 @@ impl FileSystem for LocalFileSystem {
         Ok(images)
     }
 
+    async fn list_subfolders(&self, dir: &Path) -> Result<Vec<PathBuf>> {
+        let mut entries = fs::read_dir(dir).await?;
+        let mut folders = Vec::new();
+
+        while let Some(entry) = entries.next_entry().await? {
+            let path = entry.path();
+            if path.is_dir() {
+                folders.push(path);
+            }
+        }
+        Ok(folders)
+    }
+
     async fn copy(&self, from: &Path, to: &Path) -> Result<u64> {
         fs::copy(from, to).await.map_err(|e| GalleryError::Io(e))
     }
