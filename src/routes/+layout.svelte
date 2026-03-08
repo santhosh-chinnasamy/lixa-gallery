@@ -29,10 +29,13 @@
 
 <svelte:window onkeydown={handleKeydown} />
 <Sidebar.Provider open={true}>
-  <div class="flex min-h-screen w-full bg-background font-sans antialiased text-foreground">
+  <div
+    class="flex h-screen w-full overflow-hidden bg-background font-sans text-foreground antialiased"
+  >
     <AppSidebar />
-    <main class="flex-1 flex flex-col min-w-0 overflow-hidden">
-      <div class="flex-1 overflow-y-auto p-6 lg:p-10">
+    <main class="flex h-full min-w-0 flex-1 flex-col overflow-hidden">
+      <!-- Removed p-6 lg:p-10 from here to allow ControlBar to stretch full width. Added it inside Gallery.svelte -->
+      <div class="h-full flex-1 overflow-hidden">
         <slot />
       </div>
     </main>
