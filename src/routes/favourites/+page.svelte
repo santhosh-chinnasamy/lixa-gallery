@@ -76,61 +76,66 @@
 
 <KeyboardShortcuts actions={keyboardActions} />
 
-{#if $favorites.size === 0}
-  <div
-    class="flex h-[80vh] flex-col items-center justify-center p-4 text-center"
-  >
+<div class="flex h-full flex-col overflow-hidden">
+  {#if $favorites.size === 0}
     <div
-      class="mb-6 flex h-20 w-20 items-center justify-center rounded-2xl bg-primary/10 text-primary"
+      class="flex h-full flex-col items-center justify-center p-4 text-center"
     >
-      <HeartIcon size={40} strokeWidth={1.5} />
+      <div
+        class="mb-6 flex h-20 w-20 items-center justify-center rounded-2xl bg-primary/10 text-primary"
+      >
+        <HeartIcon size={40} strokeWidth={1.5} />
+      </div>
+      <h2 class="text-2xl font-bold tracking-tight text-foreground">
+        No Favourites Yet
+      </h2>
+      <p class="mt-2 max-w-xs leading-relaxed text-muted-foreground">
+        Browse your library and mark your best shots with a heart to see them
+        here.
+      </p>
+      <Button href="/" variant="outline" class="mt-8">Back to Library</Button>
     </div>
-    <h2 class="text-2xl font-bold tracking-tight text-foreground">
-      No Favourites Yet
-    </h2>
-    <p class="mt-2 max-w-xs leading-relaxed text-muted-foreground">
-      Browse your library and mark your best shots with a heart to see them
-      here.
-    </p>
-    <Button href="/" variant="outline" class="mt-8">Back to Library</Button>
-  </div>
-{:else}
-  <!-- Action buttons container -->
-  <div class="sticky top-4 z-10 mb-4 flex items-center justify-between px-6">
-    <div class="flex items-center gap-2">
-      <span class="ml-2 text-sm font-semibold tracking-tight text-foreground">
-        <span class="mr-1 rounded-md bg-primary/10 px-2 py-1 text-primary">
-          {$favorites.size}
+  {:else}
+    <!-- Action buttons container -->
+    <div class="z-10 flex shrink-0 items-center justify-between p-6 pb-2">
+      <div class="flex items-center gap-2">
+        <span class="ml-2 text-sm font-semibold tracking-tight text-foreground">
+          <span class="mr-1 rounded-md bg-primary/10 px-2 py-1 text-primary">
+            {$favorites.size}
+          </span>
+          Photos Selected
         </span>
-        Photos Selected
-      </span>
-    </div>
-    <div
-      class="flex items-center gap-3 rounded-lg border bg-background/80 p-2 shadow-[0_4px_12px_rgba(0,0,0,0.05)] backdrop-blur-md"
-    >
-      <Button
-        variant="secondary"
-        onclick={showDeleteModal}
-        size="sm"
-        class="text-sm shadow-none"
+      </div>
+      <div
+        class="flex items-center gap-3 rounded-lg border bg-background/80 p-2 shadow-[0_4px_12px_rgba(0,0,0,0.05)] backdrop-blur-md"
       >
-        Clear Selection
-      </Button>
-      <Button
-        variant="default"
-        onclick={() => {
-          showExportModal = true;
-        }}
-        size="sm"
-        class="text-sm font-medium shadow-none"
-      >
-        Export
-      </Button>
+        <Button
+          variant="secondary"
+          onclick={showDeleteModal}
+          size="sm"
+          class="text-sm shadow-none"
+        >
+          Clear Selection
+        </Button>
+        <Button
+          variant="default"
+          onclick={() => {
+            showExportModal = true;
+          }}
+          size="sm"
+          class="text-sm font-medium shadow-none"
+        >
+          Export
+        </Button>
+      </div>
     </div>
-  </div>
 
-  <Gallery photos={favoritePhotos} />
-{/if}
+    <!-- The Gallery component will take the remaining vertical flex space and control its own internal scrolling -->
+    <div class="flex-1 overflow-hidden">
+      <Gallery photos={favoritePhotos} />
+    </div>
+  {/if}
+</div>
 
 <ExportModal
   bind:open={showExportModal}

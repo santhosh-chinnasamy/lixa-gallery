@@ -61,7 +61,11 @@
   }
 </script>
 
-<Sidebar.Root variant="sidebar" collapsible="none" class="border-r bg-sidebar">
+<Sidebar.Root
+  variant="sidebar"
+  collapsible="offcanvas"
+  class="border-r bg-sidebar"
+>
   <Sidebar.Header class="flex h-16 items-center justify-between border-b px-6">
     <button
       onclick={handleHomeClick}
@@ -195,12 +199,14 @@
     </Sidebar.Group>
 
     {#if $currentFolder}
-      <Sidebar.Group class="mt-4 flex flex-grow flex-col overflow-hidden">
+      <Sidebar.Group class="mt-4 flex min-h-0 flex-1 flex-col overflow-hidden">
         <Sidebar.GroupLabel
           class="px-4 text-xs font-semibold uppercase tracking-wider text-muted-foreground/70"
           >Workspace</Sidebar.GroupLabel
         >
-        <Sidebar.GroupContent class="flex-grow overflow-y-auto">
+        <Sidebar.GroupContent
+          class="custom-scrollbar flex-1 overflow-y-auto pb-4"
+        >
           <FolderExplorer inSidebar={true} />
         </Sidebar.GroupContent>
       </Sidebar.Group>
