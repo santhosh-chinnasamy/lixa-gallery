@@ -14,12 +14,17 @@ impl FavouriteService {
         Self { favourite_repo, fs }
     }
 
-    pub async fn export_favourites(&self, events: &dyn EventHub, destination: &str) -> Result<()> {
+    pub async fn export_favourites(
+        &self,
+        events: &dyn EventHub,
+        destination: &str,
+        mode: &str,
+    ) -> Result<()> {
         let favourites = self.favourite_repo.get_favourites().await?;
 
         let mut counter = 0;
         for fav in favourites {
-            let file_path = fav.path;
+            let file_path = fav.path.clone();
             let file = PathBuf::from(&file_path);
             let name = file
                 .file_name()
@@ -38,7 +43,13 @@ impl FavouriteService {
                 continue;
             }
 
-            self.fs.copy(&file, &destination_path).await?;
+            if mode == "move" {
+                self.fs.rename(&file, &destination_path).await?;
+                // Remove from DB since the file was physically moved
+                self.remove_favourite(fav.path).await?;
+            } else {
+                self.fs.copy(&file, &destination_path).await?;
+            }
 
             counter += 1;
             events

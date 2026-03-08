@@ -20,11 +20,12 @@ pub async fn export_favourites(
     app: AppHandle,
     state: State<'_, AppState>,
     destination: &str,
+    mode: &str,
 ) -> Result<(), String> {
     let events = TauriEventHub::new(app);
     state
         .favourite
-        .export_favourites(&events, destination)
+        .export_favourites(&events, destination, mode)
         .await
         .map_err(|e| e.to_string())
 }
