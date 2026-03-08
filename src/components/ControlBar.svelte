@@ -13,7 +13,6 @@
   import Breadcrumbs from './Breadcrumbs.svelte';
   import {
     searchQuery,
-    showImagesOnly,
     sortBy,
     sortOrder,
     gridSize,
