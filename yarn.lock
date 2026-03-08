@@ -792,6 +792,24 @@ __metadata:
   languageName: node
   linkType: hard
 
+"@tanstack/svelte-virtual@npm:^3.13.21":
+  version: 3.13.21
+  resolution: "@tanstack/svelte-virtual@npm:3.13.21"
+  dependencies:
+    "@tanstack/virtual-core": "npm:3.13.21"
+  peerDependencies:
+    svelte: ^3.48.0 || ^4.0.0 || ^5.0.0
+  checksum: 10c0/04c0306b4ac24a91048b1f9197ad36204b2cb0bd5c01e934372907d80bcfb0455074c26dbb01d6221d00879845b81152eae2398e4870a93f8952d85a9deaa7d4
+  languageName: node
+  linkType: hard
+
+"@tanstack/virtual-core@npm:3.13.21":
+  version: 3.13.21
+  resolution: "@tanstack/virtual-core@npm:3.13.21"
+  checksum: 10c0/e420e3d3d7d494deab873fd1d4114a5a5aa65ca475f0a8149c84bdd52572c695a142449c6de033fbb369eac68e2d4b0c25c090c97f9cceaad3b51a7f22f3e2a7
+  languageName: node
+  linkType: hard
+
 "@tauri-apps/api@npm:^2, @tauri-apps/api@npm:^2.0.0":
   version: 2.5.0
   resolution: "@tauri-apps/api@npm:2.5.0"
@@ -1961,6 +1979,7 @@ __metadata:
     "@sveltejs/kit": "npm:^2.9.0"
     "@sveltejs/vite-plugin-svelte": "npm:^5.0.0"
     "@tailwindcss/vite": "npm:^4.1.5"
+    "@tanstack/svelte-virtual": "npm:^3.13.21"
     "@tauri-apps/api": "npm:^2"
     "@tauri-apps/cli": "npm:^2"
     "@tauri-apps/plugin-dialog": "npm:~2"

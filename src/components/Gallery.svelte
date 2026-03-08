@@ -3,7 +3,7 @@
   import ImageModal from './ImageModal.svelte';
   import ControlBar from './ControlBar.svelte';
   import type { PhotoMetadata } from '../types/photo';
-  import { onMount } from 'svelte';
+  import { createVirtualizer } from '@tanstack/svelte-virtual';
   import {
     searchQuery,
     showImagesOnly,
@@ -19,7 +19,14 @@
 
   let selectedImage = $state<PhotoMetadata | null>(null);
   let galleryContainer = $state<HTMLElement | null>(null);
-  let visibleImages = $state(new Set<number>());
+  let containerWidth = $state(0);
+
+  // Calculate dynamic columns based on container width and grid size
+  let columns = $derived(
+    containerWidth > 0
+      ? Math.max(1, Math.floor(containerWidth / ($gridSize + 16)))
+      : 1,
+  );
 
   let processedPhotos = $derived.by(() => {
     let result = [...photos];
@@ -68,49 +75,47 @@
     selectedImage = null;
   };
 
-  // Re-run observer logic whenever photos change or container is ready
+  // Initialize the head-less virtualizer instance
+  let virtualizer = createVirtualizer({
+    count: 0,
+    getScrollElement: () => null,
+    estimateSize: () => 100,
+  });
+
+  // Keep it reactive
   $effect(() => {
-    if (!galleryContainer || photos.length === 0) return;
+    // When the photo list changes (e.g navigating to a new folder), reset the scroll
+    // to prevent the virtualizer from rendering items out of bounds or caching old heights.
+    const count = processedPhotos.length;
 
-    // Clear visible images when photos change to avoid showing old indexes
-    visibleImages = new Set();
-
-    const observer = new IntersectionObserver(
-      (entries) => {
-        entries.forEach((entry) => {
-          const indexAttr = entry.target.getAttribute('data-index');
-          if (indexAttr === null) return;
-          const index = parseInt(indexAttr);
-
-          if (entry.isIntersecting) {
-            visibleImages.add(index);
-            // Preload next few images
-            for (let i = index; i < Math.min(index + 8, photos.length); i++) {
-              visibleImages.add(i);
-            }
-          } else {
-            visibleImages.delete(index);
-          }
-        });
+    $virtualizer.setOptions({
+      count,
+      getScrollElement: () => galleryContainer,
+      estimateSize: () => $gridSize + 48,
+      overscan: 10,
+      lanes: columns,
+      onChange: () => {
+        // Optional reactive sync hook
       },
-      {
-        root: galleryContainer,
-        rootMargin: '200px', // Increased margin for smoother loading
-        threshold: 0.1,
-      },
-    );
+    });
 
-    // Observe all image cards - using a tiny delay to ensure DOM has updated
-    const timeout = setTimeout(() => {
-      if (!galleryContainer) return;
-      const imageCards = galleryContainer.querySelectorAll('[data-index]');
-      imageCards.forEach((card) => observer.observe(card));
-    }, 0);
+    if (galleryContainer && count > 0) {
+      // Small tick to ensure the new virtualizer bounds are respected
+      setTimeout(() => {
+        $virtualizer.measure();
+      }, 0);
+    }
+  });
 
-    return () => {
-      clearTimeout(timeout);
-      observer.disconnect();
-    };
+  // Explicitly watch for photo array changes to force scroll to top
+  $effect(() => {
+    // Adding photos as a dependency triggers this block
+    if (photos && galleryContainer) {
+      galleryContainer.scrollTo({ top: 0 });
+      setTimeout(() => {
+        $virtualizer.measure();
+      }, 10);
+    }
   });
 </script>
 
@@ -141,22 +146,28 @@
         </div>
       {:else}
         <div
-          class="grid w-full auto-rows-fr justify-items-center gap-3 sm:gap-4 md:gap-5"
-          style="grid-template-columns: repeat(auto-fill, minmax(var(--grid-item-size), 1fr));"
+          bind:clientWidth={containerWidth}
+          class="relative w-full"
+          style="height: {$virtualizer.getTotalSize()}px;"
         >
-          {#each processedPhotos as photo, index (photo.path)}
+          {#each $virtualizer.getVirtualItems() as virtualItem (processedPhotos[virtualItem.index]?.path ?? virtualItem.index)}
+            {@const photo = processedPhotos[virtualItem.index]}
+            {@const columnWidth = columns > 0 ? containerWidth / columns : 0}
             <div
-              data-index={index}
-              class="flex w-full justify-center"
-              style="max-width: calc(var(--grid-item-size) * 1.5);"
+              style="position: absolute; top: 0; left: 0; transform: translateY({virtualItem.start}px) translateX({virtualItem.lane *
+                columnWidth}px); width: {columnWidth}px; height: {virtualItem.size}px; padding: 8px; display: flex; justify-content: center;"
             >
-              <div class="w-full max-w-full">
-                <ImageCard
-                  {photo}
-                  tabindex={index + 1}
-                  {handleImageClick}
-                  isVisible={visibleImages.has(index) || index < 12}
-                />
+              <div
+                style="width: 100%; max-width: calc(var(--grid-item-size) * 1.5);"
+              >
+                {#if photo}
+                  <ImageCard
+                    {photo}
+                    tabindex={virtualItem.index + 1}
+                    {handleImageClick}
+                    isVisible={true}
+                  />
+                {/if}
               </div>
             </div>
           {/each}

@@ -2,7 +2,6 @@
 @tailwind components;
 @tailwind utilities;
 
-
 @font-face {
   font-family: Inter;
   src: url('./assets/fonts/Inter.ttf');
@@ -101,7 +100,6 @@
     @apply bg-background text-foreground;
   }
 }
-
 
 body {
   overflow: auto;
