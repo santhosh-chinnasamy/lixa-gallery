@@ -33,6 +33,8 @@ impl GalleryService {
         folder: &str,
         thumbnail_path: &str,
     ) -> Result<Vec<PhotoMetadata>> {
+        use futures::stream::{self, StreamExt};
+
         let folder_path = PathBuf::from(folder);
         let image_files = self.fs.list_images_in_dir(&folder_path).await?;
 
@@ -52,46 +54,79 @@ impl GalleryService {
             })
             .collect();
 
+        // 1. Concurrently read file metadata
+        let fs_ref = &self.fs;
+        let db_lookup_ref = &db_lookup;
+
         let mut needs_processing = Vec::new();
         let mut all_photos = Vec::new();
 
-        for file_path in image_files {
-            let path_str = file_path.to_string_lossy().to_string();
-            if let Ok(current_metadata) = self.fs.get_file_metadata(&file_path).await {
-                if let Some((thumbnail_path, db_mtime, db_size)) = db_lookup.get(&path_str) {
-                    if current_metadata.modified as i64 == *db_mtime
-                        && current_metadata.size as i64 == *db_size
-                        && Path::new(thumbnail_path).exists()
-                    {
-                        all_photos.push(PhotoMetadata {
-                            metadata: current_metadata,
-                            thumbnail_path: thumbnail_path.to_string(),
-                            path: path_str,
-                        });
-                        continue;
+        enum MetaResult {
+            Cached(PhotoMetadata),
+            NeedsProcessing(PathBuf),
+            Failed,
+        }
+
+        let mut metadata_stream = stream::iter(image_files)
+            .map(|file_path| async move {
+                let path_str = file_path.to_string_lossy().to_string();
+                if let Ok(current_metadata) = fs_ref.get_file_metadata(&file_path).await {
+                    if let Some((thumb_path, db_mtime, db_size)) = db_lookup_ref.get(&path_str) {
+                        if current_metadata.modified as i64 == *db_mtime
+                            && current_metadata.size as i64 == *db_size
+                            && Path::new(thumb_path).exists()
+                        {
+                            return MetaResult::Cached(PhotoMetadata {
+                                metadata: current_metadata,
+                                thumbnail_path: thumb_path.to_string(),
+                                path: path_str,
+                            });
+                        }
                     }
+                    return MetaResult::NeedsProcessing(file_path);
                 }
-                needs_processing.push(file_path);
+                MetaResult::Failed
+            })
+            .buffer_unordered(32); // Max 32 concurrent OS stat calls
+
+        while let Some(result) = metadata_stream.next().await {
+            match result {
+                MetaResult::Cached(photo) => all_photos.push(photo),
+                MetaResult::NeedsProcessing(path) => needs_processing.push(path),
+                MetaResult::Failed => {}
             }
         }
 
+        // 2. Concurrently process new thumbnails
         if !needs_processing.is_empty() {
             let processor = self.image_processor.clone();
-            let thumb_path = thumbnail_path.to_string();
+            let thumb_path_str = thumbnail_path.to_string();
+
+            // Determine parallelism based on available cores natively
+            let max_concurrent_tasks = std::thread::available_parallelism()
+                .map(|n| n.get())
+                .unwrap_or(4);
+
+            let mut processing_stream = stream::iter(needs_processing)
+                .map(|file_path| {
+                    let p = processor.clone();
+                    let t = thumb_path_str.clone();
+                    async move { p.convert_image(&file_path, &t).await }
+                })
+                .buffer_unordered(max_concurrent_tasks);
 
             let mut processed_photos = Vec::new();
-            for file_path in needs_processing {
-                if let Ok(photo) = processor.convert_image(&file_path, &thumb_path).await {
-                    processed_photos.push(photo);
-                }
+            while let Some(Ok(photo)) = processing_stream.next().await {
+                processed_photos.push(photo);
             }
 
+            // 3. Chunk database insertions to avoid parameter limit (SQLite max is usually 999 to 32766, safe bet is chunks of 100 images = ~800 parameters)
             if !processed_photos.is_empty() {
-                self.photo_repo
-                    .batch_insert_photos(&processed_photos)
-                    .await?;
+                for chunk in processed_photos.chunks(100) {
+                    self.photo_repo.batch_insert_photos(chunk).await?;
+                }
+                all_photos.extend(processed_photos);
             }
-            all_photos.extend(processed_photos);
         }
 
         Ok(all_photos)
