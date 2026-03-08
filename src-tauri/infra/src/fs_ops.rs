@@ -57,7 +57,18 @@ impl FileSystem for LocalFileSystem {
             if let Some(ext) = path.extension().and_then(|s| s.to_str()) {
                 if matches!(
                     ext.to_lowercase().as_str(),
-                    "jpg" | "jpeg" | "png" | "webp" | "bmp" | "gif"
+                    "jpg"
+                        | "jpeg"
+                        | "png"
+                        | "webp"
+                        | "bmp"
+                        | "gif"
+                        | "tiff"
+                        | "tif"
+                        | "avif"
+                        | "heic"
+                        | "heif"
+                        | "svg"
                 ) {
                     images.push(path);
                 }

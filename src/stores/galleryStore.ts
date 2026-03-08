@@ -17,7 +17,6 @@ export type SortOption = 'name' | 'date' | 'size';
 export type SortOrder = 'asc' | 'desc';
 
 export const searchQuery = writable<string>('');
-export const showImagesOnly = writable<boolean>(false);
 export const sortBy = writable<SortOption>('name');
 export const sortOrder = writable<SortOrder>('asc');
 
