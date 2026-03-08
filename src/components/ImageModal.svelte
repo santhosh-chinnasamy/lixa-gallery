@@ -236,11 +236,22 @@
           </div>
         {/if}
 
+        <!-- Thumbnail placeholder/fallback -->
+        {#if !imageLoaded || imageError}
+          <img
+            src={convertFileSrc(selectedImage.thumbnail_path)}
+            alt=""
+            class={`absolute inset-0 h-full w-full rounded-lg object-contain blur-md transition-opacity duration-500 ${
+              imageError ? 'opacity-50' : 'opacity-20'
+            }`}
+          />
+        {/if}
+
         <!-- Main image -->
         <img
           src={convertFileSrc(selectedImage.path)}
           alt={fileName}
-          class={`max-h-full max-w-full rounded-lg object-contain shadow-2xl transition-opacity duration-300 ${
+          class={`relative z-10 max-h-full max-w-full rounded-lg object-contain shadow-2xl transition-opacity duration-300 ${
             imageLoaded ? 'opacity-100' : 'opacity-0'
           }`}
           style="filter: drop-shadow(0 25px 25px rgb(0 0 0 / 0.5))"

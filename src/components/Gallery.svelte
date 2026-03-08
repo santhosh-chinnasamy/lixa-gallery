@@ -6,7 +6,6 @@
   import { createVirtualizer } from '@tanstack/svelte-virtual';
   import {
     searchQuery,
-    showImagesOnly,
     sortBy,
     sortOrder,
     gridSize,
@@ -27,16 +26,6 @@
 
   let processedPhotos = $derived.by(() => {
     let result = [...photos];
-
-    if ($showImagesOnly) {
-      result = result.filter(
-        (p) =>
-          !p.metadata.name.toLowerCase().endsWith('.xmp') &&
-          !p.metadata.name.toLowerCase().endsWith('.txt') &&
-          !p.metadata.name.toLowerCase().endsWith('.json') &&
-          !p.metadata.name.toLowerCase().endsWith('.dng'),
-      ); // Just rudimentary extension checks for "images only"
-    }
 
     if ($searchQuery.trim()) {
       const q = $searchQuery.toLowerCase();
