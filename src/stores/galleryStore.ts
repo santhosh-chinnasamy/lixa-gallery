@@ -26,7 +26,7 @@ function createGridSizeStore() {
   const initialValue = Number(
     typeof localStorage !== 'undefined'
       ? localStorage.getItem(STORAGE_KEY) || '180'
-      : '180'
+      : '180',
   );
   const { subscribe, set } = writable<number>(initialValue);
 
@@ -48,18 +48,20 @@ function createExpandedFoldersStore() {
   const { subscribe, update, set } = writable<Set<string>>(new Set());
   return {
     subscribe,
-    toggle: (path: string) => update(s => {
-      const newSet = new Set(s);
-      if (newSet.has(path)) newSet.delete(path);
-      else newSet.add(path);
-      return newSet;
-    }),
-    expand: (path: string) => update(s => {
-      const newSet = new Set(s);
-      newSet.add(path);
-      return newSet;
-    }),
-    clear: () => set(new Set())
+    toggle: (path: string) =>
+      update((s) => {
+        const newSet = new Set(s);
+        if (newSet.has(path)) newSet.delete(path);
+        else newSet.add(path);
+        return newSet;
+      }),
+    expand: (path: string) =>
+      update((s) => {
+        const newSet = new Set(s);
+        newSet.add(path);
+        return newSet;
+      }),
+    clear: () => set(new Set()),
   };
 }
 
@@ -70,7 +72,7 @@ function createExplorerWidthStore() {
   const initialValue = Number(
     typeof localStorage !== 'undefined'
       ? localStorage.getItem(STORAGE_KEY) || '250'
-      : '250'
+      : '250',
   );
   const { subscribe, set } = writable<number>(initialValue);
 
@@ -92,7 +94,7 @@ function createRecentFoldersStore() {
   const initialValue = JSON.parse(
     typeof localStorage !== 'undefined'
       ? localStorage.getItem(STORAGE_KEY) || '[]'
-      : '[]'
+      : '[]',
   );
   const { subscribe, set, update } = writable<string[]>(initialValue);
 
@@ -102,7 +104,7 @@ function createRecentFoldersStore() {
       update((folders) => {
         const newFolders = [path, ...folders.filter((f) => f !== path)].slice(
           0,
-          5
+          5,
         );
         if (typeof localStorage !== 'undefined') {
           localStorage.setItem(STORAGE_KEY, JSON.stringify(newFolders));

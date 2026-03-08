@@ -62,15 +62,17 @@
     <div class="aspect-[1/1] h-auto w-full overflow-hidden bg-gray-100">
       <!-- Loading placeholder -->
       {#if !imageLoaded && !imageError}
-        <div class="flex h-full w-full items-center justify-center bg-gray-200 animate-pulse">
-          <div class="text-gray-400 text-sm">Loading...</div>
+        <div
+          class="flex h-full w-full animate-pulse items-center justify-center bg-gray-200"
+        >
+          <div class="text-sm text-gray-400">Loading...</div>
         </div>
       {/if}
 
       <!-- Error placeholder -->
       {#if imageError}
         <div class="flex h-full w-full items-center justify-center bg-gray-100">
-          <div class="text-gray-500 text-xs text-center p-2">
+          <div class="p-2 text-center text-xs text-gray-500">
             <div>Failed to load</div>
             <div class="text-gray-400">{fileName}</div>
           </div>
@@ -82,7 +84,7 @@
         bind:this={imageElement}
         src={convertFileSrc(thumbnailSrc)}
         alt={fileName}
-        loading={isVisible ? "eager" : "lazy"}
+        loading={isVisible ? 'eager' : 'lazy'}
         class={`h-full w-full object-cover transition-all duration-300 group-hover:scale-105 ${
           imageLoaded ? 'opacity-100' : 'opacity-0'
         }`}
