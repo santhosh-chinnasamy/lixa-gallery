@@ -19,8 +19,7 @@
     gridSize,
     type SortOption,
   } from '../stores/galleryStore';
-
-  const { onLoadPhotos }: { onLoadPhotos?: () => void } = $props();
+  import { loadPhotos } from './common/ImageOperations';
 
   const sortOptions: { value: SortOption; label: string }[] = [
     { value: 'name', label: 'Name' },
@@ -51,17 +50,15 @@
       <Sidebar.Trigger class="-ml-2" />
       <Breadcrumbs />
     </div>
-    {#if onLoadPhotos}
-      <Button
-        onclick={onLoadPhotos}
-        variant="outline"
-        size="sm"
-        class="h-8 shrink-0 gap-2 bg-background text-xs font-medium"
-      >
-        <FolderOpen size={14} />
-        <span class="hidden sm:inline">Open Folder</span>
-      </Button>
-    {/if}
+    <Button
+      onclick={() => loadPhotos()}
+      variant="outline"
+      size="sm"
+      class="h-8 shrink-0 gap-2 bg-background text-xs font-medium"
+    >
+      <FolderOpen size={14} />
+      <span class="hidden sm:inline">Open Folder</span>
+    </Button>
   </div>
 
   <!-- Bottom Row: Search, Filters, and Sorting -->
