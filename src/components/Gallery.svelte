@@ -115,15 +115,15 @@
 </script>
 
 <div
-  class="relative flex h-full flex-col"
+  class="relative flex h-full flex-col overflow-hidden"
   style="--grid-item-size: {$gridSize}px"
 >
   <ControlBar {onLoadPhotos} />
   <main
-    class="custom-scrollbar flex-1 overflow-auto scroll-smooth"
+    class="custom-scrollbar flex-1 overflow-y-auto scroll-smooth"
     bind:this={galleryContainer}
   >
-    <div class="h-full p-2 sm:p-3 md:p-4 lg:p-6 xl:p-8">
+    <div class="h-full p-6 lg:p-10">
       {#if processedPhotos.length === 0}
         <div class="flex h-full min-h-[400px] items-center justify-center">
           <div

@@ -4,6 +4,7 @@
   import { Switch } from '$lib/components/ui/switch';
   import { Slider } from '$lib/components/ui/slider';
   import * as Select from '$lib/components/ui/select';
+  import * as Sidebar from '$lib/components/ui/sidebar';
   import Search from '@lucide/svelte/icons/search';
   import ArrowUp from '@lucide/svelte/icons/arrow-up';
   import ArrowDown from '@lucide/svelte/icons/arrow-down';
@@ -45,28 +46,29 @@
   class="sticky top-0 z-10 flex flex-col gap-3 border-b bg-background/80 px-4 py-3 backdrop-blur-md lg:px-6"
 >
   <!-- Top Row: Navigation and Primary Actions -->
-  <div class="flex items-center justify-between">
-    <Breadcrumbs />
+  <div class="flex items-center justify-between gap-3">
+    <div class="flex items-center gap-2 overflow-hidden">
+      <Sidebar.Trigger class="-ml-2" />
+      <Breadcrumbs />
+    </div>
     {#if onLoadPhotos}
       <Button
         onclick={onLoadPhotos}
         variant="outline"
         size="sm"
-        class="h-8 gap-2 bg-background text-xs font-medium"
+        class="h-8 shrink-0 gap-2 bg-background text-xs font-medium"
       >
         <FolderOpen size={14} />
-        <span>Open Folder</span>
+        <span class="hidden sm:inline">Open Folder</span>
       </Button>
     {/if}
   </div>
 
   <!-- Bottom Row: Search, Filters, and Sorting -->
-  <div
-    class="flex flex-col gap-4 sm:flex-row sm:items-center sm:justify-between"
-  >
-    <!-- Search & Filter Area -->
-    <div class="flex min-w-[200px] max-w-md flex-1 items-center gap-4">
-      <div class="relative flex-1">
+  <div class="flex flex-wrap items-center justify-between gap-4">
+    <!-- Search Area -->
+    <div class="flex min-w-[120px] flex-1 items-center">
+      <div class="relative w-full max-w-md">
         <Search
           class="absolute left-2.5 top-2.5 h-4 w-4 text-muted-foreground transition-colors focus-within:text-primary"
         />
@@ -78,26 +80,14 @@
           oninput={handleSearchInput}
         />
       </div>
-
-      <!-- <div
-        class="flex shrink-0 items-center space-x-2 rounded-md border bg-background/50 px-3 py-1.5 shadow-sm"
-      >
-        <Switch
-          id="images-only"
-          checked={$showImagesOnly}
-          onCheckedChange={(checked: boolean) => showImagesOnly.set(checked)}
-        />
-        <Label for="images-only" class="cursor-pointer text-xs font-medium"
-          >Images Only</Label
-        >
-      </div> -->
     </div>
 
     <!-- Sorting & Sizing Controls -->
-    <div class="flex items-center gap-4 overflow-x-auto pb-1 sm:pb-0">
-      <div class="flex items-center gap-2 border-none">
+    <div class="flex flex-wrap items-center gap-4">
+      <!-- Sorting Group -->
+      <div class="flex shrink-0 items-center gap-2">
         <Label
-          class="whitespace-nowrap text-xs font-medium text-muted-foreground"
+          class="hidden whitespace-nowrap text-xs font-medium text-muted-foreground sm:block"
           >Sort</Label
         >
         <Select.Root
@@ -108,7 +98,7 @@
           }}
         >
           <Select.Trigger
-            class="h-9 w-full min-w-[110px] bg-background/50 focus:bg-background"
+            class="h-9 w-[110px] bg-background/50 focus:bg-background"
             aria-label="Sort by"
           >
             {selectedSortOption.label}
@@ -135,10 +125,12 @@
         </Button>
       </div>
 
-      <div class="hidden h-6 w-px shrink-0 bg-border sm:block"></div>
+      <div class="hidden h-6 w-px shrink-0 bg-border md:block"></div>
 
-      <div class="flex min-w-[120px] max-w-[150px] items-center gap-3">
-        <Label class="shrink-0 text-xs font-medium text-muted-foreground"
+      <!-- Sizing Group -->
+      <div class="flex min-w-[80px] max-w-[150px] flex-1 items-center gap-3">
+        <Label
+          class="hidden shrink-0 text-xs font-medium text-muted-foreground sm:block"
           >Size</Label
         >
         <Slider
