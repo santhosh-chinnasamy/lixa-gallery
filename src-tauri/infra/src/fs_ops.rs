@@ -83,6 +83,10 @@ impl FileSystem for LocalFileSystem {
         fs::copy(from, to).await.map_err(|e| GalleryError::Io(e))
     }
 
+    async fn rename(&self, from: &Path, to: &Path) -> Result<()> {
+        fs::rename(from, to).await.map_err(|e| GalleryError::Io(e))
+    }
+
     async fn canonicalize(&self, path: &Path) -> Result<PathBuf> {
         fs::canonicalize(path)
             .await

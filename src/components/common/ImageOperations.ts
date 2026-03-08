@@ -71,7 +71,7 @@ export async function loadPhotosWithModal(onModalOpen: () => void, onModalClose:
   }
 }
 
-export async function exportFavorites() {
+export async function exportFavorites(mode: 'copy' | 'move' = 'copy') {
   try {
     const destination = await open({
       multiple: false,
@@ -81,6 +81,7 @@ export async function exportFavorites() {
 
     await invoke('export_favourites', {
       destination,
+      mode,
     });
 
     return destination;
