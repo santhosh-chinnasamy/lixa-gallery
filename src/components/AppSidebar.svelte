@@ -204,9 +204,7 @@
           class="px-4 text-xs font-semibold uppercase tracking-wider text-muted-foreground/70"
           >Workspace</Sidebar.GroupLabel
         >
-        <Sidebar.GroupContent
-          class="custom-scrollbar flex-1 overflow-y-auto pb-4"
-        >
+        <Sidebar.GroupContent class="flex-1 overflow-hidden">
           <FolderExplorer inSidebar={true} />
         </Sidebar.GroupContent>
       </Sidebar.Group>
