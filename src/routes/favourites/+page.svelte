@@ -7,6 +7,7 @@
   import { exportFavorites } from '../../components/common/ImageOperations';
   import KeyboardShortcuts from '../../components/common/KeyboardShortcuts.svelte';
   import ConfirmationModal from '../../components/modals/ConfirmationModal.svelte';
+  import ExportModal from '../../components/modals/ExportModal.svelte';
   import { favorites, photos } from '../../stores/galleryStore';
 
   // Filter photos to only show favorites
@@ -14,8 +15,10 @@
     $photos.filter((photo) => $favorites.has(photo.path)),
   );
 
-  let exportButtonText = $state('Export Favourites');
+  let exportStatus = $state('');
   let showDeleteConfirmation = $state(false);
+  let showExportModal = $state(false);
+  let isExporting = $state(false);
 
   async function handleClearFavorites() {
     await favorites.clear();
@@ -26,25 +29,47 @@
   }
 
   const keyboardActions = {
-    e: handleExport,
+    e: () => {
+      showExportModal = true;
+    },
   };
 
-  async function handleExport() {
+  async function handleExport(mode: 'copy' | 'move') {
     try {
+      isExporting = true;
+      exportStatus = 'Preparing export...';
       const unsubscribe = await listen('export-progress', (event) => {
-        exportButtonText = `Exporting ${event.payload} /`;
+        exportStatus = `Exporting ${event.payload} / ${$favorites.size} files...`;
       });
 
+      // Temporary timeout fallback for progress listener if it hangs
       setTimeout(() => unsubscribe(), 10000);
 
-      const destination = await exportFavorites();
+      // Pass mode down to the operations layer
+      const destination = await exportFavorites(mode);
       if (destination) {
-        alert(`Favourites exported to ${destination}`);
+        // Only show success alert if not moving (since moving will empty the view)
+        showExportModal = false;
+        setTimeout(
+          () =>
+            alert(
+              `Favourites successfully ${mode === 'copy' ? 'copied' : 'moved'} to ${destination}`,
+            ),
+          100,
+        );
+      } else {
+        showExportModal = false;
       }
     } catch (error) {
       console.error('Export failed:', error);
+      showExportModal = false;
+      setTimeout(
+        () => alert('Export failed. Please check the destination permissions.'),
+        100,
+      );
     } finally {
-      exportButtonText = 'Export Favourites';
+      isExporting = false;
+      exportStatus = '';
     }
   }
 </script>
@@ -71,33 +96,51 @@
   </div>
 {:else}
   <!-- Action buttons container -->
-  <div class="sticky top-4 z-10 mb-4 flex justify-center px-4">
-    <div
-      class="flex items-center gap-2 rounded-lg border bg-background/80 p-2 shadow-sm backdrop-blur-sm"
-    >
-      <Button
-        variant="outline"
-        onclick={handleExport}
-        class="text-sm font-medium"
-      >
-        {exportButtonText}
-        <span class="ml-1 rounded-full bg-primary/10 px-2 py-0.5 text-xs">
+  <div class="sticky top-4 z-10 mb-4 flex items-center justify-between px-6">
+    <div class="flex items-center gap-2">
+      <span class="ml-2 text-sm font-semibold tracking-tight text-foreground">
+        <span class="mr-1 rounded-md bg-primary/10 px-2 py-1 text-primary">
           {$favorites.size}
         </span>
-      </Button>
+        Photos Selected
+      </span>
+    </div>
+    <div
+      class="flex items-center gap-3 rounded-lg border bg-background/80 p-2 shadow-[0_4px_12px_rgba(0,0,0,0.05)] backdrop-blur-md"
+    >
       <Button
-        variant="destructive"
+        variant="secondary"
         onclick={showDeleteModal}
         size="sm"
-        class="px-3"
+        class="text-sm shadow-none"
       >
-        <TrashIcon class="h-4 w-4" />
+        Clear Selection
+      </Button>
+      <Button
+        variant="default"
+        onclick={() => {
+          showExportModal = true;
+        }}
+        size="sm"
+        class="text-sm font-medium shadow-none"
+      >
+        Export
       </Button>
     </div>
   </div>
 
   <Gallery photos={favoritePhotos} />
 {/if}
+
+<ExportModal
+  bind:open={showExportModal}
+  onExport={handleExport}
+  onCancel={() => {
+    showExportModal = false;
+  }}
+  {isExporting}
+  {exportStatus}
+/>
 
 <ConfirmationModal
   bind:open={showDeleteConfirmation}

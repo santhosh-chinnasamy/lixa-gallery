@@ -32,7 +32,7 @@ impl FileSystem for FakeFileSystem {
         Ok(files
             .iter()
             .filter(|(p, _)| p.parent().map(|parent| parent == dir).unwrap_or(false))
-            .filter(|(p, _)| p.is_file()) // Simplified for fake
+            .filter(|(p, _)| p.extension().is_some())
             .map(|(p, _)| p.clone())
             .collect())
     }
@@ -42,7 +42,7 @@ impl FileSystem for FakeFileSystem {
         Ok(files
             .iter()
             .filter(|(p, _)| p.parent().map(|parent| parent == dir).unwrap_or(false))
-            .filter(|(p, _)| p.is_dir()) // Simplified for fake
+            .filter(|(p, _)| p.extension().is_none())
             .map(|(p, _)| p.clone())
             .collect())
     }
@@ -50,6 +50,11 @@ impl FileSystem for FakeFileSystem {
     async fn copy(&self, _from: &Path, _to: &Path) -> Result<u64> {
         Ok(0)
     }
+
+    async fn rename(&self, _from: &Path, _to: &Path) -> Result<()> {
+        Ok(())
+    }
+
     async fn canonicalize(&self, path: &Path) -> Result<PathBuf> {
         Ok(path.to_path_buf())
     }

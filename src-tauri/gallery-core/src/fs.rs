@@ -8,5 +8,6 @@ pub trait FileSystem: Send + Sync {
     async fn list_images_in_dir(&self, dir: &Path) -> Result<Vec<PathBuf>>;
     async fn list_subfolders(&self, dir: &Path) -> Result<Vec<PathBuf>>;
     async fn copy(&self, from: &Path, to: &Path) -> Result<u64>;
+    async fn rename(&self, from: &Path, to: &Path) -> Result<()>;
     async fn canonicalize(&self, path: &Path) -> Result<PathBuf>;
 }
