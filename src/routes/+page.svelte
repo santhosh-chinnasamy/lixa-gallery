@@ -2,28 +2,14 @@
   import { Button } from '$lib/components/ui/button';
   import LandingPage from '../components/LandingPage.svelte';
   import Gallery from '../components/Gallery.svelte';
-  import { loadPhotosWithModal } from '../components/common/ImageOperations';
+  import { loadPhotos } from '../components/common/ImageOperations';
   import KeyboardShortcuts from '../components/common/KeyboardShortcuts.svelte';
-  import FolderLoadingModal from '../components/modals/FolderLoadingModal.svelte';
   import FolderExplorer from '../components/FolderExplorer.svelte';
   import Breadcrumbs from '../components/Breadcrumbs.svelte';
   import { isLoading, photos, currentFolder } from '../stores/galleryStore';
 
-  let showFolderModal = $state(false);
-
-  function handleLoadPhotos() {
-    loadPhotosWithModal(
-      () => {
-        showFolderModal = true;
-      },
-      () => {
-        showFolderModal = false;
-      },
-    );
-  }
-
   const keyboardActions = {
-    o: handleLoadPhotos,
+    o: loadPhotos,
   };
 </script>
 
@@ -38,7 +24,7 @@
         ></div>
       </div>
       <p class="animate-pulse text-lg font-medium text-muted-foreground">
-        Initializing workspace...
+        Loading Workspace...
       </p>
       <p class="mt-2 text-sm text-muted-foreground/60">
         This may take a moment for large folders
@@ -62,21 +48,12 @@
               <div
                 class="h-4 w-4 animate-spin rounded-full border-2 border-primary border-t-transparent"
               ></div>
-              <span class="text-xs font-medium">Scanning Folder...</span>
+              <span class="text-xs font-medium">Scanning Items...</span>
             </div>
           </div>
         {/if}
-        <Gallery photos={$photos} onLoadPhotos={handleLoadPhotos} />
+        <Gallery photos={$photos} />
       </main>
     </div>
   </div>
 {/if}
-
-<FolderLoadingModal
-  bind:open={showFolderModal}
-  isLoading={$isLoading}
-  onSelectFolder={handleLoadPhotos}
-  onCancel={() => {
-    showFolderModal = false;
-  }}
-/>

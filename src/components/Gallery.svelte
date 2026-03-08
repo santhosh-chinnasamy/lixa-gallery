@@ -12,10 +12,7 @@
     gridSize,
   } from '../stores/galleryStore';
 
-  let {
-    photos = [],
-    onLoadPhotos,
-  }: { photos: PhotoMetadata[]; onLoadPhotos?: () => void } = $props();
+  let { photos = [] }: { photos: PhotoMetadata[] } = $props();
 
   let selectedImage = $state<PhotoMetadata | null>(null);
   let galleryContainer = $state<HTMLElement | null>(null);
@@ -123,7 +120,7 @@
   class="relative flex h-full flex-col overflow-hidden"
   style="--grid-item-size: {$gridSize}px"
 >
-  <ControlBar {onLoadPhotos} />
+  <ControlBar />
   <main
     class="custom-scrollbar flex-1 overflow-y-auto scroll-smooth"
     bind:this={galleryContainer}

@@ -28,45 +28,19 @@ export async function loadSubfolder(path: string) {
 
 export async function loadPhotos() {
   try {
-    isLoading.set(true);
     const folder = await open({
       multiple: false,
       directory: true,
     });
 
     if (!folder) {
-      isLoading.set(false);
       return;
     }
 
-    await loadPath(folder);
-  } catch (error) {
-    console.error('Failed to load photos:', error);
-    isLoading.set(false);
-  }
-}
-
-export async function loadPhotosWithModal(onModalOpen: () => void, onModalClose: () => void) {
-  try {
-    onModalOpen();
     isLoading.set(true);
-
-    const folder = await open({
-      multiple: false,
-      directory: true,
-    });
-
-    if (!folder) {
-      isLoading.set(false);
-      onModalClose();
-      return;
-    }
-
     await loadPath(folder);
-    onModalClose();
   } catch (error) {
     console.error('Failed to load photos:', error);
-    onModalClose();
     isLoading.set(false);
   }
 }
