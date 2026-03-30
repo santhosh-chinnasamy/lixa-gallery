@@ -109,7 +109,7 @@
   class="relative flex h-full flex-col overflow-hidden"
   style="--grid-item-size: {$gridSize}px"
 >
-  <ControlBar />
+  <ControlBar count={processedPhotos.length} total={photos.length} />
   <main
     class="custom-scrollbar flex-1 overflow-y-auto scroll-smooth"
     bind:this={galleryContainer}

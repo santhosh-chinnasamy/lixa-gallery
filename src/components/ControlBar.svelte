@@ -20,6 +20,14 @@
   } from '../stores/galleryStore';
   import { loadPhotos } from './common/ImageOperations';
 
+  let {
+    count = 0,
+    total = 0,
+  }: {
+    count: number;
+    total: number;
+  } = $props();
+
   const sortOptions: { value: SortOption; label: string }[] = [
     { value: 'name', label: 'Name' },
     { value: 'date', label: 'Date Created' },
@@ -80,6 +88,18 @@
 
     <!-- Sorting & Sizing Controls -->
     <div class="flex flex-wrap items-center gap-4">
+      {#if total > 0}
+        <div class="hidden items-baseline gap-1.5 px-1 sm:flex">
+          <span class="text-xs font-semibold text-foreground">
+            {count === total ? count : `${count} of ${total}`}
+          </span>
+          <span
+            class="text-[10px] font-medium uppercase tracking-wider text-muted-foreground/60"
+          >
+            {total === 1 ? 'Item' : 'Items'}
+          </span>
+        </div>
+      {/if}
       <!-- Sorting Group -->
       <div class="flex shrink-0 items-center gap-2">
         <Label
