@@ -163,7 +163,7 @@
   </main>
 </div>
 
-<ImageModal {selectedImage} onClose={handleCloseModal} />
+<ImageModal bind:selectedImage onClose={handleCloseModal} photos={processedPhotos} />
 
 <style>
   .custom-scrollbar::-webkit-scrollbar {

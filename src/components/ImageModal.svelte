@@ -3,34 +3,41 @@
   import { cn } from '$lib/utils';
   import { convertFileSrc } from '@tauri-apps/api/core';
   import { fade, scale } from 'svelte/transition';
-  import { favorites, photos } from '../stores/galleryStore';
+  import { favorites } from '../stores/galleryStore';
   import Filename from './Filename.svelte';
   import Heart from './icons/Heart.svelte';
   import ArrowRight from './icons/ArrowRight.svelte';
-  import { page } from '$app/state';
   import ArrowLeft from './icons/ArrowLeft.svelte';
   import Close from './icons/Close.svelte';
   import Info from '@lucide/svelte/icons/info';
   import type { PhotoMetadata } from '../types/photo';
-  export let selectedImage: PhotoMetadata | null;
-  export let onClose: () => void;
-  export let source = page.url.pathname === '/' ? 'all' : 'favorites';
 
-  // For favorites, we need to find photos by path since favorites store paths
-  $: photoSource =
-    source === 'favorites'
-      ? $photos.filter((photo) => $favorites.has(photo.path))
-      : $photos;
-  $: currentIndex = selectedImage
-    ? photoSource.findIndex((photo) => photo.path === selectedImage!.path)
-    : -1;
-  $: canShowPrevious = currentIndex > 0;
-  $: canShowNext = currentIndex < photoSource.length - 1;
-  $: isFavourite = selectedImage ? $favorites.has(selectedImage.path) : false;
+  let {
+    selectedImage = $bindable(),
+    onClose,
+    photos = [],
+  }: {
+    selectedImage: PhotoMetadata | null;
+    onClose: () => void;
+    photos: PhotoMetadata[];
+  } = $props();
+
+  // Navigation logic uses the passed photos prop
+  let photoSource = $derived(photos);
+  let currentIndex = $derived(
+    selectedImage
+      ? photoSource.findIndex((photo) => photo.path === selectedImage?.path)
+      : -1,
+  );
+  let canShowPrevious = $derived(currentIndex > 0);
+  let canShowNext = $derived(currentIndex < photoSource.length - 1);
+  let isFavourite = $derived(
+    selectedImage ? $favorites.has(selectedImage.path) : false,
+  );
 
   // Image preloading and loading states
-  let imageLoaded = false;
-  let imageError = false;
+  let imageLoaded = $state(false);
+  let imageError = $state(false);
   let preloadedImages = new Map<string, HTMLImageElement>();
 
   const keyboardActions = {
@@ -57,16 +64,12 @@
   function showPrevious() {
     if (canShowPrevious) {
       selectedImage = photoSource[currentIndex - 1];
-      imageLoaded = false;
-      imageError = false;
     }
   }
 
   function showNext() {
     if (canShowNext) {
       selectedImage = photoSource[currentIndex + 1];
-      imageLoaded = false;
-      imageError = false;
     }
   }
 
@@ -112,16 +115,18 @@
     });
   }
 
-  // Reactive statement to preload when selectedImage changes
-  $: if (selectedImage) {
-    imageLoaded = false;
-    imageError = false;
-    preloadAdjacentImages();
-  }
+  // Reset states and preload when selectedImage changes
+  $effect(() => {
+    if (selectedImage) {
+      imageLoaded = false;
+      imageError = false;
+      preloadAdjacentImages();
+    }
+  });
 
-  let showInfo = false;
-  let imageWidth = 0;
-  let imageHeight = 0;
+  let showInfo = $state(false);
+  let imageWidth = $state(0);
+  let imageHeight = $state(0);
 
   function formatBytes(bytes: number, decimals = 2) {
     if (!+bytes) return '0 Bytes';
@@ -136,9 +141,9 @@
     showInfo = !showInfo;
   }
 
-  $: fileName = selectedImage?.metadata.name;
+  let fileName = $derived(selectedImage?.metadata.name);
 
-  let showUI = true;
+  let showUI = $state(true);
   let uiTimeoutRef: ReturnType<typeof setTimeout>;
 
   function resetUITimer() {
@@ -158,15 +163,15 @@
     showUI = false;
   }
 
-  // Reactive block to initialize timer when UI first shows
-  $: {
+  // Initialize timer when UI first shows/changes
+  $effect(() => {
     if (selectedImage) {
       resetUITimer();
     }
-  }
+  });
 </script>
 
-<svelte:window on:keydown={handleKeydown} />
+<svelte:window onkeydown={handleKeydown} />
 
 {#if selectedImage}
   <div
@@ -175,10 +180,10 @@
     aria-modal="true"
     aria-label="Image preview"
     tabindex="-1"
-    on:click={handleBackdropClick}
-    on:keydown={handleKeydown}
-    on:mousemove={handleMouseMove}
-    on:mouseleave={handleMouseLeave}
+    onclick={handleBackdropClick}
+    onkeydown={handleKeydown}
+    onmousemove={handleMouseMove}
+    onmouseleave={handleMouseLeave}
     in:fade={{ duration: 200 }}
     out:fade={{ duration: 150 }}
   >
@@ -204,8 +209,8 @@
       class="relative flex h-full max-h-[95vh] w-full max-w-7xl flex-col bg-white/10"
       in:scale={{ duration: 200, start: 0.95 }}
       out:scale={{ duration: 150, start: 0.95 }}
-      on:click|stopPropagation
-      on:keydown={handleKeydown}
+      onclick={e => e.stopPropagation()}
+      onkeydown={handleKeydown}
       role="button"
       tabindex="0"
     >
@@ -255,8 +260,8 @@
             imageLoaded ? 'opacity-100' : 'opacity-0'
           }`}
           style="filter: drop-shadow(0 25px 25px rgb(0 0 0 / 0.5))"
-          on:load={handleImageLoad}
-          on:error={handleImageError}
+          onload={handleImageLoad}
+          onerror={handleImageError}
         />
 
         <!-- Info Panel Overlay -->
