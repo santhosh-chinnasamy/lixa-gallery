@@ -9,6 +9,10 @@ Select your favorite photos and export
 
 Download latest version from [release](https://github.com/santhosh-chinnasamy/lixa-gallery/releases) page for your OS and run the installer.
 
+**macOS Users**: If you see an error that the app is "damaged and can't be opened" when trying to run it, this is a known Apple Gatekeeper issue for apps downloaded from a browser. You can bypass this by running the following command in your terminal:
+```bash
+xattr -cr "/Applications/Lixa Gallery.app"
+```
 ## Keyboard Shortcuts
 
 - `o` - Open / Select folder
