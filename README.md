@@ -7,7 +7,18 @@ Select your favorite photos and export
 
 [![GitHub release (latest by date)](https://img.shields.io/github/v/release/santhosh-chinnasamy/lixa-gallery?label=Latest%20Version)](https://github.com/santhosh-chinnasamy/lixa-gallery/releases/latest)
 
+### Standard
 Download latest version from [release](https://github.com/santhosh-chinnasamy/lixa-gallery/releases) page for your OS and run the installer.
+
+### Nix / NixOS
+If you have Nix installed, you can run the app directly from the repository:
+```bash
+nix run github:santhosh-chinnasamy/lixa-gallery
+```
+Or locally:
+```bash
+nix run .
+```
 
 ## Keyboard Shortcuts
 

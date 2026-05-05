@@ -10,17 +10,35 @@ Lixa Gallery is an open-source desktop app built with **Tauri** and **SvelteKit*
 
 ### Prerequisites
 
+#### Standard (Manual)
 - [Node.js](https://nodejs.org/) (v20+)
 - [Rust](https://www.rust-lang.org/tools/install)
 - [Tauri CLI](https://tauri.app/start/prerequisites/)
 - [yarn](https://yarnpkg.com/)
 
-### Clone the Repo
+#### Nix (NixOS / Linux)
+If you use Nix or NixOS, a `flake.nix` is provided. You don't need to install the above manually.
+- [Nix](https://nixos.org/download.html) with Flakes enabled.
 
+---
+
+## 🚀 Getting Started
+
+### Standard Workflow
 ```bash
 git clone https://github.com/santhosh-chinnasamy/lixa-gallery.git
 cd lixa-gallery
 yarn
+yarn tauri dev
+```
+
+### Nix Workflow
+```bash
+git clone https://github.com/santhosh-chinnasamy/lixa-gallery.git
+cd lixa-gallery
+# Enter development shell (automatically installs all tools and libraries)
+nix develop
+yarn install
 yarn tauri dev
 ```
 
@@ -83,9 +101,32 @@ Contributions to the documentation are always welcome. If you spot an area for i
 **Clone the repository:**
 
 ```bash
-git clone https://github.com/santhosh-chinnasamylixa-gallery.git
+git clone https://github.com/santhosh-chinnasamy/lixa-gallery.git
 cd lixa-gallery
 ```
+
+### NixOS / Flake Users
+
+The project includes a `flake.nix` that provides both a development shell and a production-wrapped package.
+
+#### 1. Development
+Use `nix develop` to enter a shell with all system dependencies (GTK, WebKit, Rust, Node, etc.) pre-configured.
+```bash
+nix develop
+yarn install
+yarn tauri dev
+```
+
+#### 2. Building & Running (Option B)
+You can build a self-contained, wrapped version of the app using Nix.
+```bash
+nix run .
+```
+
+> **Note on Dependency Hashes**: The `flake.nix` uses a fixed-output derivation for the frontend. If you update `package.json` or `yarn.lock`, the build will fail with a hash mismatch. To fix:
+> 1. Copy the "Actual" hash from the error message.
+> 2. Update the `outputHash` in `flake.nix`.
+
 
 ## Creating a Pull Request
 
