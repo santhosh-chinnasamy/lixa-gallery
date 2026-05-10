@@ -4,6 +4,7 @@ pub mod tauri_api;
 
 use crate::tauri_api::{commands, state::AppState};
 use infra::db;
+use percent_encoding::percent_decode_str;
 
 #[cfg_attr(mobile, tauri::mobile_entry_point)]
 pub fn run() {
@@ -11,6 +12,77 @@ pub fn run() {
         .plugin(tauri_plugin_log::Builder::new().build())
         .plugin(tauri_plugin_dialog::init())
         .plugin(tauri_plugin_opener::init())
+        .register_asynchronous_uri_scheme_protocol("lixa-thumbnail", move |ctx, request, responder| {
+            let app_handle = ctx.app_handle().clone();
+            tauri::async_runtime::spawn(async move {
+                let uri = request.uri().to_string();
+                let prefix = "lixa-thumbnail://localhost/";
+                if !uri.starts_with(prefix) {
+                    responder.respond(
+                        tauri::http::Response::builder()
+                            .status(400)
+                            .body(Vec::new())
+                            .unwrap(),
+                    );
+                    return;
+                }
+
+                let encoded_path = &uri[prefix.len()..];
+                let path_str = percent_decode_str(encoded_path).decode_utf8_lossy().into_owned();
+                let original_path = std::path::PathBuf::from(path_str);
+
+                let state = app_handle.state::<AppState>();
+                let thumb_dir = &state.thumbnail_path;
+
+                // Simple check if it already exists to avoid redundant generation
+                // The thumbnail filename logic must match infra::image
+                let file_stem = original_path.file_stem().and_then(|s| s.to_str()).unwrap_or("unknown");
+                let thumb_full_path = std::path::Path::new(thumb_dir).join(format!("{}.webp", file_stem));
+
+                if thumb_full_path.exists() {
+                    if let Ok(data) = std::fs::read(&thumb_full_path) {
+                        responder.respond(
+                            tauri::http::Response::builder()
+                                .status(200)
+                                .header("Content-Type", "image/webp")
+                                .body(data)
+                                .unwrap(),
+                        );
+                        return;
+                    }
+                }
+
+                // Not found or failed to read, generate on the fly
+                match state.gallery.get_or_create_thumbnail(&original_path, thumb_dir).await {
+                    Ok(generated_path) => {
+                        if let Ok(data) = std::fs::read(&generated_path) {
+                            responder.respond(
+                                tauri::http::Response::builder()
+                                    .status(200)
+                                    .header("Content-Type", "image/webp")
+                                    .body(data)
+                                    .unwrap(),
+                            );
+                        } else {
+                            responder.respond(
+                                tauri::http::Response::builder()
+                                    .status(500)
+                                    .body(Vec::new())
+                                    .unwrap(),
+                            );
+                        }
+                    }
+                    Err(_) => {
+                        responder.respond(
+                            tauri::http::Response::builder()
+                                .status(404)
+                                .body(Vec::new())
+                                .unwrap(),
+                        );
+                    }
+                }
+            });
+        })
         .invoke_handler(tauri::generate_handler![
             commands::scan_folder,
             commands::export_favourites,
@@ -47,6 +119,7 @@ pub fn run() {
                     photo_repo,
                     image_processor,
                     fs.clone(),
+                    tokio::runtime::Handle::current(),
                 );
                 let favourite =
                     services::favourite_service::FavouriteService::new(favourite_repo, fs);

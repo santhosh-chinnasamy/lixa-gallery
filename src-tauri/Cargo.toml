@@ -27,6 +27,7 @@ anyhow = { version = "1.0.98" }
 log = "0.4"
 serde = { version = "1", features = ["derive"] }
 futures = "0.3.31"
+percent-encoding = "2.3"
 
 [workspace]
 members = [

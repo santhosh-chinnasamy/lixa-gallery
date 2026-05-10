@@ -41,21 +41,8 @@ impl ImageProcessorTrait for ImageProcessor {
                 }
             };
 
-            let (width, height) = (img.width(), img.height());
             let max_size = 512;
-            let (thumb_width, thumb_height) = if width > height {
-                let ratio = max_size as f32 / width as f32;
-                (max_size, (height as f32 * ratio) as u32)
-            } else {
-                let ratio = max_size as f32 / height as f32;
-                ((width as f32 * ratio) as u32, max_size)
-            };
-
-            let thumbnail = img.resize(
-                thumb_width,
-                thumb_height,
-                image::imageops::FilterType::CatmullRom,
-            );
+            let thumbnail = img.thumbnail(max_size, max_size);
 
             let file_stem = path.file_stem().and_then(|s| s.to_str()).ok_or_else(|| {
                 GalleryError::InvalidPath(format!("Could not get file stem for {}", path.display()))

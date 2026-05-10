@@ -16,9 +16,13 @@
     sortBy,
     sortOrder,
     gridSize,
+    loadingMode,
     type SortOption,
+    type LoadingMode,
   } from '../stores/galleryStore';
   import { loadPhotos } from './common/ImageOperations';
+  import Zap from '@lucide/svelte/icons/zap';
+  import Clock from '@lucide/svelte/icons/clock';
 
   const sortOptions: { value: SortOption; label: string }[] = [
     { value: 'name', label: 'Name' },
@@ -37,6 +41,10 @@
 
   function toggleSortOrder() {
     sortOrder.update((current) => (current === 'asc' ? 'desc' : 'asc'));
+  }
+
+  function toggleLoadingMode() {
+    loadingMode.set($loadingMode === 'lazy' ? 'sync' : 'lazy');
   }
 </script>
 
@@ -62,8 +70,27 @@
 
   <!-- Bottom Row: Search, Filters, and Sorting -->
   <div class="flex flex-wrap items-center justify-between gap-4">
-    <!-- Search Area -->
-    <div class="flex min-w-[120px] flex-1 items-center">
+    <!-- Performance & Search Area -->
+    <div class="flex min-w-[120px] flex-1 items-center gap-3">
+      <!-- Performance Toggle -->
+      <Button
+        variant="outline"
+        size="icon"
+        class={`h-9 w-9 shrink-0 transition-all duration-200 ${
+          $loadingMode === 'lazy'
+            ? 'bg-blue-50 text-blue-600 border-blue-200 hover:bg-blue-100 dark:bg-blue-900/20 dark:text-blue-400 dark:border-blue-800'
+            : 'bg-background/50 text-muted-foreground'
+        }`}
+        onclick={toggleLoadingMode}
+        title={`Performance Mode: ${$loadingMode === 'lazy' ? 'Lazy (Instant Load)' : 'Sync (Wait for all)'}`}
+      >
+        {#if $loadingMode === 'lazy'}
+          <Zap class="h-4 w-4 fill-current" />
+        {:else}
+          <Clock class="h-4 w-4" />
+        {/if}
+      </Button>
+
       <div class="relative w-full max-w-md">
         <Search
           class="absolute left-2.5 top-2.5 h-4 w-4 text-muted-foreground transition-colors focus-within:text-primary"
