@@ -7,13 +7,15 @@ use tauri::{AppHandle, State};
 pub async fn scan_folder(
     state: State<'_, AppState>,
     path: &str,
+    mode: gallery_core::models::LoadingMode,
 ) -> Result<Vec<PhotoMetadata>, String> {
     state
         .gallery
-        .scan_folder(path, &state.thumbnail_path)
+        .scan_folder(path, &state.thumbnail_path, mode)
         .await
         .map_err(|e| e.to_string())
 }
+
 
 #[tauri::command]
 pub async fn export_favourites(

@@ -15,6 +15,13 @@ pub enum GalleryError {
     Unknown(String),
 }
 
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
+#[serde(rename_all = "lowercase")]
+pub enum LoadingMode {
+    Sync,
+    Lazy,
+}
+
 pub type Result<T> = std::result::Result<T, GalleryError>;
 
 #[derive(Debug, Clone, Serialize, Deserialize)]

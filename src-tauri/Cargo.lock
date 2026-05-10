@@ -2620,6 +2620,7 @@ dependencies = [
  "gallery-core",
  "infra",
  "log",
+ "percent-encoding",
  "serde",
  "serde_json",
  "services",

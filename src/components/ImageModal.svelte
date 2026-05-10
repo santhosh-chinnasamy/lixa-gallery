@@ -239,7 +239,7 @@
         <!-- Thumbnail placeholder/fallback -->
         {#if !imageLoaded || imageError}
           <img
-            src={convertFileSrc(selectedImage.thumbnail_path)}
+            src={`lixa-thumbnail://localhost/${encodeURIComponent(selectedImage.path)}`}
             alt=""
             class={`absolute inset-0 h-full w-full rounded-lg object-contain blur-md transition-opacity duration-500 ${
               imageError ? 'opacity-50' : 'opacity-20'

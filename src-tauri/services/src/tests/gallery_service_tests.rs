@@ -1,6 +1,6 @@
 use super::fakes::*;
 use crate::gallery_service::GalleryService;
-use gallery_core::models::FileMetadata;
+use gallery_core::models::{FileMetadata, LoadingMode};
 use std::path::PathBuf;
 use std::sync::Arc;
 use std::sync::Mutex;
@@ -23,9 +23,9 @@ async fn test_scan_folder_finds_new_images() {
     });
     let processor = Arc::new(FakeImageProcessor);
 
-    let service = GalleryService::new(repo.clone(), processor, fs);
+    let service = GalleryService::new(repo.clone(), processor, fs, tokio::runtime::Handle::current());
 
-    let results = service.scan_folder("/pics", "/thumbs").await.unwrap();
+    let results = service.scan_folder("/pics", "/thumbs", LoadingMode::Sync).await.unwrap();
 
     assert_eq!(results.len(), 1);
     assert_eq!(results[0].metadata.name, "img1.jpg");

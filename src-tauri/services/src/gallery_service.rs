@@ -1,7 +1,7 @@
 use async_recursion::async_recursion;
 use gallery_core::fs::FileSystem;
 use gallery_core::image::ImageProcessor;
-use gallery_core::models::{FolderNode, PhotoMetadata, Result};
+use gallery_core::models::{FolderNode, LoadingMode, PhotoMetadata, Result};
 use gallery_core::repos::PhotoRepository;
 use std::{
     collections::HashMap,
@@ -13,6 +13,7 @@ pub struct GalleryService {
     photo_repo: Arc<dyn PhotoRepository>,
     image_processor: Arc<dyn ImageProcessor>,
     fs: Arc<dyn FileSystem>,
+    runtime: tokio::runtime::Handle,
 }
 
 impl GalleryService {
@@ -20,11 +21,13 @@ impl GalleryService {
         photo_repo: Arc<dyn PhotoRepository>,
         image_processor: Arc<dyn ImageProcessor>,
         fs: Arc<dyn FileSystem>,
+        runtime: tokio::runtime::Handle,
     ) -> Self {
         Self {
             photo_repo,
             image_processor,
             fs,
+            runtime,
         }
     }
 
@@ -32,8 +35,11 @@ impl GalleryService {
         &self,
         folder: &str,
         thumbnail_path: &str,
+        mode: LoadingMode,
     ) -> Result<Vec<PhotoMetadata>> {
         use futures::stream::{self, StreamExt};
+        let start_time = std::time::Instant::now();
+        log::info!("Scanning folder: {} (Mode: {:?})", folder, mode);
 
         let folder_path = PathBuf::from(folder);
         let image_files = self.fs.list_images_in_dir(&folder_path).await?;
@@ -63,7 +69,7 @@ impl GalleryService {
 
         enum MetaResult {
             Cached(PhotoMetadata),
-            NeedsProcessing(PathBuf),
+            NeedsProcessing(PhotoMetadata),
             Failed,
         }
 
@@ -83,7 +89,11 @@ impl GalleryService {
                             });
                         }
                     }
-                    return MetaResult::NeedsProcessing(file_path);
+                    return MetaResult::NeedsProcessing(PhotoMetadata {
+                        metadata: current_metadata,
+                        thumbnail_path: String::new(), // Signal for lazy loading/processing
+                        path: path_str,
+                    });
                 }
                 MetaResult::Failed
             })
@@ -92,26 +102,81 @@ impl GalleryService {
         while let Some(result) = metadata_stream.next().await {
             match result {
                 MetaResult::Cached(photo) => all_photos.push(photo),
-                MetaResult::NeedsProcessing(path) => needs_processing.push(path),
+                MetaResult::NeedsProcessing(photo) => {
+                    needs_processing.push(photo);
+                }
                 MetaResult::Failed => {}
             }
         }
 
-        // 2. Concurrently process new thumbnails
+        if mode == LoadingMode::Lazy {
+            let total_found = all_photos.len() + needs_processing.len();
+            log::info!(
+                "Lazy mode: Returning {} photos immediately. {} need background processing.",
+                total_found,
+                needs_processing.len()
+            );
+
+            let mut final_photos = all_photos;
+            let background_photos = needs_processing.clone();
+            final_photos.extend(needs_processing);
+
+            // Spawn background indexer
+            if !background_photos.is_empty() {
+                let photo_repo = self.photo_repo.clone();
+                let processor = self.image_processor.clone();
+                let t_path = thumbnail_path.to_string();
+
+                self.runtime.spawn(async move {
+                    log::info!(
+                        "Starting butter-smooth background indexing for {} photos",
+                        background_photos.len()
+                    );
+                    
+                    let mut chunk = Vec::new();
+                    for photo in background_photos {
+                        // Rate-limit the background indexer to ensure foreground "butter smoothness".
+                        // This allows the CPU to breathe between heavy image decodes.
+                        tokio::time::sleep(std::time::Duration::from_millis(50)).await;
+
+                        match processor.convert_image(Path::new(&photo.path), &t_path).await {
+                            Ok(processed_photo) => {
+                                chunk.push(processed_photo);
+                                if chunk.len() >= 10 {
+                                    let _ = photo_repo.batch_insert_photos(&chunk).await;
+                                    chunk.clear();
+                                }
+                            },
+                            Err(e) => {
+                                log::debug!("Background processing skipped for {}: {}", photo.path, e);
+                            }
+                        }
+                    }
+                    
+                    if !chunk.is_empty() {
+                        let _ = photo_repo.batch_insert_photos(&chunk).await;
+                    }
+                    log::info!("Background indexing complete.");
+                });
+            }
+
+            log::info!("Scan folder (Lazy) took: {:?}", start_time.elapsed());
+            return Ok(final_photos);
+        }
+
+        // 2. Concurrently process new thumbnails (Sync Mode)
         if !needs_processing.is_empty() {
             let processor = self.image_processor.clone();
             let thumb_path_str = thumbnail_path.to_string();
 
-            // Determine parallelism based on available cores natively
-            let max_concurrent_tasks = std::thread::available_parallelism()
-                .map(|n| n.get())
-                .unwrap_or(4);
+            // Capped concurrency to avoid system freeze on older machines
+            let max_concurrent_tasks = 2;
 
             let mut processing_stream = stream::iter(needs_processing)
-                .map(|file_path| {
+                .map(|photo| {
                     let p = processor.clone();
                     let t = thumb_path_str.clone();
-                    async move { p.convert_image(&file_path, &t).await }
+                    async move { p.convert_image(Path::new(&photo.path), &t).await }
                 })
                 .buffer_unordered(max_concurrent_tasks);
 
@@ -120,7 +185,7 @@ impl GalleryService {
                 processed_photos.push(photo);
             }
 
-            // 3. Chunk database insertions to avoid parameter limit (SQLite max is usually 999 to 32766, safe bet is chunks of 100 images = ~800 parameters)
+            // 3. Chunk database insertions
             if !processed_photos.is_empty() {
                 for chunk in processed_photos.chunks(100) {
                     self.photo_repo.batch_insert_photos(chunk).await?;
@@ -129,7 +194,18 @@ impl GalleryService {
             }
         }
 
+        log::info!("Scan folder (Sync) took: {:?}", start_time.elapsed());
         Ok(all_photos)
+    }
+
+    pub async fn get_or_create_thumbnail(
+        &self,
+        original_path: &Path,
+        thumb_dir: &str,
+    ) -> Result<String> {
+        let metadata = self.image_processor.convert_image(original_path, thumb_dir).await?;
+        self.photo_repo.batch_insert_photos(&[metadata.clone()]).await?;
+        Ok(metadata.thumbnail_path)
     }
 
     #[async_recursion]

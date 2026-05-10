@@ -15,10 +15,31 @@ export const folderTree = writable<FolderNode | null>(null);
 
 export type SortOption = 'name' | 'date' | 'size';
 export type SortOrder = 'asc' | 'desc';
+export type LoadingMode = 'sync' | 'lazy';
 
 export const searchQuery = writable<string>('');
 export const sortBy = writable<SortOption>('name');
 export const sortOrder = writable<SortOrder>('asc');
+
+function createLoadingModeStore() {
+  const STORAGE_KEY = 'loading_mode';
+  const initialValue = (typeof localStorage !== 'undefined'
+    ? localStorage.getItem(STORAGE_KEY) || 'lazy'
+    : 'lazy') as LoadingMode;
+  const { subscribe, set } = writable<LoadingMode>(initialValue);
+
+  return {
+    subscribe,
+    set: (mode: LoadingMode) => {
+      if (typeof localStorage !== 'undefined') {
+        localStorage.setItem(STORAGE_KEY, mode);
+      }
+      set(mode);
+    },
+  };
+}
+
+export const loadingMode = createLoadingModeStore();
 
 function createGridSizeStore() {
   const STORAGE_KEY = 'grid_size';
