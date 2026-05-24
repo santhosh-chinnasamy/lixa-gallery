@@ -12,6 +12,9 @@ webp = "0.3"
 mime_guess = "2.0"
 glob = "0.3"
 anyhow = { workspace = true }
+serde = { workspace = true }
+serde_json = "1"
+chrono = { version = "0.4", features = ["serde"] }
 futures = { workspace = true }
 log = { workspace = true }
 async-trait = { workspace = true }

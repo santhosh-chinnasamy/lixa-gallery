@@ -114,11 +114,13 @@ pub fn run() {
                 let photo_repo = std::sync::Arc::new(db::SqlitePhotoRepository::new(pool.clone()));
                 let favourite_repo = std::sync::Arc::new(db::SqliteFavouriteRepository::new(pool));
                 let image_processor = std::sync::Arc::new(infra::image::ImageProcessor);
+                let benchmark_logger = std::sync::Arc::new(infra::benchmark::JsonlBenchmarkLogger::new(app_data_dir));
 
                 let gallery = services::gallery_service::GalleryService::new(
                     photo_repo,
                     image_processor,
                     fs.clone(),
+                    benchmark_logger,
                     tokio::runtime::Handle::current(),
                 );
                 let favourite =

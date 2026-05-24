@@ -1,4 +1,5 @@
 use async_recursion::async_recursion;
+use gallery_core::benchmark::BenchmarkLogger;
 use gallery_core::fs::FileSystem;
 use gallery_core::image::ImageProcessor;
 use gallery_core::models::{FolderNode, LoadingMode, PhotoMetadata, Result};
@@ -13,6 +14,7 @@ pub struct GalleryService {
     photo_repo: Arc<dyn PhotoRepository>,
     image_processor: Arc<dyn ImageProcessor>,
     fs: Arc<dyn FileSystem>,
+    benchmark_logger: Arc<dyn BenchmarkLogger>,
     runtime: tokio::runtime::Handle,
 }
 
@@ -21,12 +23,14 @@ impl GalleryService {
         photo_repo: Arc<dyn PhotoRepository>,
         image_processor: Arc<dyn ImageProcessor>,
         fs: Arc<dyn FileSystem>,
+        benchmark_logger: Arc<dyn BenchmarkLogger>,
         runtime: tokio::runtime::Handle,
     ) -> Self {
         Self {
             photo_repo,
             image_processor,
             fs,
+            benchmark_logger,
             runtime,
         }
     }
@@ -38,11 +42,14 @@ impl GalleryService {
         mode: LoadingMode,
     ) -> Result<Vec<PhotoMetadata>> {
         use futures::stream::{self, StreamExt};
+        use gallery_core::benchmark::BenchmarkEntry;
+
         let start_time = std::time::Instant::now();
         log::info!("Scanning folder: {} (Mode: {:?})", folder, mode);
 
         let folder_path = PathBuf::from(folder);
         let image_files = self.fs.list_images_in_dir(&folder_path).await?;
+        let file_count = image_files.len();
 
         let mut prefix = folder.to_string();
         if !prefix.ends_with(std::path::MAIN_SEPARATOR) {
@@ -109,6 +116,8 @@ impl GalleryService {
             }
         }
 
+        let final_result;
+
         if mode == LoadingMode::Lazy {
             let total_found = all_photos.len() + needs_processing.len();
             log::info!(
@@ -160,42 +169,59 @@ impl GalleryService {
                 });
             }
 
-            log::info!("Scan folder (Lazy) took: {:?}", start_time.elapsed());
-            return Ok(final_photos);
-        }
+            final_result = Ok(final_photos);
+        } else {
+            // 2. Concurrently process new thumbnails (Sync Mode)
+            if !needs_processing.is_empty() {
+                let processor = self.image_processor.clone();
+                let thumb_path_str = thumbnail_path.to_string();
 
-        // 2. Concurrently process new thumbnails (Sync Mode)
-        if !needs_processing.is_empty() {
-            let processor = self.image_processor.clone();
-            let thumb_path_str = thumbnail_path.to_string();
+                // Capped concurrency to avoid system freeze on older machines
+                let max_concurrent_tasks = 2;
 
-            // Capped concurrency to avoid system freeze on older machines
-            let max_concurrent_tasks = 2;
+                let mut processing_stream = stream::iter(needs_processing)
+                    .map(|photo| {
+                        let p = processor.clone();
+                        let t = thumb_path_str.clone();
+                        async move { p.convert_image(Path::new(&photo.path), &t).await }
+                    })
+                    .buffer_unordered(max_concurrent_tasks);
 
-            let mut processing_stream = stream::iter(needs_processing)
-                .map(|photo| {
-                    let p = processor.clone();
-                    let t = thumb_path_str.clone();
-                    async move { p.convert_image(Path::new(&photo.path), &t).await }
-                })
-                .buffer_unordered(max_concurrent_tasks);
-
-            let mut processed_photos = Vec::new();
-            while let Some(Ok(photo)) = processing_stream.next().await {
-                processed_photos.push(photo);
-            }
-
-            // 3. Chunk database insertions
-            if !processed_photos.is_empty() {
-                for chunk in processed_photos.chunks(100) {
-                    self.photo_repo.batch_insert_photos(chunk).await?;
+                let mut processed_photos = Vec::new();
+                while let Some(Ok(photo)) = processing_stream.next().await {
+                    processed_photos.push(photo);
                 }
-                all_photos.extend(processed_photos);
+
+                // 3. Chunk database insertions
+                if !processed_photos.is_empty() {
+                    for chunk in processed_photos.chunks(100) {
+                        self.photo_repo.batch_insert_photos(chunk).await?;
+                    }
+                    all_photos.extend(processed_photos);
+                }
             }
+            final_result = Ok(all_photos);
         }
 
-        log::info!("Scan folder (Sync) took: {:?}", start_time.elapsed());
-        Ok(all_photos)
+        let elapsed = start_time.elapsed();
+        let duration_ms = elapsed.as_millis() as u64;
+
+        if let Ok(_) = final_result {
+            let entry = BenchmarkEntry {
+                timestamp: chrono::Utc::now(),
+                approach_name: "baseline".to_string(),
+                operation: "full_folder_scan".to_string(),
+                file_count,
+                duration_ms,
+                avg_ms_per_image: if file_count > 0 { duration_ms as f64 / file_count as f64 } else { 0.0 },
+                cpu_cores_detected: std::thread::available_parallelism().map(|n| n.get()).unwrap_or(1),
+                mode: format!("{:?}", mode),
+            };
+            let _ = self.benchmark_logger.log(entry).await;
+        }
+
+        log::info!("Scan folder ({:?}) took: {:?}", mode, elapsed);
+        final_result
     }
 
     pub async fn get_or_create_thumbnail(

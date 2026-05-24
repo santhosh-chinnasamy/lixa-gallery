@@ -1,4 +1,5 @@
 use async_trait::async_trait;
+use gallery_core::benchmark::{BenchmarkEntry, BenchmarkLogger};
 use gallery_core::events::EventHub;
 use gallery_core::fs::FileSystem;
 use gallery_core::image::ImageProcessor;
@@ -129,6 +130,14 @@ impl FavouriteRepository for FakeFavouriteRepository {
     }
     async fn clear_favourites(&self) -> Result<()> {
         self.favourites.lock().unwrap().clear();
+        Ok(())
+    }
+}
+
+pub struct FakeBenchmarkLogger;
+#[async_trait]
+impl BenchmarkLogger for FakeBenchmarkLogger {
+    async fn log(&self, _entry: BenchmarkEntry) -> Result<()> {
         Ok(())
     }
 }

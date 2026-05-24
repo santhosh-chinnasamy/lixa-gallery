@@ -694,8 +694,10 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "145052bdd345b87320e369255277e3fb5152762ad123a901ef5c262dd38fe8d2"
 dependencies = [
  "iana-time-zone",
+ "js-sys",
  "num-traits",
  "serde",
+ "wasm-bindgen",
  "windows-link 0.2.0",
 ]
 
@@ -1559,6 +1561,7 @@ version = "0.7.0"
 dependencies = [
  "anyhow",
  "async-trait",
+ "chrono",
  "futures",
  "serde",
  "serde_json",
@@ -2291,6 +2294,7 @@ version = "0.7.0"
 dependencies = [
  "anyhow",
  "async-trait",
+ "chrono",
  "futures",
  "gallery-core",
  "glob",
@@ -2298,6 +2302,8 @@ dependencies = [
  "log",
  "mime_guess",
  "rayon",
+ "serde",
+ "serde_json",
  "sqlx",
  "tempfile",
  "tokio",
@@ -4493,6 +4499,7 @@ dependencies = [
  "anyhow",
  "async-recursion",
  "async-trait",
+ "chrono",
  "futures",
  "gallery-core",
  "log",
