@@ -22,8 +22,9 @@ async fn test_scan_folder_finds_new_images() {
         photos: Mutex::new(vec![]),
     });
     let processor = Arc::new(FakeImageProcessor);
+    let logger = Arc::new(FakeBenchmarkLogger);
 
-    let service = GalleryService::new(repo.clone(), processor, fs, tokio::runtime::Handle::current());
+    let service = GalleryService::new(repo.clone(), processor, fs, logger, tokio::runtime::Handle::current());
 
     let results = service.scan_folder("/pics", "/thumbs", LoadingMode::Sync).await.unwrap();
 
