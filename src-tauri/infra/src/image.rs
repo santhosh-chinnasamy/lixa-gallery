@@ -3,12 +3,30 @@ use async_trait::async_trait;
 use gallery_core::image::ImageProcessor as ImageProcessorTrait;
 use gallery_core::models::{GalleryError, PhotoMetadata, Result};
 use std::path::{Path, PathBuf};
+use std::sync::Arc;
+use tokio::sync::Semaphore;
 
-pub struct ImageProcessor;
+pub struct ImageProcessor {
+    semaphore: Arc<Semaphore>,
+}
+
+impl ImageProcessor {
+    pub fn new() -> Self {
+        Self {
+            semaphore: Arc::new(Semaphore::new(3)),
+        }
+    }
+}
 
 #[async_trait]
 impl ImageProcessorTrait for ImageProcessor {
+    fn get_semaphore(&self) -> Option<Arc<Semaphore>> {
+        Some(self.semaphore.clone())
+    }
+
     async fn convert_image(&self, file_path: &Path, thumbnail_dir: &str) -> Result<PhotoMetadata> {
+        let _permit = self.semaphore.acquire().await.map_err(|e| GalleryError::Unknown(e.to_string()))?;
+        
         let path = file_path.to_path_buf();
         let thumb_dir = thumbnail_dir.to_string();
 

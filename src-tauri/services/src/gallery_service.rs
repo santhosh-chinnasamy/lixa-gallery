@@ -138,16 +138,12 @@ impl GalleryService {
 
                 self.runtime.spawn(async move {
                     log::info!(
-                        "Starting butter-smooth background indexing for {} photos",
+                        "Starting optimized background indexing for {} photos",
                         background_photos.len()
                     );
                     
                     let mut chunk = Vec::new();
                     for photo in background_photos {
-                        // Rate-limit the background indexer to ensure foreground "butter smoothness".
-                        // This allows the CPU to breathe between heavy image decodes.
-                        tokio::time::sleep(std::time::Duration::from_millis(50)).await;
-
                         match processor.convert_image(Path::new(&photo.path), &t_path).await {
                             Ok(processed_photo) => {
                                 chunk.push(processed_photo);
@@ -176,8 +172,8 @@ impl GalleryService {
                 let processor = self.image_processor.clone();
                 let thumb_path_str = thumbnail_path.to_string();
 
-                // Capped concurrency to avoid system freeze on older machines
-                let max_concurrent_tasks = 2;
+                // Increase concurrency since we now have a global semaphore to protect CPU
+                let max_concurrent_tasks = 8;
 
                 let mut processing_stream = stream::iter(needs_processing)
                     .map(|photo| {
@@ -209,7 +205,7 @@ impl GalleryService {
         if let Ok(_) = final_result {
             let entry = BenchmarkEntry {
                 timestamp: chrono::Utc::now(),
-                approach_name: "baseline".to_string(),
+                approach_name: "tokio_semaphore".to_string(),
                 operation: "full_folder_scan".to_string(),
                 file_count,
                 duration_ms,
