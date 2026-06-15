@@ -113,7 +113,7 @@ pub fn run() {
                 let fs = std::sync::Arc::new(infra::fs_ops::LocalFileSystem);
                 let photo_repo = std::sync::Arc::new(db::SqlitePhotoRepository::new(pool.clone()));
                 let favourite_repo = std::sync::Arc::new(db::SqliteFavouriteRepository::new(pool));
-                let image_processor = std::sync::Arc::new(infra::image::ImageProcessor::new());
+                let image_processor = std::sync::Arc::new(infra::image::RayonImageProcessor::new());
                 let benchmark_logger = std::sync::Arc::new(infra::benchmark::JsonlBenchmarkLogger::new(app_data_dir));
 
                 let gallery = services::gallery_service::GalleryService::new(
