@@ -4,29 +4,25 @@ use gallery_core::image::ImageProcessor as ImageProcessorTrait;
 use gallery_core::models::{GalleryError, PhotoMetadata, Result};
 use std::path::{Path, PathBuf};
 use std::sync::Arc;
-use tokio::sync::Semaphore;
 
-pub struct ImageProcessor {
-    semaphore: Arc<Semaphore>,
+pub struct RayonImageProcessor {
+    pool: Arc<rayon::ThreadPool>,
 }
 
-impl ImageProcessor {
+impl RayonImageProcessor {
     pub fn new() -> Self {
-        Self {
-            semaphore: Arc::new(Semaphore::new(3)),
-        }
+        let pool = rayon::ThreadPoolBuilder::new()
+            .num_threads(4)
+            .thread_name(|i| format!("rayon-img-{}", i))
+            .build()
+            .expect("Failed to create Rayon thread pool");
+        Self { pool: Arc::new(pool) }
     }
 }
 
 #[async_trait]
-impl ImageProcessorTrait for ImageProcessor {
-    fn get_semaphore(&self) -> Option<Arc<Semaphore>> {
-        Some(self.semaphore.clone())
-    }
-
+impl ImageProcessorTrait for RayonImageProcessor {
     async fn convert_image(&self, file_path: &Path, thumbnail_dir: &str) -> Result<PhotoMetadata> {
-        let _permit = self.semaphore.acquire().await.map_err(|e| GalleryError::Unknown(e.to_string()))?;
-        
         let path = file_path.to_path_buf();
         let thumb_dir = thumbnail_dir.to_string();
 
@@ -46,34 +42,38 @@ impl ImageProcessorTrait for ImageProcessor {
             });
         }
 
+        // We wrap the blocking rayon call in tokio::task::spawn_blocking to keep the async executor free
+        let pool = self.pool.clone();
         let output_path_result = tokio::task::spawn_blocking(move || {
-            let img = match image::open(&path) {
-                Ok(img) => img,
-                Err(e) => {
-                    log::warn!(
-                        "Failed to open image {}: {}. Falling back to original.",
-                        path.display(),
-                        e
-                    );
-                    return Ok::<Option<PathBuf>, GalleryError>(None);
-                }
-            };
+            pool.install(|| {
+                let img = match image::open(&path) {
+                    Ok(img) => img,
+                    Err(e) => {
+                        log::warn!(
+                            "Failed to open image {}: {}. Falling back to original.",
+                            path.display(),
+                            e
+                        );
+                        return Ok::<Option<PathBuf>, GalleryError>(None);
+                    }
+                };
 
-            let max_size = 512;
-            let thumbnail = img.thumbnail(max_size, max_size);
+                let max_size = 512;
+                let thumbnail = img.thumbnail(max_size, max_size);
 
-            let file_stem = path.file_stem().and_then(|s| s.to_str()).ok_or_else(|| {
-                GalleryError::InvalidPath(format!("Could not get file stem for {}", path.display()))
-            })?;
+                let file_stem = path.file_stem().and_then(|s| s.to_str()).ok_or_else(|| {
+                    GalleryError::InvalidPath(format!("Could not get file stem for {}", path.display()))
+                })?;
 
-            let output_filename = format!("{}.webp", file_stem);
-            let output_path = PathBuf::from(thumb_dir).join(&output_filename);
+                let output_filename = format!("{}.webp", file_stem);
+                let output_path = PathBuf::from(thumb_dir).join(&output_filename);
 
-            thumbnail
-                .save(&output_path)
-                .map_err(|e| GalleryError::Image(e.to_string()))?;
+                thumbnail
+                    .save(&output_path)
+                    .map_err(|e| GalleryError::Image(e.to_string()))?;
 
-            Ok::<Option<PathBuf>, GalleryError>(Some(output_path))
+                Ok::<Option<PathBuf>, GalleryError>(Some(output_path))
+            })
         })
         .await
         .map_err(|e| GalleryError::Unknown(e.to_string()))?;

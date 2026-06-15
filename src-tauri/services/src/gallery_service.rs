@@ -205,7 +205,7 @@ impl GalleryService {
         if let Ok(_) = final_result {
             let entry = BenchmarkEntry {
                 timestamp: chrono::Utc::now(),
-                approach_name: "tokio_semaphore".to_string(),
+                approach_name: "rayon_fixed_pool".to_string(),
                 operation: "full_folder_scan".to_string(),
                 file_count,
                 duration_ms,

@@ -6,9 +6,7 @@ use gallery_core::image::ImageProcessor;
 use gallery_core::models::{Favourite, FileMetadata, GalleryError, PhotoMetadata, Result};
 use gallery_core::repos::{CachedPhotoRecord, FavouriteRepository, PhotoRepository};
 use std::path::{Path, PathBuf};
-use std::sync::Arc;
 use std::sync::Mutex;
-use tokio::sync::Semaphore;
 
 pub struct FakeFileSystem {
     pub files: Mutex<Vec<(PathBuf, FileMetadata)>>,
@@ -66,10 +64,6 @@ impl FileSystem for FakeFileSystem {
 pub struct FakeImageProcessor;
 #[async_trait]
 impl ImageProcessor for FakeImageProcessor {
-    fn get_semaphore(&self) -> Option<Arc<Semaphore>> {
-        None
-    }
-
     async fn convert_image(&self, path: &Path, _thumb_dir: &str) -> Result<PhotoMetadata> {
         Ok(PhotoMetadata {
             metadata: FileMetadata {
