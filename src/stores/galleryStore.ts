@@ -23,9 +23,11 @@ export const sortOrder = writable<SortOrder>('asc');
 
 function createLoadingModeStore() {
   const STORAGE_KEY = 'loading_mode';
-  const initialValue = (typeof localStorage !== 'undefined'
-    ? localStorage.getItem(STORAGE_KEY) || 'lazy'
-    : 'lazy') as LoadingMode;
+  const initialValue = (
+    typeof localStorage !== 'undefined'
+      ? localStorage.getItem(STORAGE_KEY) || 'lazy'
+      : 'lazy'
+  ) as LoadingMode;
   const { subscribe, set } = writable<LoadingMode>(initialValue);
 
   return {

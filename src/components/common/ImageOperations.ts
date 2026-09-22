@@ -1,6 +1,14 @@
 import { invoke } from '@tauri-apps/api/core';
 import { open } from '@tauri-apps/plugin-dialog';
-import { photos, isLoading, favorites, currentFolder, recentFolders, loadFolderTree, loadingMode } from '../../stores/galleryStore';
+import {
+  photos,
+  isLoading,
+  favorites,
+  currentFolder,
+  recentFolders,
+  loadFolderTree,
+  loadingMode,
+} from '../../stores/galleryStore';
 import { get } from 'svelte/store';
 import type { PhotoMetadata } from '../../types/photo';
 
@@ -70,7 +78,7 @@ export async function exportFavorites(mode: 'copy' | 'move' = 'copy') {
 
 export async function clearFavorites() {
   const confirmed = await confirm(
-    'Are you sure you want to clear all favourites? This action cannot be undone.'
+    'Are you sure you want to clear all favourites? This action cannot be undone.',
   );
 
   if (confirmed) {

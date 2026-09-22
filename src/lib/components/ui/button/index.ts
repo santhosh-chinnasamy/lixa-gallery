@@ -1,7 +1,7 @@
 import type { WithElementRef } from 'bits-ui';
 import type {
-	HTMLAnchorAttributes,
-	HTMLButtonAttributes,
+  HTMLAnchorAttributes,
+  HTMLButtonAttributes,
 } from 'svelte/elements';
 import { type VariantProps, tv } from 'tailwind-variants';
 import Root from './button.svelte';
@@ -43,10 +43,12 @@ type ButtonProps = WithElementRef<HTMLButtonAttributes> &
   };
 
 export {
-	//
-	Root as Button, Root, buttonVariants,
-	type ButtonProps,
-	type ButtonSize,
-	type ButtonVariant, type ButtonProps as Props
+  //
+  Root as Button,
+  Root,
+  buttonVariants,
+  type ButtonProps,
+  type ButtonSize,
+  type ButtonVariant,
+  type ButtonProps as Props,
 };
-

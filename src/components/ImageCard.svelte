@@ -21,9 +21,11 @@
   let isFavourite = $derived($favorites.has(photo.path));
   let fileName = $derived(photo.metadata.name);
 
-  // Determine the image source: ALWAYS use our custom protocol for thumbnails. 
+  // Determine the image source: ALWAYS use our custom protocol for thumbnails.
   // It handles both cached and on-the-fly generation efficiently in Rust.
-  let thumbnailSrc = $derived(`lixa-thumbnail://localhost/${encodeURIComponent(photo.path)}`);
+  let thumbnailSrc = $derived(
+    `lixa-thumbnail://localhost/${encodeURIComponent(photo.path)}`,
+  );
 
   let imageLoaded = $state(false);
   let imageError = $state(false);
@@ -67,7 +69,9 @@
 >
   <Card.Content class="relative overflow-hidden rounded-lg p-0">
     <!-- Image container with consistent aspect ratio -->
-    <div class="aspect-[1/1] h-auto w-full overflow-hidden bg-gray-100 dark:bg-gray-800">
+    <div
+      class="aspect-[1/1] h-auto w-full overflow-hidden bg-gray-100 dark:bg-gray-800"
+    >
       <!-- Loading placeholder -->
       {#if !imageLoaded && !imageError}
         <div
@@ -79,10 +83,12 @@
 
       <!-- Error placeholder -->
       {#if imageError}
-        <div class="flex h-full w-full items-center justify-center bg-gray-100 dark:bg-gray-800">
+        <div
+          class="flex h-full w-full items-center justify-center bg-gray-100 dark:bg-gray-800"
+        >
           <div class="p-2 text-center text-xs text-gray-500">
             <div>Failed to load</div>
-            <div class="text-gray-400 truncate max-w-full px-2">{fileName}</div>
+            <div class="max-w-full truncate px-2 text-gray-400">{fileName}</div>
           </div>
         </div>
       {/if}

@@ -13,7 +13,7 @@
     variant = 'destructive',
     icon = AlertTriangle,
     onConfirm = () => {},
-    onCancel = () => {}
+    onCancel = () => {},
   }: {
     open: boolean;
     title?: string;
@@ -42,14 +42,18 @@
     <Dialog.Header>
       <Dialog.Title class="flex items-center gap-2">
         {@const IconComponent = icon}
-        <IconComponent class="h-5 w-5 {variant === 'destructive' ? 'text-destructive' : 'text-primary'}" />
+        <IconComponent
+          class="h-5 w-5 {variant === 'destructive'
+            ? 'text-destructive'
+            : 'text-primary'}"
+        />
         {title}
       </Dialog.Title>
       <Dialog.Description class="text-left">
         {description}
       </Dialog.Description>
     </Dialog.Header>
-    
+
     <div class="flex justify-end gap-2 pt-4">
       <Button variant="outline" onclick={handleCancel}>
         {cancelText}

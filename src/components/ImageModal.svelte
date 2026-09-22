@@ -2,7 +2,7 @@
   import { Button } from '$lib/components/ui/button';
   import { cn } from '$lib/utils';
   import { convertFileSrc } from '@tauri-apps/api/core';
-  import { fade, scale } from 'svelte/transition';
+  import { fade, scale as scaleTransition } from 'svelte/transition';
   import { favorites, photos } from '../stores/galleryStore';
   import Filename from './Filename.svelte';
   import Heart from './icons/Heart.svelte';
@@ -11,27 +11,75 @@
   import ArrowLeft from './icons/ArrowLeft.svelte';
   import Close from './icons/Close.svelte';
   import Info from '@lucide/svelte/icons/info';
+  import ZoomIn from '@lucide/svelte/icons/zoom-in';
+  import ZoomOut from '@lucide/svelte/icons/zoom-out';
+  import RotateCcw from '@lucide/svelte/icons/rotate-ccw';
   import type { PhotoMetadata } from '../types/photo';
-  export let selectedImage: PhotoMetadata | null;
-  export let onClose: () => void;
-  export let source = page.url.pathname === '/' ? 'all' : 'favorites';
 
-  // For favorites, we need to find photos by path since favorites store paths
-  $: photoSource =
+  // Props using Svelte 5 props rune
+  let {
+    selectedImage = $bindable(),
+    onClose,
+    source = page.url.pathname === '/' ? 'all' : 'favorites',
+  }: {
+    selectedImage: PhotoMetadata | null;
+    onClose: () => void;
+    source?: 'all' | 'favorites';
+  } = $props();
+
+  // Reactive derived values
+  const photoSource = $derived(
     source === 'favorites'
       ? $photos.filter((photo) => $favorites.has(photo.path))
-      : $photos;
-  $: currentIndex = selectedImage
-    ? photoSource.findIndex((photo) => photo.path === selectedImage!.path)
-    : -1;
-  $: canShowPrevious = currentIndex > 0;
-  $: canShowNext = currentIndex < photoSource.length - 1;
-  $: isFavourite = selectedImage ? $favorites.has(selectedImage.path) : false;
+      : $photos,
+  );
 
-  // Image preloading and loading states
-  let imageLoaded = false;
-  let imageError = false;
-  let preloadedImages = new Map<string, HTMLImageElement>();
+  const currentIndex = $derived(
+    selectedImage
+      ? photoSource.findIndex((photo) => photo.path === selectedImage.path)
+      : -1,
+  );
+
+  const canShowPrevious = $derived(currentIndex > 0);
+  const canShowNext = $derived(currentIndex < photoSource.length - 1);
+  const isFavourite = $derived(
+    selectedImage ? $favorites.has(selectedImage.path) : false,
+  );
+  const fileName = $derived(selectedImage?.metadata.name);
+
+  // Modal and Image states
+  let imageLoaded = $state(false);
+  let imageError = $state(false);
+  const preloadedImages = new Map<string, HTMLImageElement>();
+
+  let showInfo = $state(false);
+  let imageWidth = $state(0);
+  let imageHeight = $state(0);
+
+  let showUI = $state(true);
+  let uiTimeoutRef: ReturnType<typeof setTimeout>;
+
+  // Zoom, Pan, and Filter states
+  let zoomScale = $state(1.0);
+  let offsetX = $state(0);
+  let offsetY = $state(0);
+  let isDragging = $state(false);
+  let activeFilter = $state<'none' | 'grayscale' | 'sepia' | 'invert'>('none');
+
+  let imageEl = $state<HTMLImageElement | null>(null);
+  let containerWidth = $state(0);
+  let containerHeight = $state(0);
+
+  // Mouse drag coordinates
+  let startX = 0;
+  let startY = 0;
+
+  // Touch gesture state
+  let isTouchDragging = $state(false);
+  let touchStartX = 0;
+  let touchStartY = 0;
+  let initialPinchDistance = 0;
+  let initialScale = 1.0;
 
   const keyboardActions = {
     Escape: onClose,
@@ -57,16 +105,12 @@
   function showPrevious() {
     if (canShowPrevious) {
       selectedImage = photoSource[currentIndex - 1];
-      imageLoaded = false;
-      imageError = false;
     }
   }
 
   function showNext() {
     if (canShowNext) {
       selectedImage = photoSource[currentIndex + 1];
-      imageLoaded = false;
-      imageError = false;
     }
   }
 
@@ -82,11 +126,6 @@
     imageHeight = img.naturalHeight;
     imageLoaded = true;
     imageError = false;
-  }
-
-  function handleImageError() {
-    imageError = true;
-    imageLoaded = false;
   }
 
   // Preload adjacent images
@@ -112,17 +151,164 @@
     });
   }
 
-  // Reactive statement to preload when selectedImage changes
-  $: if (selectedImage) {
-    imageLoaded = false;
-    imageError = false;
-    preloadAdjacentImages();
+  // Zoom / Pan helper functions
+  function clamp(val: number, min: number, max: number) {
+    return Math.max(min, Math.min(max, val));
   }
 
-  let showInfo = false;
-  let imageWidth = 0;
-  let imageHeight = 0;
+  function getBounds() {
+    if (!imageEl || !containerWidth || !containerHeight) {
+      return { minX: 0, maxX: 0, minY: 0, maxY: 0 };
+    }
+    const renderedWidth = imageEl.clientWidth;
+    const renderedHeight = imageEl.clientHeight;
 
+    // Bounds check to prevent panning empty space when zoomed image fits or exceeds screen
+    const maxOffsetX = Math.max(
+      0,
+      (renderedWidth * zoomScale - containerWidth) / 2,
+    );
+    const maxOffsetY = Math.max(
+      0,
+      (renderedHeight * zoomScale - containerHeight) / 2,
+    );
+    return {
+      minX: -maxOffsetX,
+      maxX: maxOffsetX,
+      minY: -maxOffsetY,
+      maxY: maxOffsetY,
+    };
+  }
+
+  function clampOffsets() {
+    const bounds = getBounds();
+    offsetX = clamp(offsetX, bounds.minX, bounds.maxX);
+    offsetY = clamp(offsetY, bounds.minY, bounds.maxY);
+  }
+
+  function zoomIn() {
+    zoomScale = Math.min(5.0, zoomScale + 0.5);
+  }
+
+  function zoomOut() {
+    zoomScale = Math.max(1.0, zoomScale - 0.5);
+  }
+
+  function resetAll() {
+    zoomScale = 1.0;
+    offsetX = 0;
+    offsetY = 0;
+    activeFilter = 'none';
+  }
+
+  // Mouse Dragging handlers
+  function handleMouseDown(e: MouseEvent) {
+    if (zoomScale <= 1.0) return;
+    e.preventDefault();
+    isDragging = true;
+    startX = e.clientX - offsetX;
+    startY = e.clientY - offsetY;
+  }
+
+  function handleWindowMouseMove(e: MouseEvent) {
+    resetUITimer();
+    if (!isDragging) return;
+    const bounds = getBounds();
+    offsetX = clamp(e.clientX - startX, bounds.minX, bounds.maxX);
+    offsetY = clamp(e.clientY - startY, bounds.minY, bounds.maxY);
+  }
+
+  function handleWindowMouseUp() {
+    isDragging = false;
+    isTouchDragging = false;
+  }
+
+  function handleDoubleClick(e: MouseEvent) {
+    e.preventDefault();
+    if (zoomScale > 1.0) {
+      zoomScale = 1.0;
+      offsetX = 0;
+      offsetY = 0;
+    } else {
+      zoomScale = 2.5;
+      offsetX = 0;
+      offsetY = 0;
+    }
+  }
+
+  function handleWheel(e: WheelEvent) {
+    if (!imageLoaded) return;
+    e.preventDefault();
+    const zoomFactor = 1.1;
+    let newScale = zoomScale;
+    if (e.deltaY < 0) {
+      newScale = Math.min(5.0, zoomScale * zoomFactor);
+    } else {
+      newScale = Math.max(1.0, zoomScale / zoomFactor);
+    }
+    zoomScale = newScale;
+  }
+
+  // Touch gesture handlers
+  function handleTouchStart(e: TouchEvent) {
+    resetUITimer();
+    if (!imageLoaded) return;
+
+    if (e.touches.length === 1) {
+      if (zoomScale > 1.0) {
+        isTouchDragging = true;
+        touchStartX = e.touches[0].clientX - offsetX;
+        touchStartY = e.touches[0].clientY - offsetY;
+      }
+    } else if (e.touches.length === 2) {
+      isTouchDragging = false;
+      const dx = e.touches[0].clientX - e.touches[1].clientX;
+      const dy = e.touches[0].clientY - e.touches[1].clientY;
+      initialPinchDistance = Math.sqrt(dx * dx + dy * dy);
+      initialScale = zoomScale;
+    }
+  }
+
+  function handleTouchMove(e: TouchEvent) {
+    resetUITimer();
+    if (!imageLoaded) return;
+
+    if (e.touches.length === 1 && isTouchDragging) {
+      e.preventDefault();
+      const bounds = getBounds();
+      offsetX = clamp(
+        e.touches[0].clientX - touchStartX,
+        bounds.minX,
+        bounds.maxX,
+      );
+      offsetY = clamp(
+        e.touches[0].clientY - touchStartY,
+        bounds.minY,
+        bounds.maxY,
+      );
+    } else if (e.touches.length === 2 && initialPinchDistance > 0) {
+      e.preventDefault();
+      const dx = e.touches[0].clientX - e.touches[1].clientX;
+      const dy = e.touches[0].clientY - e.touches[1].clientY;
+      const currentDistance = Math.sqrt(dx * dx + dy * dy);
+      const factor = currentDistance / initialPinchDistance;
+      zoomScale = clamp(initialScale * factor, 1.0, 5.0);
+    }
+  }
+
+  function handleTouchEnd(e: TouchEvent) {
+    if (e.touches.length === 0) {
+      isTouchDragging = false;
+      initialPinchDistance = 0;
+    } else if (e.touches.length === 1) {
+      isTouchDragging = true;
+      touchStartX = e.touches[0].clientX - offsetX;
+      touchStartY = e.touches[0].clientY - offsetY;
+      initialPinchDistance = 0;
+    }
+  }
+
+  // Info / Utility functions
   function formatBytes(bytes: number, decimals = 2) {
     if (!+bytes) return '0 Bytes';
     const k = 1024;
@@ -136,49 +322,77 @@
     showInfo = !showInfo;
   }
 
-  $: fileName = selectedImage?.metadata.name;
-
-  let showUI = true;
-  let uiTimeoutRef: ReturnType<typeof setTimeout>;
-
   function resetUITimer() {
     showUI = true;
     clearTimeout(uiTimeoutRef);
     uiTimeoutRef = setTimeout(() => {
-      showUI = false;
-    }, 2000);
-  }
-
-  function handleMouseMove() {
-    resetUITimer();
+      // Don't auto-hide UI if zoomed in or dragging
+      if (zoomScale === 1.0 && !isDragging && !isTouchDragging) {
+        showUI = false;
+      }
+    }, 2500);
   }
 
   function handleMouseLeave() {
     clearTimeout(uiTimeoutRef);
-    showUI = false;
-  }
-
-  // Reactive block to initialize timer when UI first shows
-  $: {
-    if (selectedImage) {
-      resetUITimer();
+    // Don't auto-hide UI if zoomed in
+    if (zoomScale === 1.0) {
+      showUI = false;
     }
   }
+
+  // Filter style string builder
+  const filterStyle = $derived.by(() => {
+    switch (activeFilter) {
+      case 'grayscale':
+        return 'grayscale(100%)';
+      case 'sepia':
+        return 'sepia(100%)';
+      case 'invert':
+        return 'invert(100%)';
+      default:
+        return '';
+    }
+  });
+
+  // Effects for reactivity
+  $effect(() => {
+    if (selectedImage) {
+      imageLoaded = false;
+      imageError = false;
+      resetAll();
+      preloadAdjacentImages();
+      resetUITimer();
+    }
+    return () => clearTimeout(uiTimeoutRef);
+  });
+
+  $effect(() => {
+    // Automatically runs when zoomScale, containerWidth, or containerHeight changes
+    if (zoomScale || containerWidth || containerHeight) {
+      clampOffsets();
+      showUI = true;
+    }
+  });
 </script>
 
-<svelte:window on:keydown={handleKeydown} />
+<svelte:window
+  onkeydown={handleKeydown}
+  onmousemove={handleWindowMouseMove}
+  onmouseup={handleWindowMouseUp}
+/>
 
 {#if selectedImage}
   <div
-    class="fixed inset-0 z-50 flex items-center justify-center bg-black/80 p-4 backdrop-blur-3xl transition-colors duration-500"
+    class="fixed inset-0 z-50 flex items-center justify-center bg-black/85 p-4 backdrop-blur-3xl transition-colors duration-500"
     role="dialog"
     aria-modal="true"
     aria-label="Image preview"
     tabindex="-1"
-    on:click={handleBackdropClick}
-    on:keydown={handleKeydown}
-    on:mousemove={handleMouseMove}
-    on:mouseleave={handleMouseLeave}
+    onclick={handleBackdropClick}
+    onkeydown={handleKeydown}
+    onmousemove={resetUITimer}
+    onmouseleave={handleMouseLeave}
     in:fade={{ duration: 200 }}
     out:fade={{ duration: 150 }}
   >
@@ -191,7 +405,7 @@
       <Button
         variant="ghost"
         size="icon"
-        class="h-10 w-10 rounded-full bg-black/50 text-white hover:bg-black/70 focus:ring-2 focus:ring-white/50"
+        class="h-12 w-12 rounded-full bg-black/50 text-white hover:bg-black/70 focus:ring-2 focus:ring-white/50"
         onclick={onClose}
         aria-label="Close preview"
       >
@@ -202,16 +416,22 @@
     <!-- Main modal content -->
     <div
       class="relative flex h-full max-h-[95vh] w-full max-w-7xl flex-col bg-white/10"
-      in:scale={{ duration: 200, start: 0.95 }}
-      out:scale={{ duration: 150, start: 0.95 }}
-      on:click|stopPropagation
-      on:keydown={handleKeydown}
+      in:scaleTransition={{ duration: 200, start: 0.95 }}
+      out:scaleTransition={{ duration: 150, start: 0.95 }}
+      onclick={(e) => e.stopPropagation()}
+      onkeydown={handleKeydown}
       role="button"
       tabindex="0"
     >
       <!-- Image container -->
       <div
-        class="relative flex flex-1 items-center justify-center overflow-hidden rounded-lg"
+        bind:clientWidth={containerWidth}
+        bind:clientHeight={containerHeight}
+        onwheel={handleWheel}
+        ontouchstart={handleTouchStart}
+        ontouchmove={handleTouchMove}
+        ontouchend={handleTouchEnd}
+        class="relative flex flex-1 cursor-default select-none items-center justify-center overflow-hidden rounded-lg"
       >
         <!-- Loading spinner -->
         {#if !imageLoaded && !imageError}
@@ -247,16 +467,27 @@
           />
         {/if}
 
+        <!-- svelte-ignore a11y_no_noninteractive_element_interactions -->
+        <!-- svelte-ignore a11y_click_events_have_key_events -->
         <!-- Main image -->
         <img
+          bind:this={imageEl}
           src={convertFileSrc(selectedImage.path)}
           alt={fileName}
+          draggable="false"
           class={`relative z-10 max-h-full max-w-full rounded-lg object-contain shadow-2xl transition-opacity duration-300 ${
             imageLoaded ? 'opacity-100' : 'opacity-0'
-          }`}
-          style="filter: drop-shadow(0 25px 25px rgb(0 0 0 / 0.5))"
-          on:load={handleImageLoad}
-          on:error={handleImageError}
+          } ${zoomScale > 1.0 ? 'cursor-grab' : 'cursor-default'} ${isDragging || isTouchDragging ? 'cursor-grabbing' : ''}`}
+          style="filter: drop-shadow(0 25px 25px rgb(0 0 0 / 0.5)) {filterStyle
+            ? ' ' + filterStyle
+            : ''}; transform: translate({offsetX}px, {offsetY}px) scale({zoomScale}); transition: {isDragging ||
+          isTouchDragging
+            ? 'none'
+            : 'transform 0.15s ease-out, filter 0.2s ease-in-out'}; transform-origin: center center;"
+          onload={handleImageLoad}
+          onerror={handleImageError}
+          onmousedown={handleMouseDown}
+          ondblclick={handleDoubleClick}
         />
 
         <!-- Info Panel Overlay -->
@@ -344,9 +575,89 @@
         </div>
       </div>
 
-      <!-- Control bar -->
+      <!-- Zoom & Filter Controls -->
       <div
-        class={`mt-4 flex shrink-0 flex-col items-center justify-center transition-opacity duration-300 ${
+        class={`mt-2 flex shrink-0 flex-col items-center justify-center transition-opacity duration-300 ${
+          showUI ? 'opacity-100' : 'pointer-events-none opacity-0'
+        }`}
+      >
+        <div
+          class="flex flex-wrap items-center justify-center gap-3 rounded-2xl border border-white/10 bg-black/60 p-2.5 text-white shadow-xl backdrop-blur-md"
+        >
+          <!-- Zoom Out Button -->
+          <Button
+            variant="ghost"
+            size="icon"
+            disabled={zoomScale <= 1.0}
+            onclick={zoomOut}
+            class="h-12 w-12 rounded-xl text-white transition-all hover:bg-white/10 disabled:opacity-30"
+            aria-label="Zoom out"
+          >
+            <ZoomOut size={20} />
+          </Button>
+
+          <!-- Zoom Percentage -->
+          <span
+            class="min-w-[50px] text-center text-sm font-semibold text-white/90"
+          >
+            {Math.round(zoomScale * 100)}%
+          </span>
+
+          <!-- Zoom In Button -->
+          <Button
+            variant="ghost"
+            size="icon"
+            disabled={zoomScale >= 5.0}
+            onclick={zoomIn}
+            class="h-12 w-12 rounded-xl text-white transition-all hover:bg-white/10 disabled:opacity-30"
+            aria-label="Zoom in"
+          >
+            <ZoomIn size={20} />
+          </Button>
+
+          <!-- Divider -->
+          <div class="h-8 w-px bg-white/20"></div>
+
+          <!-- Filters Toggle Group -->
+          <div class="flex items-center gap-1">
+            {#each ['none', 'grayscale', 'sepia', 'invert'] as filterOption}
+              <Button
+                variant={activeFilter === filterOption ? 'secondary' : 'ghost'}
+                onclick={() =>
+                  (activeFilter = filterOption as typeof activeFilter)}
+                class={`h-12 rounded-xl px-4 text-sm font-medium capitalize transition-all duration-200 ${
+                  activeFilter === filterOption
+                    ? 'bg-white font-semibold text-black shadow-md'
+                    : 'text-white/80 hover:bg-white/10 hover:text-white'
+                }`}
+                aria-label={`Apply ${filterOption === 'none' ? 'no' : filterOption} filter`}
+                aria-pressed={activeFilter === filterOption}
+              >
+                {filterOption === 'none' ? 'Normal' : filterOption}
+              </Button>
+            {/each}
+          </div>
+
+          <!-- Reset Button -->
+          {#if zoomScale > 1.0 || activeFilter !== 'none'}
+            <div class="flex items-center pl-1" in:fade={{ duration: 150 }}>
+              <Button
+                variant="secondary"
+                onclick={resetAll}
+                class="flex h-12 items-center gap-2 rounded-xl border-0 bg-amber-500 px-4 font-semibold text-black shadow-md transition-all duration-200 hover:bg-amber-400"
+                aria-label="Reset zoom and filters"
+              >
+                <RotateCcw size={16} />
+                <span>Reset</span>
+              </Button>
+            </div>
+          {/if}
+        </div>
+      </div>
+
+      <!-- Navigation & Info Control Bar -->
+      <div
+        class={`mt-2 flex shrink-0 flex-col items-center justify-center transition-opacity duration-300 ${
           showUI ? 'opacity-100' : 'pointer-events-none opacity-0'
         }`}
       >
@@ -360,7 +671,7 @@
             disabled={!canShowPrevious}
             onclick={showPrevious}
             class={cn(
-              'h-10 w-10 rounded-full text-white transition-all duration-200 hover:bg-white/20 disabled:opacity-30',
+              'h-12 w-12 rounded-full text-white transition-all duration-200 hover:bg-white/20 disabled:opacity-30',
               !canShowPrevious && 'cursor-not-allowed',
             )}
             aria-label="Previous image"
@@ -379,7 +690,7 @@
             size="icon"
             onclick={toggleFavorite}
             class={cn(
-              'h-10 w-10 rounded-full transition-all duration-200',
+              'h-12 w-12 rounded-full transition-all duration-200',
               isFavourite
                 ? 'bg-red-500/20 text-red-400 hover:bg-red-500/30'
                 : 'text-white hover:bg-white/20 hover:text-red-400',
@@ -399,7 +710,7 @@
             disabled={!canShowNext}
             onclick={showNext}
             class={cn(
-              'h-10 w-10 rounded-full text-white transition-all duration-200 hover:bg-white/20 disabled:opacity-30',
+              'h-12 w-12 rounded-full text-white transition-all duration-200 hover:bg-white/20 disabled:opacity-30',
               !canShowNext && 'cursor-not-allowed',
             )}
             aria-label="Next image"
@@ -415,7 +726,7 @@
             size="icon"
             onclick={toggleInfo}
             class={cn(
-              'h-10 w-10 rounded-full transition-all duration-200',
+              'h-12 w-12 rounded-full transition-all duration-200',
               showInfo
                 ? 'bg-white/20 text-white'
                 : 'text-white/80 hover:bg-white/20 hover:text-white',
