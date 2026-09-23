@@ -5,6 +5,7 @@
   "type": "module",
   "scripts": {
     "postinstall": "svelte-kit sync",
+    "prepare": "husky",
     "dev": "vite",
     "build": "tsc && vite build",
     "preview": "vite preview",
@@ -13,7 +14,8 @@
     "format:rs": "cd src-tauri && cargo fmt",
     "format:ts": "prettier --write src/**/*.{ts,svelte,css,html}",
     "lint:fix": "npm run format:rs && npm run format:ts",
-    "lint": "prettier --check ."
+    "lint": "prettier --check .",
+    "bump": "node scripts/bump-version.js"
   },
   "dependencies": {
     "@tailwindcss/vite": "^4.1.5",
@@ -25,6 +27,8 @@
     "tailwindcss": "^4.1.5"
   },
   "devDependencies": {
+    "@commitlint/cli": "^21.2.3",
+    "@commitlint/config-conventional": "^21.2.3",
     "@lucide/svelte": "^0.482.0",
     "@sveltejs/adapter-static": "^3.0.6",
     "@sveltejs/kit": "^2.9.0",
@@ -33,6 +37,7 @@
     "autoprefixer": "^10.4.20",
     "bits-ui": "^1.4.7",
     "clsx": "^2.1.1",
+    "husky": "^9.1.7",
     "path": "^0.12.7",
     "prettier": "^3.4.2",
     "prettier-plugin-svelte": "^3.3.3",
