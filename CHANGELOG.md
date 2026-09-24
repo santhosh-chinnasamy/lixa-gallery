@@ -1,5 +1,18 @@
 # Changelog
 
+## [0.7.2](https://github.com/santhosh-chinnasamy/lixa-gallery/compare/lixa-gallery-v0.7.1...lixa-gallery-v0.7.2) (2026-09-24)
+
+
+### Features
+
+* add settings page and logs file for debugging ([6850196](https://github.com/santhosh-chinnasamy/lixa-gallery/commit/685019670a1ed51e73b09b3d606baedf3110d7b6))
+* refactor Nix configuration and improve development environment setup ([929f2d9](https://github.com/santhosh-chinnasamy/lixa-gallery/commit/929f2d9b5555c09a0ef7b6d026d1eb4d307f517f))
+
+
+### Bug Fixes
+
+* image modal not opens an image ([04d7e6b](https://github.com/santhosh-chinnasamy/lixa-gallery/commit/04d7e6b95b73fb017e51e1cce33733ccf86697ed))
+
 ## [0.7.1](https://github.com/santhosh-chinnasamy/lixa-gallery/compare/lixa-gallery-v0.7.0...lixa-gallery-v0.7.1) (2026-09-23)
 
 
