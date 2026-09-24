@@ -44,3 +44,7 @@ vite.config.ts.timestamp-*
 
 .benchmark*
 *.db*
+.devenv*
+.direnv*
+result
+result-*

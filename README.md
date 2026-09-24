@@ -11,14 +11,36 @@ Select your favorite photos and export
 Download latest version from [release](https://github.com/santhosh-chinnasamy/lixa-gallery/releases) page for your OS and run the installer.
 
 ### Nix / NixOS
-If you have Nix installed, you can run the app directly from the repository:
+
+#### Run directly (using Cachix binary cache)
 ```bash
-nix run github:santhosh-chinnasamy/lixa-gallery
+nix run --accept-flake-config github:santhosh-chinnasamy/lixa-gallery
 ```
-Or locally:
-```bash
-nix run .
+
+#### Install on NixOS (via Flakes)
+Add `lixa-gallery` to your `flake.nix`:
+```nix
+{
+  inputs = {
+    nixpkgs.url = "github:NixOS/nixpkgs/nixos-unstable";
+    lixa-gallery.url = "github:santhosh-chinnasamy/lixa-gallery";
+  };
+
+  outputs = { nixpkgs, lixa-gallery, ... }: {
+    nixosConfigurations.myhostname = nixpkgs.lib.nixosSystem {
+      modules = [
+        ({ pkgs, ... }: {
+          environment.systemPackages = [
+            lixa-gallery.packages.${pkgs.system}.default
+          ];
+        })
+      ];
+    };
+  };
+}
 ```
+
+Pre-built binaries are provided via [Cachix](https://app.cachix.org/cache/lixa-gallery).
 
 ## Keyboard Shortcuts
 
