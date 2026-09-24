@@ -20,25 +20,30 @@
   let {
     selectedImage = $bindable(),
     onClose,
-    source = page.url.pathname === '/' ? 'all' : 'favorites',
+    photos: photosProp,
+    source = page.url.pathname === '/' || page.url.pathname === '/index.html'
+      ? 'all'
+      : 'favorites',
   }: {
     selectedImage: PhotoMetadata | null;
     onClose: () => void;
+    photos?: PhotoMetadata[];
     source?: 'all' | 'favorites';
   } = $props();
 
   // Reactive derived values
   const photoSource = $derived(
-    source === 'favorites'
-      ? $photos.filter((photo) => $favorites.has(photo.path))
-      : $photos,
+    photosProp ??
+      (source === 'favorites'
+        ? $photos.filter((photo) => $favorites.has(photo.path))
+        : $photos),
   );
 
-  const currentIndex = $derived(
-    selectedImage
-      ? photoSource.findIndex((photo) => photo.path === selectedImage.path)
-      : -1,
-  );
+  const currentIndex = $derived.by(() => {
+    if (!selectedImage) return -1;
+    const currentPath = selectedImage.path;
+    return photoSource.findIndex((photo) => photo.path === currentPath);
+  });
 
   const canShowPrevious = $derived(currentIndex > 0);
   const canShowNext = $derived(currentIndex < photoSource.length - 1);
@@ -126,6 +131,11 @@
     imageHeight = img.naturalHeight;
     imageLoaded = true;
     imageError = false;
+  }
+
+  function handleImageError() {
+    imageError = true;
+    imageLoaded = false;
   }
 
   // Preload adjacent images
