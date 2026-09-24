@@ -4,6 +4,14 @@
   import '../app.css';
   import AppSidebar from '../components/AppSidebar.svelte';
   import type { KeyboardActions } from '../types/events';
+  import { initLogger } from '$lib/logger';
+  import type { Snippet } from 'svelte';
+
+  let { children }: { children?: Snippet } = $props();
+
+  $effect(() => {
+    initLogger();
+  });
 
   const toggleFullScreen = async () => {
     const fullscreen = await getCurrentWindow().isFullscreen();
@@ -36,7 +44,7 @@
     <main class="flex h-full min-w-0 flex-1 flex-col overflow-hidden">
       <!-- Removed p-6 lg:p-10 from here to allow ControlBar to stretch full width. Added it inside Gallery.svelte -->
       <div class="h-full flex-1 overflow-hidden">
-        <slot />
+        {@render children?.()}
       </div>
     </main>
   </div>

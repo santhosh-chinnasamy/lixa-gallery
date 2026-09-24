@@ -79,3 +79,20 @@ pub async fn get_folder_tree(
         .await
         .map_err(|e| e.to_string())
 }
+
+#[tauri::command]
+pub async fn open_logs_dir(app_handle: AppHandle) -> Result<String, String> {
+    use tauri::Manager;
+    let log_dir = app_handle.path().app_log_dir().map_err(|e| e.to_string())?;
+    let log_file = log_dir.join("Lixa Gallery.log");
+    let target = if log_file.exists() { log_file } else { log_dir };
+    tauri_plugin_opener::reveal_item_in_dir(&target).map_err(|e| e.to_string())?;
+    Ok(target.to_string_lossy().to_string())
+}
+
+#[tauri::command]
+pub fn get_log_dir(app_handle: AppHandle) -> Result<String, String> {
+    use tauri::Manager;
+    let log_dir = app_handle.path().app_log_dir().map_err(|e| e.to_string())?;
+    Ok(log_dir.to_string_lossy().to_string())
+}

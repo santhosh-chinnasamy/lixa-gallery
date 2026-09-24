@@ -8,6 +8,7 @@
   import UsersIcon from '@lucide/svelte/icons/users';
   import ChevronRightIcon from '@lucide/svelte/icons/chevron-right';
   import HouseIcon from '@lucide/svelte/icons/house';
+  import SettingsIcon from '@lucide/svelte/icons/settings';
   import {
     favorites,
     recentFolders,
@@ -213,6 +214,27 @@
 
   <Sidebar.Footer class="border-t p-4">
     <Sidebar.Menu>
+      <Sidebar.MenuItem>
+        <Sidebar.MenuButton
+          class={`w-full justify-start gap-3 px-4 py-2 transition-colors ${isActive('/settings') ? 'bg-primary/10 font-medium text-primary' : 'text-muted-foreground hover:bg-accent hover:text-accent-foreground'}`}
+        >
+          {#snippet child({ props })}
+            <a
+              href="/settings"
+              {...props}
+              class="flex w-full items-center gap-3"
+            >
+              <SettingsIcon
+                size={20}
+                class={isActive('/settings')
+                  ? 'text-primary'
+                  : 'text-muted-foreground/70'}
+              />
+              <span class="text-sm">Settings</span>
+            </a>
+          {/snippet}
+        </Sidebar.MenuButton>
+      </Sidebar.MenuItem>
       <Sidebar.MenuItem>
         <Sidebar.MenuButton
           class="w-full text-muted-foreground hover:text-foreground"
