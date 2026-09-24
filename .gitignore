@@ -42,7 +42,8 @@ vite.config.ts.timestamp-*
 !.yarn/sdks
 !.yarn/versions
 
-.benchmark*
+*benchmark*
+all_permissions.txt
 *.db*
 .devenv*
 .direnv*

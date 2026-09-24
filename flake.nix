@@ -74,7 +74,7 @@
             inherit version src;
 
             # Update this hash whenever package.json or yarn.lock changes.
-            outputHash = "sha256-+QsQ6EWnVKCQczjrs25FT2TU58P0J17GaM6SkEdWZ3Y=";
+            outputHash = "sha256-Sh+AdV0HJNc0+F7Sg2PhezJuTydm0KwzRVSALOVdJzY=";
             outputHashAlgo = "sha256";
             outputHashMode = "recursive";
 
