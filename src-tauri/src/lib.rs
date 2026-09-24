@@ -8,8 +8,49 @@ use percent_encoding::percent_decode_str;
 
 #[cfg_attr(mobile, tauri::mobile_entry_point)]
 pub fn run() {
+    let default_hook = std::panic::take_hook();
+    std::panic::set_hook(Box::new(move |panic_info| {
+        let payload = if let Some(s) = panic_info.payload().downcast_ref::<&str>() {
+            s.to_string()
+        } else if let Some(s) = panic_info.payload().downcast_ref::<String>() {
+            s.clone()
+        } else {
+            "Unknown panic payload".to_string()
+        };
+
+        let location = panic_info
+            .location()
+            .map(|loc| format!("{}:{}:{}", loc.file(), loc.line(), loc.column()))
+            .unwrap_or_else(|| "Unknown location".to_string());
+
+        let backtrace = std::backtrace::Backtrace::force_capture();
+        log::error!(
+            target: "crash",
+            "APPLICATION PANIC / CRASH at {location}:\nPayload: {payload}\nBacktrace:\n{backtrace}"
+        );
+        default_hook(panic_info);
+    }));
+
     tauri::Builder::default()
-        .plugin(tauri_plugin_log::Builder::new().build())
+        .plugin(
+            tauri_plugin_log::Builder::new()
+                .targets([
+                    tauri_plugin_log::Target::new(tauri_plugin_log::TargetKind::Stdout),
+                    tauri_plugin_log::Target::new(tauri_plugin_log::TargetKind::LogDir { file_name: None }),
+                    tauri_plugin_log::Target::new(tauri_plugin_log::TargetKind::Webview),
+                ])
+                .max_file_size(5 * 1024 * 1024)
+                .rotation_strategy(tauri_plugin_log::RotationStrategy::KeepSome(5))
+                .timezone_strategy(tauri_plugin_log::TimezoneStrategy::UseLocal)
+                .level(log::LevelFilter::Info)
+                .filter(|metadata| {
+                    if metadata.target().starts_with("sqlx::query") && metadata.level() > log::Level::Info {
+                        return false;
+                    }
+                    true
+                })
+                .build(),
+        )
         .plugin(tauri_plugin_dialog::init())
         .plugin(tauri_plugin_opener::init())
         .register_asynchronous_uri_scheme_protocol("lixa-thumbnail", move |ctx, request, responder| {
@@ -90,7 +131,9 @@ pub fn run() {
             commands::remove_favourite,
             commands::get_favourites,
             commands::clear_favourites,
-            commands::get_folder_tree
+            commands::get_folder_tree,
+            commands::open_logs_dir,
+            commands::get_log_dir
         ])
         .setup(|app| {
             let app_handle = app.handle().clone();
