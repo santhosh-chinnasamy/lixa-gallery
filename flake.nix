@@ -68,13 +68,29 @@
             sqlite
           ];
 
-          # Fixed-output derivation for building frontend assets
-          frontend-assets = pkgs.stdenv.mkDerivation {
-            pname = "${pname}-frontend";
-            inherit version src;
+          # 1. Fixed-output derivation for fetching Yarn dependencies.
+          # Input is strictly limited to lockfile and configuration.
+          # The package.json version is normalized to "0.0.0" so version bumps
+          # by release-please NEVER change this derivation or trigger a hash mismatch.
+          yarn-cache = pkgs.stdenv.mkDerivation {
+            pname = "${pname}-yarn-cache";
+            version = "deps";
 
-            # Update this hash whenever package.json or yarn.lock changes.
-            outputHash = "sha256-Sh+AdV0HJNc0+F7Sg2PhezJuTydm0KwzRVSALOVdJzY=";
+            src = pkgs.lib.cleanSourceWith {
+              src = ./.;
+              filter = path: type:
+                let base = baseNameOf path; in
+                base == "package.json" ||
+                base == "yarn.lock" ||
+                base == ".yarnrc.yml" ||
+                base == ".yarn" ||
+                base == "releases" ||
+                base == "yarn-4.9.2.cjs";
+            };
+
+            # This hash only changes when packages are added/removed/upgraded in yarn.lock.
+            # It will NEVER change during release-please version bumps or frontend code changes.
+            outputHash = "sha256-qlWF97et6qbqF7FBuRIR4IFB6fuPAxrqlI/O2iVEHXM=";
             outputHashAlgo = "sha256";
             outputHashMode = "recursive";
 
@@ -85,6 +101,35 @@
               export NODE_EXTRA_CA_CERTS=${pkgs.cacert}/etc/ssl/certs/ca-bundle.crt
               export SSL_CERT_FILE=${pkgs.cacert}/etc/ssl/certs/ca-bundle.crt
 
+              # Normalize version so package.json version changes don't affect Yarn resolution
+              node -e '
+                const fs = require("fs");
+                const pkg = JSON.parse(fs.readFileSync("package.json", "utf-8"));
+                pkg.version = "0.0.0";
+                fs.writeFileSync("package.json", JSON.stringify(pkg, null, 2) + "\n");
+              '
+
+              yarn config set enableGlobalCache false
+              yarn config set cacheFolder $out
+              yarn install --immutable
+            '';
+
+            dontInstall = true;
+          };
+
+          # 2. Pure derivation for building frontend assets.
+          # Notice: NO outputHash! Changes to src/ or version in package.json
+          # rebuild purely without ANY hash mismatches.
+          frontend-assets = pkgs.stdenv.mkDerivation {
+            pname = "${pname}-frontend";
+            inherit version src;
+
+            nativeBuildInputs = [ pkgs.nodejs pkgs.yarn ];
+
+            buildPhase = ''
+              export HOME=$TMPDIR
+              yarn config set enableGlobalCache false
+              yarn config set cacheFolder ${yarn-cache}
               yarn install --immutable
               yarn build
             '';
@@ -95,6 +140,7 @@
           };
         in
         {
+          yarnCache = yarn-cache;
           frontend = frontend-assets;
 
           default = pkgs.rustPlatform.buildRustPackage {
@@ -156,5 +202,43 @@
           program = "${self.packages.${system}.default}/bin/lixa-gallery";
         };
       });
+
+      devShells = forAllSystems (system:
+        let
+          pkgs = pkgsFor.${system};
+          libraries = with pkgs; [
+            webkitgtk_4_1
+            gtk3
+            cairo
+            gdk-pixbuf
+            glib
+            dbus
+            openssl
+            librsvg
+            sqlite
+          ];
+        in
+        {
+          default = pkgs.mkShell {
+            nativeBuildInputs = with pkgs; [
+              pkg-config
+              gobject-introspection
+              cargo
+              rustc
+              nodejs
+              yarn
+              cargo-tauri
+              makeWrapper
+            ];
+
+            buildInputs = libraries;
+
+            shellHook = ''
+              export LD_LIBRARY_PATH="${pkgs.lib.makeLibraryPath libraries}:$LD_LIBRARY_PATH"
+              export XDG_DATA_DIRS="${pkgs.gsettings-desktop-schemas}/share/gsettings-schemas/${pkgs.gsettings-desktop-schemas.name}:${pkgs.gtk3}/share/gsettings-schemas/${pkgs.gtk3.name}:$XDG_DATA_DIRS"
+            '';
+          };
+        }
+      );
     };
 }
