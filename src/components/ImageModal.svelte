@@ -5,15 +5,10 @@
   import { fade, scale as scaleTransition } from 'svelte/transition';
   import { favorites, photos } from '../stores/galleryStore';
   import Filename from './Filename.svelte';
-  import Heart from './icons/Heart.svelte';
-  import ArrowRight from './icons/ArrowRight.svelte';
-  import { page } from '$app/state';
-  import ArrowLeft from './icons/ArrowLeft.svelte';
   import Close from './icons/Close.svelte';
   import Info from '@lucide/svelte/icons/info';
-  import ZoomIn from '@lucide/svelte/icons/zoom-in';
-  import ZoomOut from '@lucide/svelte/icons/zoom-out';
-  import RotateCcw from '@lucide/svelte/icons/rotate-ccw';
+  import ImageModalControls from './ImageModalControls.svelte';
+  import { page } from '$app/state';
   import type { PhotoMetadata } from '../types/photo';
 
   // Props using Svelte 5 props rune
@@ -86,20 +81,81 @@
   let initialPinchDistance = 0;
   let initialScale = 1.0;
 
-  const keyboardActions = {
-    Escape: onClose,
-    ArrowLeft: showPrevious,
-    ArrowRight: showNext,
-    l: toggleFavorite,
-  } as const;
+  function resetZoom() {
+    zoomScale = 1.0;
+    offsetX = 0;
+    offsetY = 0;
+  }
 
   function handleKeydown(event: KeyboardEvent) {
     if (!selectedImage) return;
 
-    const action = keyboardActions[event.key as keyof typeof keyboardActions];
-    if (action) {
+    const isCtrlOrCmd = event.ctrlKey || event.metaKey;
+
+    // Zoom shortcuts (Ctrl/Cmd +, Ctrl/Cmd -, Ctrl/Cmd 0, or standalone +, -, 0)
+    if (isCtrlOrCmd) {
+      if (event.key === '=' || event.key === '+') {
+        event.preventDefault();
+        zoomIn();
+        return;
+      }
+      if (event.key === '-') {
+        event.preventDefault();
+        zoomOut();
+        return;
+      }
+      if (event.key === '0') {
+        event.preventDefault();
+        resetZoom();
+        return;
+      }
+    } else {
+      if (event.key === '+' || event.key === '=') {
+        event.preventDefault();
+        zoomIn();
+        return;
+      }
+      if (event.key === '-') {
+        event.preventDefault();
+        zoomOut();
+        return;
+      }
+      if (event.key === '0') {
+        event.preventDefault();
+        resetZoom();
+        return;
+      }
+    }
+
+    if (event.key === 'ArrowLeft' || event.key === '[') {
       event.preventDefault();
-      action();
+      showPrevious();
+      return;
+    }
+    if (event.key === 'ArrowRight' || event.key === ']') {
+      event.preventDefault();
+      showNext();
+      return;
+    }
+    if (
+      event.key === 'l' ||
+      event.key === 'L' ||
+      event.key === 'f' ||
+      event.key === 'F'
+    ) {
+      event.preventDefault();
+      toggleFavorite();
+      return;
+    }
+    if (event.key === 'i' || event.key === 'I') {
+      event.preventDefault();
+      toggleInfo();
+      return;
+    }
+    if (event.key === 'Escape') {
+      event.preventDefault();
+      onClose();
+      return;
     }
   }
 
@@ -585,168 +641,27 @@
         </div>
       </div>
 
-      <!-- Zoom & Filter Controls -->
-      <div
-        class={`mt-2 flex shrink-0 flex-col items-center justify-center transition-opacity duration-300 ${
-          showUI ? 'opacity-100' : 'pointer-events-none opacity-0'
-        }`}
-      >
-        <div
-          class="flex flex-wrap items-center justify-center gap-3 rounded-2xl border border-white/10 bg-black/60 p-2.5 text-white shadow-xl backdrop-blur-md"
-        >
-          <!-- Zoom Out Button -->
-          <Button
-            variant="ghost"
-            size="icon"
-            disabled={zoomScale <= 1.0}
-            onclick={zoomOut}
-            class="h-12 w-12 rounded-xl text-white transition-all hover:bg-white/10 disabled:opacity-30"
-            aria-label="Zoom out"
-          >
-            <ZoomOut size={20} />
-          </Button>
-
-          <!-- Zoom Percentage -->
-          <span
-            class="min-w-[50px] text-center text-sm font-semibold text-white/90"
-          >
-            {Math.round(zoomScale * 100)}%
-          </span>
-
-          <!-- Zoom In Button -->
-          <Button
-            variant="ghost"
-            size="icon"
-            disabled={zoomScale >= 5.0}
-            onclick={zoomIn}
-            class="h-12 w-12 rounded-xl text-white transition-all hover:bg-white/10 disabled:opacity-30"
-            aria-label="Zoom in"
-          >
-            <ZoomIn size={20} />
-          </Button>
-
-          <!-- Divider -->
-          <div class="h-8 w-px bg-white/20"></div>
-
-          <!-- Filters Toggle Group -->
-          <div class="flex items-center gap-1">
-            {#each ['none', 'grayscale', 'sepia', 'invert'] as filterOption}
-              <Button
-                variant={activeFilter === filterOption ? 'secondary' : 'ghost'}
-                onclick={() =>
-                  (activeFilter = filterOption as typeof activeFilter)}
-                class={`h-12 rounded-xl px-4 text-sm font-medium capitalize transition-all duration-200 ${
-                  activeFilter === filterOption
-                    ? 'bg-white font-semibold text-black shadow-md'
-                    : 'text-white/80 hover:bg-white/10 hover:text-white'
-                }`}
-                aria-label={`Apply ${filterOption === 'none' ? 'no' : filterOption} filter`}
-                aria-pressed={activeFilter === filterOption}
-              >
-                {filterOption === 'none' ? 'Normal' : filterOption}
-              </Button>
-            {/each}
-          </div>
-
-          <!-- Reset Button -->
-          {#if zoomScale > 1.0 || activeFilter !== 'none'}
-            <div class="flex items-center pl-1" in:fade={{ duration: 150 }}>
-              <Button
-                variant="secondary"
-                onclick={resetAll}
-                class="flex h-12 items-center gap-2 rounded-xl border-0 bg-amber-500 px-4 font-semibold text-black shadow-md transition-all duration-200 hover:bg-amber-400"
-                aria-label="Reset zoom and filters"
-              >
-                <RotateCcw size={16} />
-                <span>Reset</span>
-              </Button>
-            </div>
-          {/if}
-        </div>
-      </div>
-
-      <!-- Navigation & Info Control Bar -->
-      <div
-        class={`mt-2 flex shrink-0 flex-col items-center justify-center transition-opacity duration-300 ${
-          showUI ? 'opacity-100' : 'pointer-events-none opacity-0'
-        }`}
-      >
-        <div
-          class="flex items-center gap-2 rounded-full bg-white/20 p-2 shadow-lg backdrop-blur-md"
-        >
-          <!-- Previous button -->
-          <Button
-            variant="ghost"
-            size="icon"
-            disabled={!canShowPrevious}
-            onclick={showPrevious}
-            class={cn(
-              'h-12 w-12 rounded-full text-white transition-all duration-200 hover:bg-white/20 disabled:opacity-30',
-              !canShowPrevious && 'cursor-not-allowed',
-            )}
-            aria-label="Previous image"
-          >
-            <ArrowLeft />
-          </Button>
-
-          <!-- Image counter -->
-          <div class="px-3 text-sm font-medium text-white/90">
-            {currentIndex + 1} / {photoSource.length}
-          </div>
-
-          <!-- Favorite button -->
-          <Button
-            variant="ghost"
-            size="icon"
-            onclick={toggleFavorite}
-            class={cn(
-              'h-12 w-12 rounded-full transition-all duration-200',
-              isFavourite
-                ? 'bg-red-500/20 text-red-400 hover:bg-red-500/30'
-                : 'text-white hover:bg-white/20 hover:text-red-400',
-            )}
-            aria-label={isFavourite
-              ? 'Remove from favorites'
-              : 'Add to favorites'}
-            aria-pressed={isFavourite}
-          >
-            <Heart {isFavourite} />
-          </Button>
-
-          <!-- Next button -->
-          <Button
-            variant="ghost"
-            size="icon"
-            disabled={!canShowNext}
-            onclick={showNext}
-            class={cn(
-              'h-12 w-12 rounded-full text-white transition-all duration-200 hover:bg-white/20 disabled:opacity-30',
-              !canShowNext && 'cursor-not-allowed',
-            )}
-            aria-label="Next image"
-          >
-            <ArrowRight />
-          </Button>
-
-          <div class="mx-1 h-6 w-px bg-white/20"></div>
-
-          <!-- Info toggle button -->
-          <Button
-            variant="ghost"
-            size="icon"
-            onclick={toggleInfo}
-            class={cn(
-              'h-12 w-12 rounded-full transition-all duration-200',
-              showInfo
-                ? 'bg-white/20 text-white'
-                : 'text-white/80 hover:bg-white/20 hover:text-white',
-            )}
-            aria-label="Toggle info panel"
-          >
-            <Info size={18} />
-          </Button>
-        </div>
-      </div>
+      <!-- Floating Modal Controls (Pagination style) -->
+      <ImageModalControls
+        {showUI}
+        {currentIndex}
+        totalPhotos={photoSource.length}
+        {canShowPrevious}
+        {canShowNext}
+        onPrevious={showPrevious}
+        onNext={showNext}
+        {zoomScale}
+        onZoomIn={zoomIn}
+        onZoomOut={zoomOut}
+        onResetZoom={resetZoom}
+        {activeFilter}
+        onFilterChange={(f) => (activeFilter = f)}
+        onResetAll={resetAll}
+        {isFavourite}
+        onToggleFavorite={toggleFavorite}
+        {showInfo}
+        onToggleInfo={toggleInfo}
+      />
 
       <div
         class={`transition-opacity duration-300 ${
