@@ -1,5 +1,15 @@
 # Changelog
 
+## [0.7.3](https://github.com/santhosh-chinnasamy/lixa-gallery/compare/lixa-gallery-v0.7.2...lixa-gallery-v0.7.3) (2026-09-25)
+
+
+### Features
+
+* add ImageModalControls component for enhanced image viewing experience ([321a392](https://github.com/santhosh-chinnasamy/lixa-gallery/commit/321a392548d83bfb50671a17c57cb0ca9519d51f))
+* create tabs for General & Diagnostics and Keyboard Shortcuts in ([321a392](https://github.com/santhosh-chinnasamy/lixa-gallery/commit/321a392548d83bfb50671a17c57cb0ca9519d51f))
+* enhance Nix configuration with Yarn caching and frontend build setup ([e61fe78](https://github.com/santhosh-chinnasamy/lixa-gallery/commit/e61fe78d96f5b4deec1d12ab40fa8ed849c72912))
+* implement Tabs component for settings navigation with keyboard ([321a392](https://github.com/santhosh-chinnasamy/lixa-gallery/commit/321a392548d83bfb50671a17c57cb0ca9519d51f))
+
 ## [0.7.2](https://github.com/santhosh-chinnasamy/lixa-gallery/compare/lixa-gallery-v0.7.1...lixa-gallery-v0.7.2) (2026-09-24)
 
 
