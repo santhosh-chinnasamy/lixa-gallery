@@ -46,6 +46,7 @@ jobs:
           fi
 
   publish-tauri:
+    name: Publish Tauri Binaries
     needs: release-please
     if: ${{ needs.release-please.outputs.release_created == 'true' }}
     permissions:
@@ -95,3 +96,25 @@ jobs:
           releaseDraft: false
           prerelease: false
           args: ${{ matrix.args }}
+
+  publish-nix-cache:
+    name: Build & Push Nix Release to Cachix
+    needs: release-please
+    if: ${{ needs.release-please.outputs.release_created == 'true' }}
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: cachix/install-nix-action@v27
+        with:
+          nix_path: nixpkgs=channel:nixos-unstable
+          extra_nix_config: |
+            trusted-public-keys = cache.nixos.org-1:6NCHdD59X431o0gWypbMrAURkbJ16ZPMQFGspcDShjY= lixa-gallery.cachix.org-1:cy41vSEjVo4t1+nLSz4B8/Rd261rKvo0vp8BBwC692w=
+
+      - uses: cachix/cachix-action@v15
+        with:
+          name: lixa-gallery
+          authToken: '${{ secrets.CACHIX_AUTH_TOKEN }}'
+
+      - name: Build Nix package and push to Cachix
+        run: nix build -L .#default

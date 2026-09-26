@@ -1,17 +1,15 @@
-name: 'Nix Cache'
+name: 'Nix Check'
 
 on:
-  push:
+  pull_request:
     branches:
       - main
-    tags:
-      - 'v*'
-      - 'lixa-gallery-v*'
-  pull_request:
   workflow_dispatch:
 
 jobs:
-  build-and-cache:
+  build-and-check:
+    name: Test Nix Flake Build
+    if: ${{ !startsWith(github.head_ref, 'release-please') }}
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
@@ -22,10 +20,11 @@ jobs:
           extra_nix_config: |
             trusted-public-keys = cache.nixos.org-1:6NCHdD59X431o0gWypbMrAURkbJ16ZPMQFGspcDShjY= lixa-gallery.cachix.org-1:cy41vSEjVo4t1+nLSz4B8/Rd261rKvo0vp8BBwC692w=
 
+      # Read-only Cachix: authToken is empty so it only reads from cache and never pushes
       - uses: cachix/cachix-action@v15
         with:
           name: lixa-gallery
-          authToken: '${{ secrets.CACHIX_AUTH_TOKEN }}'
+          authToken: ''
 
       - name: Build Nix package
         run: nix build -L .#default
