@@ -1,5 +1,13 @@
 # Changelog
 
+## [0.7.4](https://github.com/santhosh-chinnasamy/lixa-gallery/compare/lixa-gallery-v0.7.3...lixa-gallery-v0.7.4) (2026-09-29)
+
+
+### Features
+
+* **favourites:** add folder grouping, selective export, and workspace support ([9c558f4](https://github.com/santhosh-chinnasamy/lixa-gallery/commit/9c558f4700764be534ba67fc34d7525adc3b316e))
+* update CI workflows to enhance Nix build and PR validation processes ([83121fb](https://github.com/santhosh-chinnasamy/lixa-gallery/commit/83121fb3cb77a3837088ca9b3c4498d685b6885a))
+
 ## [0.7.3](https://github.com/santhosh-chinnasamy/lixa-gallery/compare/lixa-gallery-v0.7.2...lixa-gallery-v0.7.3) (2026-09-25)
 
 
