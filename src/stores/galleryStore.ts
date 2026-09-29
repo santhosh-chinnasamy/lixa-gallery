@@ -1,6 +1,6 @@
 import { invoke } from '@tauri-apps/api/core';
-import { get, writable } from 'svelte/store';
-import type { PhotoMetadata } from '../types/photo';
+import { derived, get, writable } from 'svelte/store';
+import type { FavouriteFolderGroup, PhotoMetadata } from '../types/photo';
 
 export interface FolderNode {
   name: string;
@@ -153,9 +153,8 @@ function createFavoritesStore() {
     subscribe,
     initialize: async () => {
       try {
-        const favorites =
-          await invoke<Array<{ path: string }>>('get_favourites');
-        const paths = new Set(favorites.map((f) => f.path));
+        const favs = await invoke<Array<{ path: string }>>('get_favourites');
+        const paths = new Set(favs.map((f) => f.path));
         set(paths);
       } catch (error) {
         console.error('Error loading favorites:', error);
@@ -188,11 +187,61 @@ function createFavoritesStore() {
     clear: async () => {
       await invoke('clear_favourites');
       set(new Set());
+      favouritePhotos.set([]);
+      favouriteFolderGroups.set([]);
+    },
+    clearPrefix: async (prefix: string) => {
+      await invoke('clear_favourites_by_prefix', { prefix });
+      await favorites.initialize();
+      await refreshFavourites();
     },
   };
 }
 
 export const favorites = createFavoritesStore();
+
+export type FavouriteScope = 'current' | 'all';
+export const favouriteScope = writable<FavouriteScope>('current');
+export const favouritePhotos = writable<PhotoMetadata[]>([]);
+export const favouriteFolderGroups = writable<FavouriteFolderGroup[]>([]);
+export const isLoadingFavourites = writable<boolean>(false);
+
+export const currentFolderFavoritesCount = derived(
+  [favorites, currentFolder],
+  ([$favorites, $currentFolder]) => {
+    if (!$currentFolder) return 0;
+    let count = 0;
+    for (const path of $favorites) {
+      if (path.startsWith($currentFolder)) {
+        count++;
+      }
+    }
+    return count;
+  },
+);
+
+export async function refreshFavourites() {
+  isLoadingFavourites.set(true);
+  try {
+    await favorites.initialize();
+    const groups = await invoke<FavouriteFolderGroup[]>(
+      'get_favourite_folder_groups',
+    );
+    favouriteFolderGroups.set(groups);
+
+    const curr = get(currentFolder);
+    const scope = get(favouriteScope);
+    const folderScope = scope === 'current' && curr ? curr : null;
+    const photosList = await invoke<PhotoMetadata[]>('get_favourite_photos', {
+      folderScope,
+    });
+    favouritePhotos.set(photosList);
+  } catch (error) {
+    console.error('Error refreshing favourites:', error);
+  } finally {
+    isLoadingFavourites.set(false);
+  }
+}
 
 export function clearPhotos() {
   photos.set([]);

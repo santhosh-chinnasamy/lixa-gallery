@@ -16,7 +16,9 @@ impl RayonImageProcessor {
             .thread_name(|i| format!("rayon-img-{}", i))
             .build()
             .expect("Failed to create Rayon thread pool");
-        Self { pool: Arc::new(pool) }
+        Self {
+            pool: Arc::new(pool),
+        }
     }
 }
 
@@ -62,7 +64,10 @@ impl ImageProcessorTrait for RayonImageProcessor {
                 let thumbnail = img.thumbnail(max_size, max_size);
 
                 let file_stem = path.file_stem().and_then(|s| s.to_str()).ok_or_else(|| {
-                    GalleryError::InvalidPath(format!("Could not get file stem for {}", path.display()))
+                    GalleryError::InvalidPath(format!(
+                        "Could not get file stem for {}",
+                        path.display()
+                    ))
                 })?;
 
                 let output_filename = format!("{}.webp", file_stem);

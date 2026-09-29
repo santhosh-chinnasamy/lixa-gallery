@@ -10,4 +10,5 @@ pub trait FileSystem: Send + Sync {
     async fn copy(&self, from: &Path, to: &Path) -> Result<u64>;
     async fn rename(&self, from: &Path, to: &Path) -> Result<()>;
     async fn canonicalize(&self, path: &Path) -> Result<PathBuf>;
+    async fn create_dir_all(&self, path: &Path) -> Result<()>;
 }

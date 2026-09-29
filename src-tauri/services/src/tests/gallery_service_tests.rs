@@ -24,9 +24,18 @@ async fn test_scan_folder_finds_new_images() {
     let processor = Arc::new(FakeImageProcessor);
     let logger = Arc::new(FakeBenchmarkLogger);
 
-    let service = GalleryService::new(repo.clone(), processor, fs, logger, tokio::runtime::Handle::current());
+    let service = GalleryService::new(
+        repo.clone(),
+        processor,
+        fs,
+        logger,
+        tokio::runtime::Handle::current(),
+    );
 
-    let results = service.scan_folder("/pics", "/thumbs", LoadingMode::Sync).await.unwrap();
+    let results = service
+        .scan_folder("/pics", "/thumbs", LoadingMode::Sync)
+        .await
+        .unwrap();
 
     assert_eq!(results.len(), 1);
     assert_eq!(results[0].metadata.name, "img1.jpg");
