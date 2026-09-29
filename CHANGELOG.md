@@ -1,5 +1,14 @@
 # Changelog
 
+## [0.7.5](https://github.com/santhosh-chinnasamy/lixa-gallery/compare/lixa-gallery-v0.7.4...lixa-gallery-v0.7.5) (2026-09-29)
+
+
+### Features
+
+* add monotonic wall clock for timer ([1bf7446](https://github.com/santhosh-chinnasamy/lixa-gallery/commit/1bf74465dd701719cca1716d4f018499f0670200))
+* add slideshow support ([0209c42](https://github.com/santhosh-chinnasamy/lixa-gallery/commit/0209c42354287c0509d731ebabb698112d565c62))
+* use lucide icons consistently across repo ([5a31a07](https://github.com/santhosh-chinnasamy/lixa-gallery/commit/5a31a07eae56f78ebe101494240a931cde742c9b))
+
 ## [0.7.4](https://github.com/santhosh-chinnasamy/lixa-gallery/compare/lixa-gallery-v0.7.3...lixa-gallery-v0.7.4) (2026-09-29)
 
 
