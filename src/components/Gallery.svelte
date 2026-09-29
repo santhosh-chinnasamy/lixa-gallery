@@ -1,6 +1,7 @@
 <script lang="ts">
   import ImageCard from './ImageCard.svelte';
   import ImageModal from './ImageModal.svelte';
+  import SlideshowModal from './SlideshowModal.svelte';
   import ControlBar from './ControlBar.svelte';
   import type { PhotoMetadata } from '../types/photo';
   import { createVirtualizer } from '@tanstack/svelte-virtual';
@@ -14,6 +15,7 @@
   let { photos = [] }: { photos: PhotoMetadata[] } = $props();
 
   let selectedImage = $state<PhotoMetadata | null>(null);
+  let isSlideshowOpen = $state(false);
   let galleryContainer = $state<HTMLElement | null>(null);
   let containerWidth = $state(0);
 
@@ -109,7 +111,10 @@
   class="relative flex h-full flex-col overflow-hidden"
   style="--grid-item-size: {$gridSize}px"
 >
-  <ControlBar />
+  <ControlBar
+    onStartSlideshow={() => (isSlideshowOpen = true)}
+    canStartSlideshow={processedPhotos.length > 0}
+  />
   <main
     class="custom-scrollbar flex-1 overflow-y-auto scroll-smooth"
     bind:this={galleryContainer}
@@ -167,6 +172,12 @@
   bind:selectedImage
   photos={processedPhotos}
   onClose={handleCloseModal}
+/>
+
+<SlideshowModal
+  bind:open={isSlideshowOpen}
+  photos={processedPhotos}
+  onClose={() => (isSlideshowOpen = false)}
 />
 
 <style>
