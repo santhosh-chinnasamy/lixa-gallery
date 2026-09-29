@@ -5,7 +5,7 @@
   import { fade, scale as scaleTransition } from 'svelte/transition';
   import { favorites, photos } from '../stores/galleryStore';
   import Filename from './Filename.svelte';
-  import Close from './icons/Close.svelte';
+  import X from '@lucide/svelte/icons/x';
   import Info from '@lucide/svelte/icons/info';
   import ImageModalControls from './ImageModalControls.svelte';
   import SlideshowModal from './SlideshowModal.svelte';
@@ -482,7 +482,7 @@
         onclick={onClose}
         aria-label="Close preview"
       >
-        <Close />
+        <X size={20} />
       </Button>
     </div>
 
@@ -581,7 +581,7 @@
               class="h-8 w-8 text-white/70 hover:text-white"
               onclick={toggleInfo}
             >
-              <Close />
+              <X size={16} />
             </Button>
           </div>
 

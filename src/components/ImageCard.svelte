@@ -3,7 +3,7 @@
   import { convertFileSrc } from '@tauri-apps/api/core';
   import { favorites } from '../stores/galleryStore';
   import Filename from './Filename.svelte';
-  import Heart from './icons/Heart.svelte';
+  import Heart from '@lucide/svelte/icons/heart';
   import type { PhotoMetadata } from '../types/photo';
 
   let {
@@ -115,7 +115,7 @@
       onclick={toggleFavorite}
       aria-label={isFavourite ? 'Remove from favorites' : 'Add to favorites'}
     >
-      <Heart {isFavourite} />
+      <Heart size={16} class={isFavourite ? 'fill-current' : ''} />
     </button>
 
     <div

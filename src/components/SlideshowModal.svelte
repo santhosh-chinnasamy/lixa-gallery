@@ -6,7 +6,7 @@
   import { untrack } from 'svelte';
   import { fade } from 'svelte/transition';
   import { favorites } from '../stores/galleryStore';
-  import Heart from './icons/Heart.svelte';
+  import Heart from '@lucide/svelte/icons/heart';
   import Play from '@lucide/svelte/icons/play';
   import Pause from '@lucide/svelte/icons/pause';
   import SkipForward from '@lucide/svelte/icons/skip-forward';
@@ -763,7 +763,7 @@
           title={isFavourite ? 'Favorite (F/L)' : 'Mark as Favorite (F/L)'}
           aria-pressed={isFavourite}
         >
-          <Heart {isFavourite} />
+          <Heart size={16} class={isFavourite ? 'fill-current' : ''} />
         </Button>
       </div>
     </footer>
