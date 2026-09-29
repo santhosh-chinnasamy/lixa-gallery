@@ -20,17 +20,18 @@ impl JsonlBenchmarkLogger {
 #[async_trait]
 impl BenchmarkLogger for JsonlBenchmarkLogger {
     async fn log(&self, entry: BenchmarkEntry) -> Result<()> {
-        let json = serde_json::to_string(&entry).map_err(|e| gallery_core::models::GalleryError::Unknown(e.to_string()))?;
+        let json = serde_json::to_string(&entry)
+            .map_err(|e| gallery_core::models::GalleryError::Unknown(e.to_string()))?;
         let mut file = OpenOptions::new()
             .create(true)
             .append(true)
             .open(&self.log_path)
             .await?;
-        
+
         file.write_all(json.as_bytes()).await?;
         file.write_all(b"\n").await?;
         file.flush().await?;
-        
+
         Ok(())
     }
 }

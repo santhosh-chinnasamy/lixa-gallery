@@ -141,23 +141,30 @@ impl GalleryService {
                         "Starting optimized background indexing for {} photos",
                         background_photos.len()
                     );
-                    
+
                     let mut chunk = Vec::new();
                     for photo in background_photos {
-                        match processor.convert_image(Path::new(&photo.path), &t_path).await {
+                        match processor
+                            .convert_image(Path::new(&photo.path), &t_path)
+                            .await
+                        {
                             Ok(processed_photo) => {
                                 chunk.push(processed_photo);
                                 if chunk.len() >= 10 {
                                     let _ = photo_repo.batch_insert_photos(&chunk).await;
                                     chunk.clear();
                                 }
-                            },
+                            }
                             Err(e) => {
-                                log::debug!("Background processing skipped for {}: {}", photo.path, e);
+                                log::debug!(
+                                    "Background processing skipped for {}: {}",
+                                    photo.path,
+                                    e
+                                );
                             }
                         }
                     }
-                    
+
                     if !chunk.is_empty() {
                         let _ = photo_repo.batch_insert_photos(&chunk).await;
                     }
@@ -209,8 +216,14 @@ impl GalleryService {
                 operation: "full_folder_scan".to_string(),
                 file_count,
                 duration_ms,
-                avg_ms_per_image: if file_count > 0 { duration_ms as f64 / file_count as f64 } else { 0.0 },
-                cpu_cores_detected: std::thread::available_parallelism().map(|n| n.get()).unwrap_or(1),
+                avg_ms_per_image: if file_count > 0 {
+                    duration_ms as f64 / file_count as f64
+                } else {
+                    0.0
+                },
+                cpu_cores_detected: std::thread::available_parallelism()
+                    .map(|n| n.get())
+                    .unwrap_or(1),
                 mode: format!("{:?}", mode),
             };
             let _ = self.benchmark_logger.log(entry).await;
@@ -225,8 +238,13 @@ impl GalleryService {
         original_path: &Path,
         thumb_dir: &str,
     ) -> Result<String> {
-        let metadata = self.image_processor.convert_image(original_path, thumb_dir).await?;
-        self.photo_repo.batch_insert_photos(&[metadata.clone()]).await?;
+        let metadata = self
+            .image_processor
+            .convert_image(original_path, thumb_dir)
+            .await?;
+        self.photo_repo
+            .batch_insert_photos(&[metadata.clone()])
+            .await?;
         Ok(metadata.thumbnail_path)
     }
 

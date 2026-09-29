@@ -51,6 +51,32 @@ pub struct Favourite {
     pub path: String,
 }
 
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct FavouriteFolderGroup {
+    pub folder_path: String,
+    pub folder_name: String,
+    pub count: usize,
+    pub photos: Vec<PhotoMetadata>,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct ExportOptions {
+    pub destination: String,
+    pub mode: String, // "copy" | "move"
+    pub paths: Option<Vec<String>>,
+    #[serde(default)]
+    pub preserve_folder_structure: bool,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct Workspace {
+    pub id: String,
+    pub name: String,
+    pub root_path: String,
+    pub created_at: i64,
+    pub last_opened_at: i64,
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;

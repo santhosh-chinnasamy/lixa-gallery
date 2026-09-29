@@ -13,6 +13,7 @@
     favorites,
     recentFolders,
     currentFolder,
+    currentFolderFavoritesCount,
     clearPhotos,
   } from '../stores/galleryStore';
   import { loadPath } from './common/ImageOperations';
@@ -186,9 +187,18 @@
                     <span class="text-sm">{item.title}</span>
                     {#if item.title === 'Favourites' && $favorites.size > 0}
                       <Sidebar.MenuBadge
-                        class="ml-auto bg-primary font-medium text-primary-foreground"
-                        >{$favorites.size}</Sidebar.MenuBadge
+                        class="ml-auto bg-primary text-[11px] font-medium text-primary-foreground"
+                        title={$currentFolder &&
+                        $currentFolderFavoritesCount < $favorites.size
+                          ? `${$currentFolderFavoritesCount} in current folder, ${$favorites.size} total`
+                          : `${$favorites.size} favorites`}
                       >
+                        {#if $currentFolder && $currentFolderFavoritesCount < $favorites.size}
+                          {$currentFolderFavoritesCount} / {$favorites.size}
+                        {:else}
+                          {$favorites.size}
+                        {/if}
+                      </Sidebar.MenuBadge>
                     {/if}
                   </a>
                 {/snippet}

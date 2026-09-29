@@ -1,6 +1,8 @@
 use async_trait::async_trait;
-use gallery_core::models::{Favourite, PhotoMetadata, Result};
-use gallery_core::repos::{CachedPhotoRecord, FavouriteRepository, PhotoRepository};
+use gallery_core::models::{Favourite, FileMetadata, PhotoMetadata, Result, Workspace};
+use gallery_core::repos::{
+    CachedPhotoRecord, FavouriteRepository, PhotoRepository, WorkspaceRepository,
+};
 use sqlx::{
     sqlite::{SqliteConnectOptions, SqliteJournalMode, SqliteSynchronous},
     QueryBuilder, Row, Sqlite, SqlitePool,
@@ -86,6 +88,46 @@ impl PhotoRepository for SqlitePhotoRepository {
             .collect();
 
         Ok(result)
+    }
+
+    async fn get_photos_by_paths(&self, paths: &[String]) -> Result<Vec<PhotoMetadata>> {
+        if paths.is_empty() {
+            return Ok(Vec::new());
+        }
+
+        let mut results = Vec::new();
+        const CHUNK: usize = 500;
+        for chunk in paths.chunks(CHUNK) {
+            let mut qb: QueryBuilder<Sqlite> = QueryBuilder::new(
+                "SELECT path, name, thumbnail_path, mtime, ctime, size FROM photos WHERE path IN (",
+            );
+            let mut separated = qb.separated(", ");
+            for p in chunk {
+                separated.push_bind(p);
+            }
+            separated.push_unseparated(")");
+
+            let rows = qb
+                .build()
+                .fetch_all(&self.pool)
+                .await
+                .map_err(|e| gallery_core::models::GalleryError::Db(e.to_string()))?;
+
+            for row in rows {
+                results.push(PhotoMetadata {
+                    metadata: FileMetadata {
+                        name: row.get("name"),
+                        modified: row.get::<i64, _>("mtime") as u64,
+                        created: row.get::<i64, _>("ctime") as u64,
+                        size: row.get::<i64, _>("size") as u64,
+                    },
+                    thumbnail_path: row.get("thumbnail_path"),
+                    path: row.get("path"),
+                });
+            }
+        }
+
+        Ok(results)
     }
 
     async fn batch_insert_photos(&self, photos: &[PhotoMetadata]) -> Result<()> {
@@ -184,8 +226,120 @@ impl FavouriteRepository for SqliteFavouriteRepository {
         Ok(())
     }
 
+    async fn get_favourites_by_prefix(&self, prefix: &str) -> Result<Vec<Favourite>> {
+        let rows = sqlx::query("SELECT path FROM favourites WHERE path LIKE ?1 || '%'")
+            .bind(prefix)
+            .fetch_all(&self.pool)
+            .await
+            .map_err(|e| gallery_core::models::GalleryError::Db(e.to_string()))?;
+
+        let favourites = rows
+            .into_iter()
+            .map(|row| Favourite {
+                path: row.get("path"),
+            })
+            .collect();
+
+        Ok(favourites)
+    }
+
     async fn clear_favourites(&self) -> Result<()> {
         sqlx::query("DELETE FROM favourites")
+            .execute(&self.pool)
+            .await
+            .map_err(|e| gallery_core::models::GalleryError::Db(e.to_string()))?;
+        Ok(())
+    }
+
+    async fn clear_favourites_by_prefix(&self, prefix: &str) -> Result<()> {
+        sqlx::query("DELETE FROM favourites WHERE path LIKE ?1 || '%'")
+            .bind(prefix)
+            .execute(&self.pool)
+            .await
+            .map_err(|e| gallery_core::models::GalleryError::Db(e.to_string()))?;
+        Ok(())
+    }
+}
+
+pub struct SqliteWorkspaceRepository {
+    pool: SqlitePool,
+}
+
+impl SqliteWorkspaceRepository {
+    pub fn new(pool: SqlitePool) -> Self {
+        Self { pool }
+    }
+}
+
+#[async_trait]
+impl WorkspaceRepository for SqliteWorkspaceRepository {
+    async fn upsert_workspace(&self, workspace: &Workspace) -> Result<()> {
+        sqlx::query(
+            "INSERT INTO workspaces (id, name, root_path, created_at, last_opened_at)
+             VALUES (?1, ?2, ?3, ?4, ?5)
+             ON CONFLICT(root_path) DO UPDATE SET
+                name = excluded.name,
+                last_opened_at = excluded.last_opened_at",
+        )
+        .bind(&workspace.id)
+        .bind(&workspace.name)
+        .bind(&workspace.root_path)
+        .bind(workspace.created_at)
+        .bind(workspace.last_opened_at)
+        .execute(&self.pool)
+        .await
+        .map_err(|e| gallery_core::models::GalleryError::Db(e.to_string()))?;
+
+        Ok(())
+    }
+
+    async fn get_workspaces(&self) -> Result<Vec<Workspace>> {
+        let rows = sqlx::query(
+            "SELECT id, name, root_path, created_at, last_opened_at
+             FROM workspaces
+             ORDER BY last_opened_at DESC",
+        )
+        .fetch_all(&self.pool)
+        .await
+        .map_err(|e| gallery_core::models::GalleryError::Db(e.to_string()))?;
+
+        let workspaces = rows
+            .into_iter()
+            .map(|row| Workspace {
+                id: row.get("id"),
+                name: row.get("name"),
+                root_path: row.get("root_path"),
+                created_at: row.get("created_at"),
+                last_opened_at: row.get("last_opened_at"),
+            })
+            .collect();
+
+        Ok(workspaces)
+    }
+
+    async fn get_workspace_by_path(&self, root_path: &str) -> Result<Option<Workspace>> {
+        let row = sqlx::query(
+            "SELECT id, name, root_path, created_at, last_opened_at
+             FROM workspaces
+             WHERE root_path = ?1",
+        )
+        .bind(root_path)
+        .fetch_optional(&self.pool)
+        .await
+        .map_err(|e| gallery_core::models::GalleryError::Db(e.to_string()))?;
+
+        Ok(row.map(|r| Workspace {
+            id: r.get("id"),
+            name: r.get("name"),
+            root_path: r.get("root_path"),
+            created_at: r.get("created_at"),
+            last_opened_at: r.get("last_opened_at"),
+        }))
+    }
+
+    async fn remove_workspace(&self, id: &str) -> Result<()> {
+        sqlx::query("DELETE FROM workspaces WHERE id = ?1")
+            .bind(id)
             .execute(&self.pool)
             .await
             .map_err(|e| gallery_core::models::GalleryError::Db(e.to_string()))?;
@@ -244,5 +398,57 @@ mod tests {
         let cached = repo.get_cached_photos_for_path("").await.unwrap();
         assert_eq!(cached.len(), 1);
         assert_eq!(cached[0].path, "img.jpg");
+
+        let fetched = repo
+            .get_photos_by_paths(&["img.jpg".to_string()])
+            .await
+            .unwrap();
+        assert_eq!(fetched.len(), 1);
+        assert_eq!(fetched[0].metadata.name, "img.jpg");
+    }
+
+    #[tokio::test]
+    async fn test_favourite_repo_prefix() {
+        let pool = setup_test_db().await;
+        let repo = SqliteFavouriteRepository::new(pool);
+
+        repo.add_favourite("/a/1.jpg".to_string()).await.unwrap();
+        repo.add_favourite("/a/2.jpg".to_string()).await.unwrap();
+        repo.add_favourite("/b/1.jpg".to_string()).await.unwrap();
+
+        let a_favs = repo.get_favourites_by_prefix("/a/").await.unwrap();
+        assert_eq!(a_favs.len(), 2);
+
+        repo.clear_favourites_by_prefix("/a/").await.unwrap();
+        let remaining = repo.get_favourites().await.unwrap();
+        assert_eq!(remaining.len(), 1);
+        assert_eq!(remaining[0].path, "/b/1.jpg");
+    }
+
+    #[tokio::test]
+    async fn test_workspace_repo() {
+        let pool = setup_test_db().await;
+        let repo = SqliteWorkspaceRepository::new(pool);
+
+        let ws = Workspace {
+            id: "ws-1".to_string(),
+            name: "Folder A".to_string(),
+            root_path: "/photos/a".to_string(),
+            created_at: 1000,
+            last_opened_at: 1000,
+        };
+
+        repo.upsert_workspace(&ws).await.unwrap();
+        let workspaces = repo.get_workspaces().await.unwrap();
+        assert_eq!(workspaces.len(), 1);
+        assert_eq!(workspaces[0].name, "Folder A");
+
+        let fetched = repo.get_workspace_by_path("/photos/a").await.unwrap();
+        assert!(fetched.is_some());
+        assert_eq!(fetched.unwrap().id, "ws-1");
+
+        repo.remove_workspace("ws-1").await.unwrap();
+        let workspaces_after = repo.get_workspaces().await.unwrap();
+        assert_eq!(workspaces_after.len(), 0);
     }
 }

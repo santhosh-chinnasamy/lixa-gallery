@@ -103,6 +103,12 @@ impl FileSystem for LocalFileSystem {
             .await
             .map_err(|e| GalleryError::Io(e))
     }
+
+    async fn create_dir_all(&self, path: &Path) -> Result<()> {
+        fs::create_dir_all(path)
+            .await
+            .map_err(|e| GalleryError::Io(e))
+    }
 }
 
 pub async fn get_file_metadata<P: AsRef<Path>>(path: P) -> Result<FileMetadata> {

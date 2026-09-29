@@ -25,6 +25,9 @@ export async function loadPath(folderPath: string, isRoot = true) {
     if (isRoot) {
       recentFolders.add(folderPath);
       await loadFolderTree(folderPath);
+      invoke('save_workspace', { path: folderPath }).catch((e) =>
+        console.error('Failed to record workspace:', e),
+      );
     }
   } catch (error) {
     console.error('Failed to load photos from path:', error);
@@ -56,7 +59,11 @@ export async function loadPhotos() {
   }
 }
 
-export async function exportFavorites(mode: 'copy' | 'move' = 'copy') {
+export async function exportFavorites(
+  mode: 'copy' | 'move' = 'copy',
+  paths?: string[],
+  preserveFolderStructure = false,
+) {
   try {
     const destination = await open({
       multiple: false,
@@ -67,6 +74,8 @@ export async function exportFavorites(mode: 'copy' | 'move' = 'copy') {
     await invoke('export_favourites', {
       destination,
       mode,
+      paths: paths && paths.length > 0 ? paths : null,
+      preserveFolderStructure,
     });
 
     return destination;
