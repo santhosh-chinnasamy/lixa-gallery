@@ -3,7 +3,7 @@
   import { cn } from '$lib/utils';
   import { convertFileSrc } from '@tauri-apps/api/core';
   import { getCurrentWindow } from '@tauri-apps/api/window';
-  import { untrack } from 'svelte';
+  import { untrack, onDestroy } from 'svelte';
   import { fade } from 'svelte/transition';
   import { favorites } from '../stores/galleryStore';
   import Heart from '@lucide/svelte/icons/heart';
@@ -17,6 +17,8 @@
   import Minimize from '@lucide/svelte/icons/minimize';
   import Info from '@lucide/svelte/icons/info';
   import X from '@lucide/svelte/icons/x';
+  import ChevronLeft from '@lucide/svelte/icons/chevron-left';
+  import ChevronRight from '@lucide/svelte/icons/chevron-right';
   import type { PhotoMetadata } from '../types/photo';
 
   let {
@@ -47,19 +49,17 @@
   let shuffleOrder = $state<number[]>([]);
   let shuffleIndex = $state(0);
   let progress = $state(0); // 0 to 100%
+  let isImageLoaded = $state(false);
 
-  // Double-buffering for butter-smooth crossfading
-  // Slot 0 and Slot 1 alternate as active and incoming
-  let activeSlot = $state<0 | 1>(0);
-  let slot0Photo = $state<PhotoMetadata | null>(null);
-  let slot1Photo = $state<PhotoMetadata | null>(null);
+  // Timing references (monotonic wall-clock)
+  let rafId: number | null = null;
+  let startTime = 0;
+  let elapsedBeforePause = 0;
+  let hudTimeoutRef: ReturnType<typeof setTimeout> | null = null;
+  let loadSafetyTimeout: ReturnType<typeof setTimeout> | null = null;
 
   // Preloading cache
   const preloadedPaths = new Set<string>();
-
-  // Timers
-  let progressTimer: ReturnType<typeof setInterval> | null = null;
-  let hudTimeoutRef: ReturnType<typeof setTimeout> | null = null;
 
   // Derive current photo
   const currentPhoto = $derived.by(() => {
@@ -80,26 +80,27 @@
   );
 
   // Shuffle array helper (Fisher-Yates)
-  function createShuffledIndices(length: number, currentIdx: number): number[] {
+  function createShuffledIndices(length: number, forceFirstIdx = -1): number[] {
     const indices = Array.from({ length }, (_, i) => i);
     for (let i = indices.length - 1; i > 0; i--) {
       const j = Math.floor(Math.random() * (i + 1));
       [indices[i], indices[j]] = [indices[j], indices[i]];
     }
-    // Ensure current item stays first in shuffle
-    const foundPos = indices.indexOf(currentIdx);
-    if (foundPos !== -1 && foundPos !== 0) {
-      [indices[0], indices[foundPos]] = [indices[foundPos], indices[0]];
+    if (forceFirstIdx >= 0) {
+      const foundPos = indices.indexOf(forceFirstIdx);
+      if (foundPos !== -1 && foundPos !== 0) {
+        [indices[0], indices[foundPos]] = [indices[foundPos], indices[0]];
+      }
     }
     return indices;
   }
 
-  // Preload next upcoming photos
+  // Preload upcoming photos
   function preloadUpcoming(startPos: number) {
     if (photos.length <= 1) return;
     const toPreload: string[] = [];
 
-    if (isShuffle) {
+    if (isShuffle && shuffleOrder.length === photos.length) {
       for (let offset = 1; offset <= 3; offset++) {
         const nextPos = (startPos + offset) % shuffleOrder.length;
         const photoIdx = shuffleOrder[nextPos];
@@ -125,47 +126,120 @@
     });
   }
 
-  // Transition to a photo with crossfade
-  function transitionToPhoto(photo: PhotoMetadata | null) {
-    if (!photo) return;
+  // Animation frame ticker (monotonic wall-clock)
+  function tickTimer() {
+    if (
+      !open ||
+      !isPlaying ||
+      isHoveringHUD ||
+      !isImageLoaded ||
+      photos.length <= 1
+    ) {
+      rafId = null;
+      return;
+    }
+
+    const durationMs = intervalSeconds * 1000;
+    const elapsed = performance.now() - startTime + elapsedBeforePause;
+    progress = Math.min(100, (elapsed / durationMs) * 100);
+
+    if (elapsed >= durationMs) {
+      progress = 0;
+      elapsedBeforePause = 0;
+      nextSlide();
+      return;
+    }
+
+    rafId = requestAnimationFrame(tickTimer);
+  }
+
+  function startAnimationLoop() {
+    if (rafId) cancelAnimationFrame(rafId);
+    if (
+      open &&
+      isPlaying &&
+      !isHoveringHUD &&
+      isImageLoaded &&
+      photos.length > 1
+    ) {
+      rafId = requestAnimationFrame(tickTimer);
+    }
+  }
+
+  function pauseTimer() {
+    if (rafId) {
+      cancelAnimationFrame(rafId);
+      rafId = null;
+    }
+    if (isImageLoaded) {
+      elapsedBeforePause += performance.now() - startTime;
+    }
+  }
+
+  function prepareImageLoad() {
+    isImageLoaded = false;
     progress = 0;
-
-    const nextSlot: 0 | 1 = activeSlot === 0 ? 1 : 0;
-    if (nextSlot === 1) {
-      slot1Photo = photo;
-    } else {
-      slot0Photo = photo;
+    elapsedBeforePause = 0;
+    if (rafId) {
+      cancelAnimationFrame(rafId);
+      rafId = null;
     }
-
-    // Flip active slot to trigger CSS transition
-    activeSlot = nextSlot;
-
-    // Trigger preload for upcoming slides
-    if (isShuffle) {
-      preloadUpcoming(shuffleIndex);
-    } else {
-      preloadUpcoming(currentIndex);
+    if (loadSafetyTimeout) {
+      clearTimeout(loadSafetyTimeout);
     }
+    // Safety fallback: if onload doesn't fire within 800ms, start countdown anyway
+    loadSafetyTimeout = setTimeout(() => {
+      if (!isImageLoaded && open) {
+        handleImageLoad();
+      }
+    }, 800);
+  }
+
+  function handleImageLoad() {
+    if (loadSafetyTimeout) {
+      clearTimeout(loadSafetyTimeout);
+      loadSafetyTimeout = null;
+    }
+    if (!isImageLoaded) {
+      isImageLoaded = true;
+      startTime = performance.now();
+      elapsedBeforePause = 0;
+      startAnimationLoop();
+    }
+  }
+
+  function handleImageError() {
+    if (loadSafetyTimeout) {
+      clearTimeout(loadSafetyTimeout);
+      loadSafetyTimeout = null;
+    }
+    isImageLoaded = true;
+    startTime = performance.now();
+    elapsedBeforePause = 0;
+    startAnimationLoop();
   }
 
   function nextSlide() {
     if (photos.length <= 1) return;
-    progress = 0;
+    prepareImageLoad();
 
     if (isShuffle) {
       if (shuffleIndex < shuffleOrder.length - 1) {
         shuffleIndex++;
       } else if (isLoop) {
-        // Reshuffle and loop back
+        // Reshuffle loop: ensure first photo of new cycle is never the last one displayed
         const curr = shuffleOrder[shuffleIndex] ?? 0;
-        shuffleOrder = createShuffledIndices(photos.length, curr);
+        const newOrder = createShuffledIndices(photos.length, -1);
+        if (newOrder[0] === curr && newOrder.length > 1) {
+          [newOrder[0], newOrder[1]] = [newOrder[1], newOrder[0]];
+        }
+        shuffleOrder = newOrder;
         shuffleIndex = 0;
       } else {
         isPlaying = false;
         return;
       }
-      const nextIdx = shuffleOrder[shuffleIndex] ?? 0;
-      transitionToPhoto(photos[nextIdx]);
+      preloadUpcoming(shuffleIndex);
     } else {
       if (currentIndex < photos.length - 1) {
         currentIndex++;
@@ -175,54 +249,55 @@
         isPlaying = false;
         return;
       }
-      transitionToPhoto(photos[currentIndex]);
+      preloadUpcoming(currentIndex);
     }
   }
 
   function prevSlide() {
     if (photos.length <= 1) return;
-    progress = 0;
+    prepareImageLoad();
 
     if (isShuffle) {
       if (shuffleIndex > 0) {
         shuffleIndex--;
-        const prevIdx = shuffleOrder[shuffleIndex] ?? 0;
-        transitionToPhoto(photos[prevIdx]);
       } else if (isLoop) {
         shuffleIndex = shuffleOrder.length - 1;
-        const prevIdx = shuffleOrder[shuffleIndex] ?? 0;
-        transitionToPhoto(photos[prevIdx]);
       }
+      preloadUpcoming(shuffleIndex);
     } else {
       if (currentIndex > 0) {
         currentIndex--;
       } else if (isLoop) {
         currentIndex = photos.length - 1;
       }
-      transitionToPhoto(photos[currentIndex]);
+      preloadUpcoming(currentIndex);
     }
   }
 
   function togglePlayPause() {
     isPlaying = !isPlaying;
     if (isPlaying) {
+      startTime = performance.now();
+      startAnimationLoop();
       resetHudTimer();
+    } else {
+      pauseTimer();
     }
   }
 
   function toggleShuffle() {
     if (!isShuffle) {
-      // Turn on shuffle
       shuffleOrder = createShuffledIndices(photos.length, currentIndex);
       shuffleIndex = 0;
       isShuffle = true;
+      preloadUpcoming(0);
     } else {
-      // Turn off shuffle, sync currentIndex to the photo currently displayed
       if (currentPhoto) {
         const found = photos.findIndex((p) => p.path === currentPhoto.path);
         if (found !== -1) currentIndex = found;
       }
       isShuffle = false;
+      preloadUpcoming(currentIndex);
     }
   }
 
@@ -244,7 +319,6 @@
       isFullscreen = !current;
     } catch (err) {
       console.warn('Unable to toggle fullscreen via Tauri window API:', err);
-      // Fallback to web fullscreen API
       if (!document.fullscreenElement) {
         await document.documentElement.requestFullscreen().catch(() => {});
         isFullscreen = true;
@@ -280,7 +354,6 @@
     showHUD = true;
     if (hudTimeoutRef) clearTimeout(hudTimeoutRef);
 
-    // Only auto-hide if playing and not hovering controls
     if (isPlaying && !isHoveringHUD) {
       hudTimeoutRef = setTimeout(() => {
         if (!isHoveringHUD) {
@@ -369,13 +442,12 @@
       untrack(() => {
         if (photos.length > 0) {
           currentIndex = Math.max(0, Math.min(startIndex, photos.length - 1));
-          slot0Photo = photos[currentIndex] ?? null;
-          slot1Photo = null;
-          activeSlot = 0;
-          progress = 0;
-          isPlaying = true;
           isShuffle = false;
+          shuffleOrder = [];
+          shuffleIndex = 0;
+          isPlaying = true;
           showInfo = false;
+          prepareImageLoad();
           preloadUpcoming(currentIndex);
           resetHudTimer();
 
@@ -388,47 +460,29 @@
     } else if (!open && wasOpen) {
       wasOpen = false;
       untrack(() => {
-        if (progressTimer) {
-          clearInterval(progressTimer);
-          progressTimer = null;
+        if (rafId) {
+          cancelAnimationFrame(rafId);
+          rafId = null;
         }
         if (hudTimeoutRef) {
           clearTimeout(hudTimeoutRef);
           hudTimeoutRef = null;
         }
+        if (loadSafetyTimeout) {
+          clearTimeout(loadSafetyTimeout);
+          loadSafetyTimeout = null;
+        }
+        progress = 0;
+        elapsedBeforePause = 0;
+        isImageLoaded = false;
       });
     }
   });
 
-  // Playback timer ticker (every 50ms)
-  $effect(() => {
-    if (progressTimer) {
-      clearInterval(progressTimer);
-      progressTimer = null;
-    }
-
-    if (open && isPlaying && !isHoveringHUD && photos.length > 1) {
-      const stepMs = 50;
-      const totalMs = intervalSeconds * 1000;
-      const stepIncrement = (stepMs / totalMs) * 100;
-
-      progressTimer = setInterval(() => {
-        progress += stepIncrement;
-        if (progress >= 100) {
-          progress = 0;
-          nextSlide();
-        }
-      }, stepMs);
-    } else {
-      progress = 0;
-    }
-
-    return () => {
-      if (progressTimer) {
-        clearInterval(progressTimer);
-        progressTimer = null;
-      }
-    };
+  onDestroy(() => {
+    if (rafId) cancelAnimationFrame(rafId);
+    if (hudTimeoutRef) clearTimeout(hudTimeoutRef);
+    if (loadSafetyTimeout) clearTimeout(loadSafetyTimeout);
   });
 </script>
 
@@ -453,7 +507,7 @@
       class="absolute left-0 right-0 top-0 z-30 h-1 overflow-hidden bg-white/10"
     >
       <div
-        class="h-full bg-primary/80 transition-all duration-75 ease-linear"
+        class="h-full bg-primary/80 transition-none"
         style="width: {progress}%;"
       ></div>
     </div>
@@ -529,52 +583,84 @@
       </div>
     </header>
 
-    <!-- Main Image Display (Double-buffered for smooth cross-fades) -->
+    <!-- Main Presentation Viewport -->
+    <!-- svelte-ignore a11y_click_events_have_key_events -->
+    <!-- svelte-ignore a11y_no_noninteractive_element_interactions -->
     <main
-      class="relative flex h-full w-full flex-1 items-center justify-center overflow-hidden"
+      class={cn(
+        'relative flex h-full w-full flex-1 items-center justify-center overflow-hidden',
+        showHUD ? 'cursor-pointer' : 'cursor-none',
+      )}
+      onclick={(e) => {
+        if (
+          e.target === e.currentTarget ||
+          (e.target as HTMLElement).tagName === 'IMG'
+        ) {
+          togglePlayPause();
+        }
+      }}
     >
-      <!-- Click left/right halves to navigate -->
+      <!-- Edge Navigation Chevrons -->
       <button
         type="button"
-        class="absolute bottom-0 left-0 top-0 z-10 w-1/4 cursor-w-resize opacity-0 focus:outline-none"
-        onclick={prevSlide}
-        aria-label="Previous image"
-      ></button>
+        class={cn(
+          'absolute left-4 top-1/2 z-20 -translate-y-1/2 rounded-full border border-white/10 bg-black/50 p-3 text-white/80 backdrop-blur-md transition-all duration-300 hover:scale-110 hover:bg-black/80 hover:text-white',
+          showHUD ? 'opacity-100' : 'pointer-events-none opacity-0',
+        )}
+        onmouseenter={() => pauseTimer()}
+        onmouseleave={() => {
+          if (isPlaying) {
+            startTime = performance.now();
+            startAnimationLoop();
+          }
+        }}
+        onclick={(e) => {
+          e.stopPropagation();
+          prevSlide();
+        }}
+        aria-label="Previous Slide"
+        title="Previous Slide (←)"
+      >
+        <ChevronLeft size={28} />
+      </button>
+
       <button
         type="button"
-        class="absolute bottom-0 right-0 top-0 z-10 w-1/4 cursor-e-resize opacity-0 focus:outline-none"
-        onclick={nextSlide}
-        aria-label="Next image"
-      ></button>
+        class={cn(
+          'absolute right-4 top-1/2 z-20 -translate-y-1/2 rounded-full border border-white/10 bg-black/50 p-3 text-white/80 backdrop-blur-md transition-all duration-300 hover:scale-110 hover:bg-black/80 hover:text-white',
+          showHUD ? 'opacity-100' : 'pointer-events-none opacity-0',
+        )}
+        onmouseenter={() => pauseTimer()}
+        onmouseleave={() => {
+          if (isPlaying) {
+            startTime = performance.now();
+            startAnimationLoop();
+          }
+        }}
+        onclick={(e) => {
+          e.stopPropagation();
+          nextSlide();
+        }}
+        aria-label="Next Slide"
+        title="Next Slide (→)"
+      >
+        <ChevronRight size={28} />
+      </button>
 
-      <!-- Slot 0 Image -->
-      {#if slot0Photo}
-        <img
-          src={convertFileSrc(slot0Photo.path)}
-          alt={slot0Photo.metadata.name}
-          class={cn(
-            'absolute inset-0 m-auto max-h-full max-w-full object-contain transition-opacity duration-500 ease-in-out',
-            activeSlot === 0
-              ? 'z-10 opacity-100'
-              : 'pointer-events-none z-0 opacity-0',
-          )}
-          draggable="false"
-        />
-      {/if}
-
-      <!-- Slot 1 Image -->
-      {#if slot1Photo}
-        <img
-          src={convertFileSrc(slot1Photo.path)}
-          alt={slot1Photo.metadata.name}
-          class={cn(
-            'absolute inset-0 m-auto max-h-full max-w-full object-contain transition-opacity duration-500 ease-in-out',
-            activeSlot === 1
-              ? 'z-10 opacity-100'
-              : 'pointer-events-none z-0 opacity-0',
-          )}
-          draggable="false"
-        />
+      <!-- Keyed Image Crossfade: completely eliminates WebKit texture reuse ghosting -->
+      {#if currentPhoto}
+        {#key currentPhoto.path}
+          <img
+            src={convertFileSrc(currentPhoto.path)}
+            alt={currentPhoto.metadata.name}
+            onload={handleImageLoad}
+            onerror={handleImageError}
+            in:fade={{ duration: 400 }}
+            out:fade={{ duration: 400 }}
+            class="absolute inset-0 m-auto max-h-full max-w-full select-none object-contain"
+            draggable="false"
+          />
+        {/key}
       {/if}
 
       <!-- Detailed Info Overlay Card -->
@@ -629,9 +715,16 @@
         'absolute bottom-6 left-0 right-0 z-20 flex justify-center px-4 transition-opacity duration-300',
         showHUD ? 'opacity-100' : 'pointer-events-none opacity-0',
       )}
-      onmouseenter={() => (isHoveringHUD = true)}
+      onmouseenter={() => {
+        isHoveringHUD = true;
+        pauseTimer();
+      }}
       onmouseleave={() => {
         isHoveringHUD = false;
+        if (isPlaying) {
+          startTime = performance.now();
+          startAnimationLoop();
+        }
         resetHudTimer();
       }}
       role="region"
@@ -692,6 +785,8 @@
               onclick={() => {
                 intervalSeconds = sec;
                 progress = 0;
+                elapsedBeforePause = 0;
+                startTime = performance.now();
               }}
               class={cn(
                 'rounded-full px-2 py-0.5 text-xs font-semibold transition-all',
