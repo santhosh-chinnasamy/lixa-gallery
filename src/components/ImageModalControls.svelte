@@ -2,9 +2,9 @@
   import { Button } from '$lib/components/ui/button';
   import { cn } from '$lib/utils';
   import { fade } from 'svelte/transition';
-  import ArrowLeft from './icons/ArrowLeft.svelte';
-  import ArrowRight from './icons/ArrowRight.svelte';
-  import Heart from './icons/Heart.svelte';
+  import ArrowLeft from '@lucide/svelte/icons/arrow-left';
+  import ArrowRight from '@lucide/svelte/icons/arrow-right';
+  import Heart from '@lucide/svelte/icons/heart';
   import ZoomIn from '@lucide/svelte/icons/zoom-in';
   import ZoomOut from '@lucide/svelte/icons/zoom-out';
   import RotateCcw from '@lucide/svelte/icons/rotate-ccw';
@@ -81,7 +81,7 @@
       )}
       aria-label="Previous image (Left Arrow)"
     >
-      <ArrowLeft />
+      <ArrowLeft size={18} />
     </Button>
 
     <!-- Image counter -->
@@ -103,7 +103,7 @@
       )}
       aria-label="Next image (Right Arrow)"
     >
-      <ArrowRight />
+      <ArrowRight size={18} />
     </Button>
 
     <div class="h-5 w-px bg-white/20"></div>
@@ -200,7 +200,7 @@
         : 'Add to favorites (L)'}
       aria-pressed={isFavourite}
     >
-      <Heart {isFavourite} />
+      <Heart size={18} class={isFavourite ? 'fill-current' : ''} />
     </Button>
 
     <!-- Info toggle button -->
