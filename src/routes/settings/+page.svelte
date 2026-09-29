@@ -15,6 +15,7 @@
   import KeyboardIcon from '@lucide/svelte/icons/keyboard';
   import EyeIcon from '@lucide/svelte/icons/eye';
   import CompassIcon from '@lucide/svelte/icons/compass';
+  import PlayIcon from '@lucide/svelte/icons/play';
 
   let logDirPath = $state<string>('');
   let isCopied = $state(false);
@@ -447,7 +448,139 @@
               </div>
 
               <div class="flex items-center justify-between py-3">
+                <span class="font-medium text-foreground">Start Slideshow</span>
+                <kbd
+                  class="shadow-xs inline-flex min-w-[24px] items-center justify-center rounded-md border border-border bg-muted px-2 py-1 font-mono text-xs font-semibold text-foreground"
+                  >P</kbd
+                >
+              </div>
+
+              <div class="flex items-center justify-between py-3">
                 <span class="font-medium text-foreground">Close Viewer</span>
+                <kbd
+                  class="shadow-xs inline-flex min-w-[24px] items-center justify-center rounded-md border border-border bg-muted px-2 py-1 font-mono text-xs font-semibold text-foreground"
+                  >Esc</kbd
+                >
+              </div>
+            </div>
+          </Card.Content>
+        </Card.Root>
+
+        <!-- Slideshow Presentation Shortcuts -->
+        <Card.Root class="shadow-sm">
+          <Card.Header>
+            <div class="flex items-center gap-2">
+              <PlayIcon class="h-5 w-5 text-primary" />
+              <Card.Title>Slideshow Presentation Mode</Card.Title>
+            </div>
+            <Card.Description>
+              Keyboard shortcuts available during hands-free photo presentation.
+            </Card.Description>
+          </Card.Header>
+          <Card.Content>
+            <div class="divide-y divide-border text-sm">
+              <div class="flex items-center justify-between py-3">
+                <span class="font-medium text-foreground">Play / Pause</span>
+                <kbd
+                  class="shadow-xs inline-flex min-w-[24px] items-center justify-center rounded-md border border-border bg-muted px-2 py-1 font-mono text-xs font-semibold text-foreground"
+                  >Space</kbd
+                >
+              </div>
+
+              <div class="flex items-center justify-between py-3">
+                <span class="font-medium text-foreground">Next Slide</span>
+                <div class="flex items-center gap-1.5">
+                  <kbd
+                    class="shadow-xs inline-flex min-w-[24px] items-center justify-center rounded-md border border-border bg-muted px-2 py-1 font-mono text-xs font-semibold text-foreground"
+                    >→</kbd
+                  >
+                  <span class="text-xs text-muted-foreground">or</span>
+                  <kbd
+                    class="shadow-xs inline-flex min-w-[24px] items-center justify-center rounded-md border border-border bg-muted px-2 py-1 font-mono text-xs font-semibold text-foreground"
+                    >PageDown</kbd
+                  >
+                </div>
+              </div>
+
+              <div class="flex items-center justify-between py-3">
+                <span class="font-medium text-foreground">Previous Slide</span>
+                <div class="flex items-center gap-1.5">
+                  <kbd
+                    class="shadow-xs inline-flex min-w-[24px] items-center justify-center rounded-md border border-border bg-muted px-2 py-1 font-mono text-xs font-semibold text-foreground"
+                    >←</kbd
+                  >
+                  <span class="text-xs text-muted-foreground">or</span>
+                  <kbd
+                    class="shadow-xs inline-flex min-w-[24px] items-center justify-center rounded-md border border-border bg-muted px-2 py-1 font-mono text-xs font-semibold text-foreground"
+                    >PageUp</kbd
+                  >
+                </div>
+              </div>
+
+              <div class="flex items-center justify-between py-3">
+                <span class="font-medium text-foreground">Toggle Favorite</span>
+                <div class="flex items-center gap-1.5">
+                  <kbd
+                    class="shadow-xs inline-flex min-w-[24px] items-center justify-center rounded-md border border-border bg-muted px-2 py-1 font-mono text-xs font-semibold text-foreground"
+                    >F</kbd
+                  >
+                  <span class="text-xs text-muted-foreground">or</span>
+                  <kbd
+                    class="shadow-xs inline-flex min-w-[24px] items-center justify-center rounded-md border border-border bg-muted px-2 py-1 font-mono text-xs font-semibold text-foreground"
+                    >L</kbd
+                  >
+                </div>
+              </div>
+
+              <div class="flex items-center justify-between py-3">
+                <span class="font-medium text-foreground"
+                  >Toggle Shuffle Mode</span
+                >
+                <kbd
+                  class="shadow-xs inline-flex min-w-[24px] items-center justify-center rounded-md border border-border bg-muted px-2 py-1 font-mono text-xs font-semibold text-foreground"
+                  >S</kbd
+                >
+              </div>
+
+              <div class="flex items-center justify-between py-3">
+                <span class="font-medium text-foreground"
+                  >Toggle Repeat / Loop</span
+                >
+                <kbd
+                  class="shadow-xs inline-flex min-w-[24px] items-center justify-center rounded-md border border-border bg-muted px-2 py-1 font-mono text-xs font-semibold text-foreground"
+                  >R</kbd
+                >
+              </div>
+
+              <div class="flex items-center justify-between py-3">
+                <span class="font-medium text-foreground"
+                  >Toggle Image Info</span
+                >
+                <kbd
+                  class="shadow-xs inline-flex min-w-[24px] items-center justify-center rounded-md border border-border bg-muted px-2 py-1 font-mono text-xs font-semibold text-foreground"
+                  >I</kbd
+                >
+              </div>
+
+              <div class="flex items-center justify-between py-3">
+                <span class="font-medium text-foreground"
+                  >Toggle Fullscreen</span
+                >
+                <div class="flex items-center gap-1.5">
+                  <kbd
+                    class="shadow-xs inline-flex min-w-[24px] items-center justify-center rounded-md border border-border bg-muted px-2 py-1 font-mono text-xs font-semibold text-foreground"
+                    >F11</kbd
+                  >
+                  <span class="text-xs text-muted-foreground">or</span>
+                  <kbd
+                    class="shadow-xs inline-flex min-w-[24px] items-center justify-center rounded-md border border-border bg-muted px-2 py-1 font-mono text-xs font-semibold text-foreground"
+                    >Enter</kbd
+                  >
+                </div>
+              </div>
+
+              <div class="flex items-center justify-between py-3">
+                <span class="font-medium text-foreground">Exit Slideshow</span>
                 <kbd
                   class="shadow-xs inline-flex min-w-[24px] items-center justify-center rounded-md border border-border bg-muted px-2 py-1 font-mono text-xs font-semibold text-foreground"
                   >Esc</kbd

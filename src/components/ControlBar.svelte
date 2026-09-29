@@ -23,6 +23,15 @@
   import { loadPhotos } from './common/ImageOperations';
   import Zap from '@lucide/svelte/icons/zap';
   import Clock from '@lucide/svelte/icons/clock';
+  import Play from '@lucide/svelte/icons/play';
+
+  let {
+    onStartSlideshow,
+    canStartSlideshow = false,
+  }: {
+    onStartSlideshow?: () => void;
+    canStartSlideshow?: boolean;
+  } = $props();
 
   const sortOptions: { value: SortOption; label: string }[] = [
     { value: 'name', label: 'Name' },
@@ -57,15 +66,29 @@
       <Sidebar.Trigger class="-ml-2" />
       <Breadcrumbs />
     </div>
-    <Button
-      onclick={() => loadPhotos()}
-      variant="outline"
-      size="sm"
-      class="h-8 shrink-0 gap-2 bg-background text-xs font-medium"
-    >
-      <FolderOpen size={14} />
-      <span class="hidden sm:inline">Open Folder</span>
-    </Button>
+    <div class="flex items-center gap-2">
+      {#if canStartSlideshow}
+        <Button
+          onclick={onStartSlideshow}
+          variant="outline"
+          size="sm"
+          class="h-8 shrink-0 gap-1.5 bg-background text-xs font-medium transition-colors hover:border-primary/50 hover:text-primary"
+          title="Start Slideshow"
+        >
+          <Play size={13} class="fill-current" />
+          <span class="hidden sm:inline">Slideshow</span>
+        </Button>
+      {/if}
+      <Button
+        onclick={() => loadPhotos()}
+        variant="outline"
+        size="sm"
+        class="h-8 shrink-0 gap-2 bg-background text-xs font-medium"
+      >
+        <FolderOpen size={14} />
+        <span class="hidden sm:inline">Open Folder</span>
+      </Button>
+    </div>
   </div>
 
   <!-- Bottom Row: Search, Filters, and Sorting -->

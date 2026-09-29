@@ -7,10 +7,12 @@
   import ChevronDownIcon from '@lucide/svelte/icons/chevron-down';
   import ChevronRightIcon from '@lucide/svelte/icons/chevron-right';
   import DownloadIcon from '@lucide/svelte/icons/download';
+  import Play from '@lucide/svelte/icons/play';
   import { listen } from '@tauri-apps/api/event';
   import Gallery from '../../components/Gallery.svelte';
   import ImageCard from '../../components/ImageCard.svelte';
   import ImageModal from '../../components/ImageModal.svelte';
+  import SlideshowModal from '../../components/SlideshowModal.svelte';
   import { exportFavorites } from '../../components/common/ImageOperations';
   import KeyboardShortcuts from '../../components/common/KeyboardShortcuts.svelte';
   import ConfirmationModal from '../../components/modals/ConfirmationModal.svelte';
@@ -32,6 +34,7 @@
   let showClearFolderConfirmation = $state(false);
   let showExportModal = $state(false);
   let isExporting = $state(false);
+  let isSlideshowOpen = $state(false);
 
   // Modal viewer state for All Folders view
   let selectedModalImage = $state<PhotoMetadata | null>(null);
@@ -60,6 +63,10 @@
     if (!$currentFolder) return [];
     return $favouritePhotos.filter((p) => p.path.startsWith($currentFolder!));
   });
+
+  const activeFavouritesList = $derived(
+    $favouriteScope === 'current' ? currentFolderPhotos : $favouritePhotos,
+  );
 
   const keyboardActions = {
     e: () => {
@@ -258,6 +265,19 @@
           </Button>
         {/if}
 
+        {#if activeFavouritesList.length > 0}
+          <Button
+            variant="outline"
+            size="sm"
+            onclick={() => (isSlideshowOpen = true)}
+            class="gap-1.5 text-xs font-medium transition-colors hover:border-primary/50 hover:text-primary"
+            title="Start Slideshow of Favourites"
+          >
+            <Play size={13} class="fill-current text-primary" />
+            <span>Slideshow</span>
+          </Button>
+        {/if}
+
         <Button
           variant="default"
           size="sm"
@@ -408,6 +428,13 @@
   bind:selectedImage={selectedModalImage}
   photos={modalPhotos}
   onClose={() => (selectedModalImage = null)}
+/>
+
+<!-- Slideshow Modal -->
+<SlideshowModal
+  bind:open={isSlideshowOpen}
+  photos={activeFavouritesList}
+  onClose={() => (isSlideshowOpen = false)}
 />
 
 <!-- Export Modal -->

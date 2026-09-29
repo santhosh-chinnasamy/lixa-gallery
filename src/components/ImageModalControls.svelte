@@ -9,6 +9,7 @@
   import ZoomOut from '@lucide/svelte/icons/zoom-out';
   import RotateCcw from '@lucide/svelte/icons/rotate-ccw';
   import Info from '@lucide/svelte/icons/info';
+  import Play from '@lucide/svelte/icons/play';
 
   let {
     currentIndex,
@@ -28,6 +29,7 @@
     onToggleFavorite,
     showInfo,
     onToggleInfo,
+    onStartSlideshow,
     showUI = true,
   }: {
     currentIndex: number;
@@ -47,6 +49,7 @@
     onToggleFavorite: () => void;
     showInfo: boolean;
     onToggleInfo: () => void;
+    onStartSlideshow?: () => void;
     showUI?: boolean;
   } = $props();
 
@@ -216,5 +219,20 @@
     >
       <Info size={16} />
     </Button>
+
+    <!-- Start Slideshow button -->
+    {#if onStartSlideshow}
+      <div class="h-5 w-px bg-white/20"></div>
+      <Button
+        variant="ghost"
+        size="icon"
+        onclick={onStartSlideshow}
+        class="h-9 w-9 rounded-full text-white/80 transition-all duration-200 hover:bg-white/15 hover:text-white"
+        aria-label="Start Slideshow (P)"
+        title="Start Slideshow (P)"
+      >
+        <Play size={15} class="fill-current" />
+      </Button>
+    {/if}
   </div>
 </div>

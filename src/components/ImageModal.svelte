@@ -8,6 +8,7 @@
   import Close from './icons/Close.svelte';
   import Info from '@lucide/svelte/icons/info';
   import ImageModalControls from './ImageModalControls.svelte';
+  import SlideshowModal from './SlideshowModal.svelte';
   import { page } from '$app/state';
   import type { PhotoMetadata } from '../types/photo';
 
@@ -48,6 +49,7 @@
   const fileName = $derived(selectedImage?.metadata.name);
 
   // Modal and Image states
+  let isSlideshowOpen = $state(false);
   let imageLoaded = $state(false);
   let imageError = $state(false);
   const preloadedImages = new Map<string, HTMLImageElement>();
@@ -150,6 +152,11 @@
     if (event.key === 'i' || event.key === 'I') {
       event.preventDefault();
       toggleInfo();
+      return;
+    }
+    if (event.key === 'p' || event.key === 'P') {
+      event.preventDefault();
+      isSlideshowOpen = true;
       return;
     }
     if (event.key === 'Escape') {
@@ -661,6 +668,7 @@
         onToggleFavorite={toggleFavorite}
         {showInfo}
         onToggleInfo={toggleInfo}
+        onStartSlideshow={() => (isSlideshowOpen = true)}
       />
 
       <div
@@ -673,3 +681,10 @@
     </div>
   </div>
 {/if}
+
+<SlideshowModal
+  bind:open={isSlideshowOpen}
+  photos={photoSource}
+  startIndex={currentIndex}
+  onClose={() => (isSlideshowOpen = false)}
+/>
