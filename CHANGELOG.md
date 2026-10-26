@@ -1,5 +1,12 @@
 # Changelog
 
+## [0.7.6](https://github.com/santhosh-chinnasamy/lixa-gallery/compare/lixa-gallery-v0.7.5...lixa-gallery-v0.7.6) (2026-10-26)
+
+
+### Features
+
+* add a Contact Sheet landing site ([7c82f0d](https://github.com/santhosh-chinnasamy/lixa-gallery/commit/7c82f0d252bdb38852ed38fed8302d505d57a13b))
+
 ## [0.7.5](https://github.com/santhosh-chinnasamy/lixa-gallery/compare/lixa-gallery-v0.7.4...lixa-gallery-v0.7.5) (2026-09-29)
 
 
