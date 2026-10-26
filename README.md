@@ -1,24 +1,33 @@
 # Lixa Gallery
 
-Select your favorite photos and export
+Circle the keepers.
+
+Open a folder from a shoot, mark the frames worth keeping, and copy or move them out. A small desktop app for culling photos. Nothing is uploaded.
+
+**Site:** https://santhosh-chinnasamy.github.io/lixa-gallery/
 
 ![Lixa Gallery Logo](./src-tauri/icons/128x128.png 'Lixa Gallery Logo')
+
 ## Installation
 
 [![GitHub release (latest by date)](https://img.shields.io/github/v/release/santhosh-chinnasamy/lixa-gallery?label=Latest%20Version)](https://github.com/santhosh-chinnasamy/lixa-gallery/releases/latest)
 
-### Standard
-Download latest version from [release](https://github.com/santhosh-chinnasamy/lixa-gallery/releases) page for your OS and run the installer.
+Installers for macOS (Apple silicon and Intel), Windows, and Linux are on the [site](https://santhosh-chinnasamy.github.io/lixa-gallery/#install). The button for your machine downloads that release asset directly.
+
+The site is published with GitHub Pages from [`.github/workflows/pages.yml`](.github/workflows/pages.yml).
 
 ### Nix / NixOS
 
 #### Run directly (using Cachix binary cache)
+
 ```bash
 nix run --accept-flake-config github:santhosh-chinnasamy/lixa-gallery
 ```
 
 #### Install on NixOS (via Flakes)
+
 Add `lixa-gallery` to your `flake.nix`:
+
 ```nix
 {
   inputs = {
@@ -42,18 +51,19 @@ Add `lixa-gallery` to your `flake.nix`:
 
 Pre-built binaries are provided via [Cachix](https://app.cachix.org/cache/lixa-gallery).
 
-## Keyboard Shortcuts
+## Keyboard shortcuts
 
-- `o` - Open / Select folder
-- `l` - toggle image as favorite in preview mode or in gallery mode
-- `e` - export favorites
-- `F11` - toggle fullscreen
+The full list — gallery, viewer, and slideshow — is on the [site](https://santhosh-chinnasamy.github.io/lixa-gallery/#shortcuts). It is taken from the shortcut handlers in the app.
 
 ## Screenshots / Demo
 
 [![Demo Video](https://img.shields.io/badge/Demo%20Video-Youtube-FF0000?style=plastic&logo=youtube&logoColor=FF0000&link=https://youtu.be/F1yKYnQ873I)](https://youtu.be/F1yKYnQ873I)
 
-![Lixa Gallery Screenshot](./assets/screen-3.png 'Lixa Gallery Screenshot')
+![Gallery](./site/assets/shots/gallery.jpg 'Lixa Gallery — folder grid')
+
+![Viewer](./site/assets/shots/viewer.jpg 'Lixa Gallery — full-size viewer')
+
+![Export](./site/assets/shots/export.jpg 'Lixa Gallery — export favourites')
 
 ## Supports
 
@@ -68,6 +78,5 @@ Please read the [contributing guidelines](CONTRIBUTING.md) to setup your develop
 ## Attributions
 
 - Logo generated using svg from <a href="https://www.svgrepo.com" target="_blank">SVG Repo</a>
-
 
 <video src="./assets/demo.mp4" controls="" alt="Lixa Gallery Demo" title="Lixa Gallery Demo" height="400" width="auto" />

@@ -1,0 +1,149 @@
+<header class="hero">
+  <div>
+    <p class="kicker">Open-source photo culling · v<span data-release-version>@@version@@</span></p>
+    <h1>Circle the<br><em>keepers.</em></h1>
+    <p class="sub">Open a folder from your last shoot, press <kbd>L</kbd> on the frames worth keeping, and copy or move them out. A small desktop app, nothing uploaded.</p>
+    <div class="cta">
+      <a class="btn" id="primary-download" href="#install">Download</a>
+      <a class="btn ghost" href="https://github.com/santhosh-chinnasamy/lixa-gallery">View source</a>
+    </div>
+    <p class="meta">macOS · Windows · Linux (.deb .rpm AppImage) · Nix<br>MIT licensed · built with Tauri &amp; Rust</p>
+  </div>
+  <figure class="sheet" aria-label="Contact sheet with grease-pencil circles on three keepers">
+    <div class="strip">
+      <div class="fr"><span>12A ▸</span><img src="assets/frames/IMG_1015.jpg" alt="Sample frame 12A"></div>
+      <div class="fr"><span>13</span><img src="assets/frames/IMG_1016.jpg" alt="Sample frame 13, circled as a keeper"><svg viewBox="0 0 100 100" preserveAspectRatio="none" aria-hidden="true"><path d="M50 4 C82 2 98 22 97 50 C96 80 76 97 46 96 C16 95 2 76 3 48 C4 20 24 5 56 6 C62 6 66 8 70 10"/></svg></div>
+      <div class="fr x"><span>13A ▸</span><img src="assets/frames/IMG_1018.jpg" alt="Sample frame 13A, crossed out"></div>
+      <div class="fr"><span>14</span><img src="assets/frames/IMG_1019.jpg" alt="Sample frame 14"></div>
+      <div class="fr"><span>14A ▸</span><img src="assets/frames/IMG_1036.jpg" alt="Sample frame 14A"></div>
+      <div class="fr"><span>15</span><img src="assets/frames/IMG_1039.jpg" alt="Sample frame 15"></div>
+      <div class="fr"><span>15A ▸</span><img src="assets/frames/IMG_1043.jpg" alt="Sample frame 15A, circled as a keeper"><svg viewBox="0 0 100 100" preserveAspectRatio="none" aria-hidden="true"><path d="M48 5 C80 3 97 24 96 52 C95 82 72 96 44 95 C15 94 3 72 4 46 C5 18 28 4 60 7"/></svg></div>
+      <div class="fr"><span>16</span><img src="assets/frames/IMG_1047.jpg" alt="Sample frame 16"></div>
+      <div class="fr x"><span>16A ▸</span><img src="assets/frames/IMG_1050.jpg" alt="Sample frame 16A, crossed out"></div>
+      <div class="fr"><span>17</span><img src="assets/frames/IMG_1067.jpg" alt="Sample frame 17"></div>
+      <div class="fr"><span>17A ▸</span><img src="assets/frames/IMG_1074.jpg" alt="Sample frame 17A, circled as a keeper"><svg viewBox="0 0 100 100" preserveAspectRatio="none" aria-hidden="true"><path d="M52 6 C84 5 97 26 96 52 C95 80 74 96 46 95 C18 94 4 74 4 48 C4 22 22 6 50 5 C58 5 64 7 68 9"/></svg></div>
+      <div class="fr"><span>18</span><img src="assets/frames/IMG_1080.jpg" alt="Sample frame 18"></div>
+    </div>
+    <figcaption class="sheet-cap"><span>~/Pictures/2026-10 Madurai</span><span>3 of 20 picked</span></figcaption>
+  </figure>
+</header>
+
+<section id="how">
+  <h2 class="h2">Three keys from a full card to a short folder.</h2>
+  <p class="lede">Lixa does one job: helping you decide. It doesn't import, catalogue or edit. It shows you the folder, remembers what you liked, and puts those files somewhere else.</p>
+  <div class="steps">
+    <div class="step">
+      <div class="shot"><img src="assets/shots/gallery.jpg" alt="Gallery grid for a folder of photos, with hearts on the marked frames"></div>
+      <div class="num">01</div>
+      <h3><kbd>O</kbd> Open a folder</h3>
+      <p>Thumbnails are 512px WebP, generated in Rust as you scroll, so a large folder opens without a long import. Subfolders show up in the sidebar.</p>
+    </div>
+    <div class="step">
+      <div class="shot"><img src="assets/shots/viewer.jpg" alt="Full-size viewer with zoom and black-and-white, sepia and invert controls"></div>
+      <div class="num">02</div>
+      <h3><kbd>L</kbd> Mark the good ones</h3>
+      <p>Step through full size with the arrow keys, zoom in to check focus, or flip the frame to black and white, sepia or invert.</p>
+    </div>
+    <div class="step">
+      <div class="shot"><img src="assets/shots/export.jpg" alt="Export dialog set to copy one folder of favourites and keep the folder structure"></div>
+      <div class="num">03</div>
+      <h3><kbd>E</kbd> Export</h3>
+      <p>Copy or move favourites into a new folder: everything, the current folder, or a chosen set of folders. The folder structure stays, unless you turn that off.</p>
+    </div>
+  </div>
+</section>
+
+<section id="notes">
+  <h2 class="h2">Margin notes.</h2>
+  <div class="notes">
+    <div class="note"><b>Formats</b><p>JPEG, PNG, WebP, AVIF, TIFF, GIF, BMP and SVG. HEIC and HEIF are listed in the folder; preview depends on the system webview.</p></div>
+    <div class="note"><b>Slideshow</b><p>Play a folder, or just your favourites, at 2, 3, 5, 8 or 10 seconds a frame, with shuffle and loop. You can still mark frames from inside it.</p></div>
+    <div class="note"><b>Favourites</b><p>Grouped by the folder they came from, kept across sessions in a local SQLite file.</p></div>
+    <div class="note"><b>Find</b><p>Search by filename. Sort by name, date created or file size, either way. Resize the grid.</p></div>
+    <div class="note"><b>Private</b><p>No account, no cloud, no network calls. Files stay where they are until you export.</p></div>
+    <div class="note"><b>Bug reports</b><p>A local log file you can attach to an issue. Settings opens the folder that holds it.</p></div>
+  </div>
+</section>
+
+<section id="shortcuts">
+  <h2 class="h2">Every action has a key.</h2>
+  <p class="lede">Taken from the handlers in the app. <kbd>O</kbd> opens a folder on the gallery screen. <kbd>E</kbd> exports from the favourites page. <kbd>L</kbd> marks the focused thumbnail, or the frame open in the viewer and slideshow. The sidebar is <kbd>Ctrl</kbd> or <kbd>⌘</kbd> <kbd>B</kbd>, and fullscreen is <kbd>F11</kbd>. These stay quiet while a text field is focused.</p>
+  <div class="keymap">
+    <div class="col">
+      <h3>Gallery</h3>
+      <div class="row"><span>Open folder</span><span class="keys"><kbd>O</kbd></span></div>
+      <div class="row"><span>Toggle favourite</span><span class="keys"><kbd class="keep">L</kbd></span></div>
+      <div class="row"><span>Open the frame</span><span class="keys"><kbd>Enter</kbd></span></div>
+      <div class="row"><span>Export favourites</span><span class="keys"><kbd>E</kbd></span></div>
+      <div class="row"><span>Toggle sidebar</span><span class="keys"><kbd>Ctrl</kbd><kbd>B</kbd><span class="or">or</span><kbd>⌘</kbd><kbd>B</kbd></span></div>
+      <div class="row"><span>Fullscreen</span><span class="keys"><kbd>F11</kbd></span></div>
+    </div>
+    <div class="col">
+      <h3>Viewer</h3>
+      <div class="row"><span>Previous</span><span class="keys"><kbd>←</kbd><kbd>[</kbd></span></div>
+      <div class="row"><span>Next</span><span class="keys"><kbd>→</kbd><kbd>]</kbd></span></div>
+      <div class="row"><span>Favourite</span><span class="keys"><kbd class="keep">L</kbd><kbd class="keep">F</kbd></span></div>
+      <div class="row"><span>Zoom in / out / reset</span><span class="keys"><kbd>+</kbd><kbd>-</kbd><kbd>0</kbd></span></div>
+      <div class="row"><span>Photo details</span><span class="keys"><kbd>I</kbd></span></div>
+      <div class="row"><span>Start slideshow</span><span class="keys"><kbd>P</kbd></span></div>
+      <div class="row"><span>Close</span><span class="keys"><kbd>Esc</kbd></span></div>
+      <p class="note">Drag pans a zoomed frame. Double-click swaps 100% and 250%. The scroll wheel or a pinch zooms. Plus and equals zoom in; minus and zero follow, with or without Ctrl or ⌘.</p>
+    </div>
+    <div class="col">
+      <h3>Slideshow</h3>
+      <div class="row"><span>Play / pause</span><span class="keys"><kbd>Space</kbd></span></div>
+      <div class="row"><span>Next</span><span class="keys"><kbd>→</kbd><kbd>PgDn</kbd></span></div>
+      <div class="row"><span>Previous</span><span class="keys"><kbd>←</kbd><kbd>PgUp</kbd></span></div>
+      <div class="row"><span>Favourite</span><span class="keys"><kbd class="keep">F</kbd><kbd class="keep">L</kbd></span></div>
+      <div class="row"><span>Shuffle</span><span class="keys"><kbd>S</kbd></span></div>
+      <div class="row"><span>Repeat</span><span class="keys"><kbd>R</kbd></span></div>
+      <div class="row"><span>Image info</span><span class="keys"><kbd>I</kbd></span></div>
+      <div class="row"><span>Fullscreen</span><span class="keys"><kbd>F11</kbd><kbd>Enter</kbd></span></div>
+      <div class="row"><span>Exit</span><span class="keys"><kbd>Esc</kbd></span></div>
+    </div>
+  </div>
+</section>
+
+<section id="install">
+  <h2 class="h2">Get it.</h2>
+  <div class="install">
+    <ul class="dl">
+      <li><a data-dl="macos-arm" href="@@macos-arm@@"><span class="name">macOS — Apple silicon <span class="hint" data-hint="macos-arm" hidden></span></span><span class="ext">.dmg</span></a></li>
+      <li><a data-dl="macos-intel" href="@@macos-intel@@"><span class="name">macOS — Intel <span class="hint" data-hint="macos-intel" hidden></span></span><span class="ext">.dmg</span></a></li>
+      <li><a data-dl="windows-exe" href="@@windows-exe@@"><span class="name">Windows <span class="hint" data-hint="windows-exe" hidden></span></span><span class="ext">.exe</span></a></li>
+      <li><a data-dl="windows-msi" href="@@windows-msi@@"><span class="name">Windows <span class="hint" data-hint="windows-msi" hidden></span></span><span class="ext">.msi</span></a></li>
+      <li><a data-dl="linux-deb" href="@@linux-deb@@"><span class="name">Debian, Ubuntu <span class="hint" data-hint="linux-deb" hidden></span></span><span class="ext">.deb</span></a></li>
+      <li><a data-dl="linux-rpm" href="@@linux-rpm@@"><span class="name">Fedora, RHEL <span class="hint" data-hint="linux-rpm" hidden></span></span><span class="ext">.rpm</span></a></li>
+      <li><a data-dl="linux-appimage" href="@@linux-appimage@@"><span class="name">Linux <span class="hint" data-hint="linux-appimage" hidden></span></span><span class="ext">.AppImage</span></a></li>
+    </ul>
+    <div>
+<pre><span class="c"># Nix — run without installing</span>
+nix run --accept-flake-config \
+  github:santhosh-chinnasamy/lixa-gallery
+
+<span class="c"># binaries cached on lixa-gallery.cachix.org</span></pre>
+      <details class="nixos">
+        <summary>NixOS module</summary>
+<pre>{
+  inputs = {
+    nixpkgs.url = "github:NixOS/nixpkgs/nixos-unstable";
+    lixa-gallery.url = "github:santhosh-chinnasamy/lixa-gallery";
+  };
+
+  outputs = { nixpkgs, lixa-gallery, ... }: {
+    nixosConfigurations.myhostname = nixpkgs.lib.nixosSystem {
+      modules = [
+        ({ pkgs, ... }: {
+          environment.systemPackages = [
+            lixa-gallery.packages.${pkgs.system}.default
+          ];
+        })
+      ];
+    };
+  };
+}</pre>
+      </details>
+      <p class="fallback">The flake turns on the <a href="https://app.cachix.org/cache/lixa-gallery">lixa-gallery Cachix cache</a>. <code>--accept-flake-config</code> is what allows that. If a button has no direct file, it falls through to the <a href="@@fallback@@">latest release</a>.</p>
+    </div>
+  </div>
+</section>

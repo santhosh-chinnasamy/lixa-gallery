@@ -8,9 +8,16 @@ on:
 permissions:
   contents: write
   pull-requests: write
+  # deploy-site calls the Pages workflow, which can only use permissions
+  # granted here. pages + id-token are what actions/deploy-pages needs.
+  pages: write
+  id-token: write
 
 jobs:
   release-please:
+    permissions:
+      contents: write
+      pull-requests: write
     runs-on: ubuntu-latest
     outputs:
       release_created: ${{ steps.release.outputs.release_created }}
@@ -101,6 +108,9 @@ jobs:
     name: Build & Push Nix Release to Cachix
     needs: release-please
     if: ${{ needs.release-please.outputs.release_created == 'true' }}
+    permissions:
+      contents: write
+      pull-requests: write
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
@@ -118,3 +128,17 @@ jobs:
 
       - name: Build Nix package and push to Cachix
         run: nix build -L .#default
+
+  # A separate `on: release` workflow would never run: release-please and
+  # tauri-action publish with GITHUB_TOKEN, and that token does not trigger
+  # other workflows. Call the Pages deploy from this run, after the installers
+  # exist, so the site's download links match the release that was just cut.
+  deploy-site:
+    name: Deploy landing site
+    needs: publish-tauri
+    if: ${{ needs.publish-tauri.result == 'success' }}
+    permissions:
+      contents: read
+      pages: write
+      id-token: write
+    uses: ./.github/workflows/pages.yml
