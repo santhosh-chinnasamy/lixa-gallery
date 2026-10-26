@@ -15,7 +15,9 @@
     "format:ts": "prettier --write src/**/*.{ts,svelte,css,html}",
     "lint:fix": "npm run format:rs && npm run format:ts",
     "lint": "prettier --check .",
-    "bump": "node scripts/bump-version.js"
+    "bump": "node scripts/bump-version.js",
+    "site": "node site/build.mjs",
+    "site:test": "node --test site/changelog.test.mjs site/downloads.test.mjs"
   },
   "dependencies": {
     "@tailwindcss/vite": "^4.1.5",

@@ -10,3 +10,6 @@ node_modules
 .svelte-kit
 .vscode
 static
+
+# Hand-written static site, separate from the Svelte/Tailwind app
+site
