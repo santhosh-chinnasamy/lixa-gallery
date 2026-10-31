@@ -1,5 +1,6 @@
 <script lang="ts">
   import { Button } from '$lib/components/ui/button';
+  import { thumbnailUrl } from '$lib/thumbnail';
   import { cn } from '$lib/utils';
   import { convertFileSrc } from '@tauri-apps/api/core';
   import { fade, scale as scaleTransition } from 'svelte/transition';
@@ -532,7 +533,7 @@
         <!-- Thumbnail placeholder/fallback -->
         {#if !imageLoaded || imageError}
           <img
-            src={`lixa-thumbnail://localhost/${encodeURIComponent(selectedImage.path)}`}
+            src={thumbnailUrl(selectedImage)}
             alt=""
             class={`absolute inset-0 h-full w-full rounded-lg object-contain blur-md transition-opacity duration-500 ${
               imageError ? 'opacity-50' : 'opacity-20'
