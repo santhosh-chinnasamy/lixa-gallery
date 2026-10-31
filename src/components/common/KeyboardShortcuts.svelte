@@ -1,4 +1,5 @@
 <script lang="ts">
+  import { error as logError } from '$lib/logger';
   import type { KeyboardActions } from '../../types/events';
 
   let { actions } = $props<{ actions: KeyboardActions }>();
@@ -20,10 +21,7 @@
         action();
       }
     } catch (error) {
-      console.error(
-        `Error executing keyboard action: [key: ${event.key}]`,
-        error,
-      );
+      logError(`Error executing keyboard action: [key: ${event.key}] ${error}`);
     }
   };
 </script>

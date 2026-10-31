@@ -1,38 +1,23 @@
 import {
-  attachConsole,
   error as logError,
   warn as logWarn,
   info as logInfo,
-  debug as logDebug,
+  debug,
 } from '@tauri-apps/plugin-log';
 import { invoke } from '@tauri-apps/api/core';
 
 let initialized = false;
 
 /**
- * Initializes frontend log capture, attaching console output and global
- * error/unhandledrejection listeners to pipe logs to the native file target.
+ * Initializes frontend log capture for uncaught errors and unhandled promise rejections.
+ * Native browser console methods are NOT intercepted, preserving DevTools performance and stack traces.
  */
 export async function initLogger() {
   if (initialized || typeof window === 'undefined') return;
   initialized = true;
 
-  try {
-    // Attach Rust logs to the webview console in development
-    await attachConsole();
-  } catch (err) {
-    // Expected when running outside Tauri or if console attachment is unsupported
-  }
-
   // Global uncaught JS error handler
   window.addEventListener('error', (event) => {
-    const errorDetails = {
-      message: event.message,
-      filename: event.filename,
-      lineno: event.lineno,
-      colno: event.colno,
-      stack: event.error?.stack,
-    };
     logError(
       `[Frontend Uncaught Error] ${event.message} at ${event.filename}:${event.lineno}:${event.colno}\nStack: ${event.error?.stack || 'No stack'}`,
     );
@@ -50,44 +35,13 @@ export async function initLogger() {
     logError(`[Frontend Unhandled Rejection] ${message}`);
   });
 
-  // Intercept console.error to log to native file
-  const originalConsoleError = console.error;
-  console.error = (...args: unknown[]) => {
-    originalConsoleError(...args);
-    const message = args
-      .map((a) =>
-        a instanceof Error
-          ? `${a.message}\n${a.stack}`
-          : typeof a === 'object'
-            ? JSON.stringify(a)
-            : String(a),
-      )
-      .join(' ');
-    logError(`[Console Error] ${message}`);
-  };
-
-  // Intercept console.warn to log to native file
-  const originalConsoleWarn = console.warn;
-  console.warn = (...args: unknown[]) => {
-    originalConsoleWarn(...args);
-    const message = args
-      .map((a) =>
-        a instanceof Error
-          ? `${a.message}\n${a.stack}`
-          : typeof a === 'object'
-            ? JSON.stringify(a)
-            : String(a),
-      )
-      .join(' ');
-    logWarn(`[Console Warn] ${message}`);
-  };
-
   logInfo('[Frontend] Logger initialized successfully');
 }
 
 /**
- * Opens the application's log directory or selects the log file in the user's OS file manager.
- * Returns the path of the target opened.
+ * Opens the application's log directory or selects the session log file.
+ * Flushes the in-memory flight recorder to the session dump on demand.
+ * Crash reports are written separately as crash-*.log and are not overwritten.
  */
 export async function openLogsFolder(): Promise<string> {
   return await invoke<string>('open_logs_dir');
@@ -100,9 +54,4 @@ export async function getLogDirectory(): Promise<string> {
   return await invoke<string>('get_log_dir');
 }
 
-export {
-  logError as error,
-  logWarn as warn,
-  logInfo as info,
-  logDebug as debug,
-};
+export { logError as error, logWarn as warn, logInfo as info, debug };

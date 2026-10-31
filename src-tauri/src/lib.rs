@@ -1,5 +1,6 @@
 use tauri::Manager;
 
+pub mod logging;
 pub mod tauri_api;
 
 use crate::tauri_api::{commands, state::AppState};
@@ -8,6 +9,11 @@ use percent_encoding::percent_decode_str;
 
 #[cfg_attr(mobile, tauri::mobile_entry_point)]
 pub fn run() {
+    // Initialize in-memory Flight Recorder logger (capped at 2 MB RAM)
+    if let Err(e) = logging::init_flight_recorder() {
+        eprintln!("Warning: Failed to initialize flight recorder logger: {e}");
+    }
+
     let default_hook = std::panic::take_hook();
     std::panic::set_hook(Box::new(move |panic_info| {
         let payload = if let Some(s) = panic_info.payload().downcast_ref::<&str>() {
@@ -24,37 +30,16 @@ pub fn run() {
             .unwrap_or_else(|| "Unknown location".to_string());
 
         let backtrace = std::backtrace::Backtrace::force_capture();
-        log::error!(
-            target: "crash",
-            "APPLICATION PANIC / CRASH at {location}:\nPayload: {payload}\nBacktrace:\n{backtrace}"
+        let crash_msg = format!(
+            "\n[CRASH] APPLICATION PANIC at {location}:\nPayload: {payload}\nBacktrace:\n{backtrace}\n"
         );
+        eprintln!("{crash_msg}");
+        logging::dump_crash(&crash_msg);
         default_hook(panic_info);
     }));
 
     tauri::Builder::default()
-        .plugin(
-            tauri_plugin_log::Builder::new()
-                .targets([
-                    tauri_plugin_log::Target::new(tauri_plugin_log::TargetKind::Stdout),
-                    tauri_plugin_log::Target::new(tauri_plugin_log::TargetKind::LogDir {
-                        file_name: None,
-                    }),
-                    tauri_plugin_log::Target::new(tauri_plugin_log::TargetKind::Webview),
-                ])
-                .max_file_size(5 * 1024 * 1024)
-                .rotation_strategy(tauri_plugin_log::RotationStrategy::KeepSome(5))
-                .timezone_strategy(tauri_plugin_log::TimezoneStrategy::UseLocal)
-                .level(log::LevelFilter::Info)
-                .filter(|metadata| {
-                    if metadata.target().starts_with("sqlx::query")
-                        && metadata.level() > log::Level::Info
-                    {
-                        return false;
-                    }
-                    true
-                })
-                .build(),
-        )
+        .plugin(tauri_plugin_log::Builder::new().skip_logger().build())
         .plugin(tauri_plugin_dialog::init())
         .plugin(tauri_plugin_opener::init())
         .register_asynchronous_uri_scheme_protocol(
@@ -159,6 +144,9 @@ pub fn run() {
         ])
         .setup(|app| {
             let app_handle = app.handle().clone();
+            if let Ok(log_dir) = app_handle.path().app_log_dir() {
+                logging::set_log_dir(log_dir);
+            }
             let app_data_dir = app_handle
                 .path()
                 .app_data_dir()
