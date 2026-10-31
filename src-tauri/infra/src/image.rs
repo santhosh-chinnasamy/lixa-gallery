@@ -13,12 +13,18 @@ impl RayonImageProcessor {
     pub fn new() -> Self {
         let pool = rayon::ThreadPoolBuilder::new()
             .num_threads(4)
-            .thread_name(|i| format!("rayon-img-{}", i))
+            .thread_name(|i| format!("rayon-img-{i}"))
             .build()
             .expect("Failed to create Rayon thread pool");
         Self {
             pool: Arc::new(pool),
         }
+    }
+}
+
+impl Default for RayonImageProcessor {
+    fn default() -> Self {
+        Self::new()
     }
 }
 

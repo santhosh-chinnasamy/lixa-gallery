@@ -253,7 +253,7 @@ fn prune_crash_logs(dir: &Path, keep: usize) {
         })
         .collect();
 
-    crashes.sort_by(|a, b| a.0.cmp(&b.0));
+    crashes.sort_by_key(|a| a.0);
     let excess = crashes.len().saturating_sub(keep);
     for (_, path) in crashes.into_iter().take(excess) {
         let _ = remove_file(path);
@@ -352,7 +352,7 @@ mod tests {
         assert!(truncated.ends_with("... [TRUNCATED]"));
         assert!(truncated.is_char_boundary(truncated.len()));
         // Must not panic when used as a normal String.
-        let _ = format!("{truncated}");
+        let _ = truncated.to_string();
     }
 
     #[test]
