@@ -19,6 +19,7 @@
   import X from '@lucide/svelte/icons/x';
   import ChevronLeft from '@lucide/svelte/icons/chevron-left';
   import ChevronRight from '@lucide/svelte/icons/chevron-right';
+  import { warn as logWarn } from '$lib/logger';
   import type { PhotoMetadata } from '../types/photo';
 
   let {
@@ -318,7 +319,7 @@
       await appWindow.setFullscreen(!current);
       isFullscreen = !current;
     } catch (err) {
-      console.warn('Unable to toggle fullscreen via Tauri window API:', err);
+      logWarn(`Unable to toggle fullscreen via Tauri window API: ${err}`);
       if (!document.fullscreenElement) {
         await document.documentElement.requestFullscreen().catch(() => {});
         isFullscreen = true;

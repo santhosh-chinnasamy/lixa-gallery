@@ -1,5 +1,6 @@
 import { invoke } from '@tauri-apps/api/core';
 import { derived, get, writable } from 'svelte/store';
+import { error as logError } from '$lib/logger';
 import type { FavouriteFolderGroup, PhotoMetadata } from '../types/photo';
 
 export interface FolderNode {
@@ -157,7 +158,7 @@ function createFavoritesStore() {
         const paths = new Set(favs.map((f) => f.path));
         set(paths);
       } catch (error) {
-        console.error('Error loading favorites:', error);
+        logError(`Error loading favorites: ${error}`);
       }
     },
     add: (path: string) =>
@@ -237,7 +238,7 @@ export async function refreshFavourites() {
     });
     favouritePhotos.set(photosList);
   } catch (error) {
-    console.error('Error refreshing favourites:', error);
+    logError(`Error refreshing favourites: ${error}`);
   } finally {
     isLoadingFavourites.set(false);
   }
@@ -255,7 +256,7 @@ export async function loadFolderTree(path: string) {
     const tree = await invoke<FolderNode>('get_folder_tree', { path });
     folderTree.set(tree);
   } catch (error) {
-    console.error('Error loading folder tree:', error);
+    logError(`Error loading folder tree: ${error}`);
   }
 }
 

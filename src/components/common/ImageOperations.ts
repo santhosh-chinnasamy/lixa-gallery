@@ -1,5 +1,6 @@
 import { invoke } from '@tauri-apps/api/core';
 import { open } from '@tauri-apps/plugin-dialog';
+import { error as logError } from '$lib/logger';
 import {
   photos,
   isLoading,
@@ -26,11 +27,11 @@ export async function loadPath(folderPath: string, isRoot = true) {
       recentFolders.add(folderPath);
       await loadFolderTree(folderPath);
       invoke('save_workspace', { path: folderPath }).catch((e) =>
-        console.error('Failed to record workspace:', e),
+        logError(`Failed to record workspace: ${e}`),
       );
     }
   } catch (error) {
-    console.error('Failed to load photos from path:', error);
+    logError(`Failed to load photos from path: ${error}`);
   } finally {
     isLoading.set(false);
   }
@@ -54,7 +55,7 @@ export async function loadPhotos() {
     isLoading.set(true);
     await loadPath(folder);
   } catch (error) {
-    console.error('Failed to load photos:', error);
+    logError(`Failed to load photos: ${error}`);
     isLoading.set(false);
   }
 }
@@ -80,7 +81,7 @@ export async function exportFavorites(
 
     return destination;
   } catch (error) {
-    console.error('Failed to export files:', error);
+    logError(`Failed to export files: ${error}`);
     throw error;
   }
 }

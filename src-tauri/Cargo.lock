@@ -2623,6 +2623,8 @@ name = "lixa-gallery"
 version = "0.7.1"
 dependencies = [
  "anyhow",
+ "chrono",
+ "dirs",
  "futures",
  "gallery-core",
  "infra",
@@ -2636,6 +2638,7 @@ dependencies = [
  "tauri-plugin-dialog",
  "tauri-plugin-log",
  "tauri-plugin-opener",
+ "tempfile",
  "tokio",
 ]
 
