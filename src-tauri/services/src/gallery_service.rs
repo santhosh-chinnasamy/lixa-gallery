@@ -4,6 +4,7 @@ use gallery_core::fs::FileSystem;
 use gallery_core::image::ImageProcessor;
 use gallery_core::models::{FolderNode, LoadingMode, PhotoMetadata, Result};
 use gallery_core::repos::PhotoRepository;
+use gallery_core::thumbnail_cache::stored_thumbnail_is_current;
 use std::{
     collections::HashMap,
     path::{Path, PathBuf},
@@ -85,8 +86,11 @@ impl GalleryService {
                 let path_str = file_path.to_string_lossy().to_string();
                 if let Ok(current_metadata) = fs_ref.get_file_metadata(&file_path).await {
                     if let Some((thumb_path, db_mtime, db_size)) = db_lookup_ref.get(&path_str) {
+                        // `{stem}.webp` rows from the v1 cache are not unique
+                        // across folders, so only a current identity file counts.
                         if current_metadata.modified as i64 == *db_mtime
                             && current_metadata.size as i64 == *db_size
+                            && stored_thumbnail_is_current(thumb_path, *db_mtime, *db_size)
                             && Path::new(thumb_path).exists()
                         {
                             return MetaResult::Cached(PhotoMetadata {
