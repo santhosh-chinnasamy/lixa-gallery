@@ -32,3 +32,9 @@ export interface ExportOptions {
   paths?: string[];
   preserve_folder_structure?: boolean;
 }
+
+export interface ExportReport {
+  copied: number;
+  renamed: number;
+  skipped: number;
+}

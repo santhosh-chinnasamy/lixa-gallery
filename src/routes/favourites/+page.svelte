@@ -13,7 +13,10 @@
   import ImageCard from '../../components/ImageCard.svelte';
   import ImageModal from '../../components/ImageModal.svelte';
   import SlideshowModal from '../../components/SlideshowModal.svelte';
-  import { exportFavorites } from '../../components/common/ImageOperations';
+  import {
+    exportFavorites,
+    formatExportSuccess,
+  } from '../../components/common/ImageOperations';
   import KeyboardShortcuts from '../../components/common/KeyboardShortcuts.svelte';
   import ConfirmationModal from '../../components/modals/ConfirmationModal.svelte';
   import ExportModal from '../../components/modals/ExportModal.svelte';
@@ -125,22 +128,21 @@
 
       setTimeout(() => unsubscribe(), 15000);
 
-      const destination = await exportFavorites(
+      const exported = await exportFavorites(
         mode,
         paths,
         preserveFolderStructure,
       );
 
-      if (destination) {
+      if (exported) {
         showExportModal = false;
         await refreshFavourites();
-        setTimeout(
-          () =>
-            alert(
-              `Favourites successfully ${mode === 'copy' ? 'copied' : 'moved'} to ${destination}`,
-            ),
-          100,
+        const message = formatExportSuccess(
+          mode,
+          exported.destination,
+          exported.report,
         );
+        setTimeout(() => alert(message), 100);
       } else {
         showExportModal = false;
       }
