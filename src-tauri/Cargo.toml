@@ -28,6 +28,11 @@ log = "0.4"
 serde = { version = "1", features = ["derive"] }
 futures = "0.3.31"
 percent-encoding = "2.3"
+chrono = { version = "0.4", default-features = false, features = ["clock"] }
+dirs = "6"
+
+[dev-dependencies]
+tempfile = "3"
 
 [workspace]
 members = [
@@ -52,6 +57,13 @@ thiserror = "2"
 async-trait = "0.1"
 async-recursion = "1.1.1"
 
+[workspace.lints.clippy]
+# async_trait expands methods to Pin<Box<dyn Future>>, which is already
+# #[must_use], so Clippy's double_must_use fires on every async trait method.
+double_must_use = "allow"
+
+[lints]
+workspace = true
 
 [profile.dev]
 debug = 0

@@ -3,6 +3,9 @@ name = "infra"
 version.workspace = true
 edition.workspace = true
 
+[lints]
+workspace = true
+
 [dependencies]
 gallery-core = { path = "../gallery-core" }
 sqlx = { version = "0.8.6", features = ["sqlite", "runtime-tokio"] }

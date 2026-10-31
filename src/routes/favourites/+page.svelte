@@ -14,6 +14,7 @@
   import ImageModal from '../../components/ImageModal.svelte';
   import SlideshowModal from '../../components/SlideshowModal.svelte';
   import { exportFavorites } from '../../components/common/ImageOperations';
+  import { error as logError } from '$lib/logger';
   import KeyboardShortcuts from '../../components/common/KeyboardShortcuts.svelte';
   import ConfirmationModal from '../../components/modals/ConfirmationModal.svelte';
   import ExportModal from '../../components/modals/ExportModal.svelte';
@@ -145,7 +146,7 @@
         showExportModal = false;
       }
     } catch (error) {
-      console.error('Export failed:', error);
+      logError(`Export failed: ${error}`);
       showExportModal = false;
       setTimeout(
         () => alert('Export failed. Please check the destination permissions.'),

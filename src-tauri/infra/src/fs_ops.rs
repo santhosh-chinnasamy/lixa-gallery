@@ -17,14 +17,14 @@ impl FileSystem for LocalFileSystem {
 
         let modified = metadata
             .modified()
-            .map_err(|e| GalleryError::Io(e))?
+            .map_err(GalleryError::Io)?
             .duration_since(UNIX_EPOCH)
             .map(|d| d.as_secs())
             .unwrap_or(0);
 
         let created = metadata
             .created()
-            .map_err(|e| GalleryError::Io(e))?
+            .map_err(GalleryError::Io)?
             .duration_since(UNIX_EPOCH)
             .map(|d| d.as_secs())
             .unwrap_or(0);
@@ -91,23 +91,19 @@ impl FileSystem for LocalFileSystem {
     }
 
     async fn copy(&self, from: &Path, to: &Path) -> Result<u64> {
-        fs::copy(from, to).await.map_err(|e| GalleryError::Io(e))
+        fs::copy(from, to).await.map_err(GalleryError::Io)
     }
 
     async fn rename(&self, from: &Path, to: &Path) -> Result<()> {
-        fs::rename(from, to).await.map_err(|e| GalleryError::Io(e))
+        fs::rename(from, to).await.map_err(GalleryError::Io)
     }
 
     async fn canonicalize(&self, path: &Path) -> Result<PathBuf> {
-        fs::canonicalize(path)
-            .await
-            .map_err(|e| GalleryError::Io(e))
+        fs::canonicalize(path).await.map_err(GalleryError::Io)
     }
 
     async fn create_dir_all(&self, path: &Path) -> Result<()> {
-        fs::create_dir_all(path)
-            .await
-            .map_err(|e| GalleryError::Io(e))
+        fs::create_dir_all(path).await.map_err(GalleryError::Io)
     }
 }
 

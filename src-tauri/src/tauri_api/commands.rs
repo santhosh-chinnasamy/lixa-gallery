@@ -170,7 +170,11 @@ pub async fn get_folder_tree(state: State<'_, AppState>, path: &str) -> Result<F
 pub async fn open_logs_dir(app_handle: AppHandle) -> Result<String, String> {
     use tauri::Manager;
     let log_dir = app_handle.path().app_log_dir().map_err(|e| e.to_string())?;
-    let log_file = log_dir.join("Lixa Gallery.log");
+    let log_file = log_dir.join(crate::logging::SESSION_LOG_FILENAME);
+
+    // Flush in-memory flight recorder to the session dump only (never overwrites crash-*.log).
+    let _ = crate::logging::flush_session_log(&log_file);
+
     let target = if log_file.exists() { log_file } else { log_dir };
     tauri_plugin_opener::reveal_item_in_dir(&target).map_err(|e| e.to_string())?;
     Ok(target.to_string_lossy().to_string())
