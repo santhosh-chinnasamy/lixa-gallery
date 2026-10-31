@@ -10,7 +10,7 @@ import {
   loadingMode,
 } from '../../stores/galleryStore';
 import { get } from 'svelte/store';
-import type { PhotoMetadata } from '../../types/photo';
+import type { ExportReport, PhotoMetadata } from '../../types/photo';
 
 export async function loadPath(folderPath: string, isRoot = true) {
   try {
@@ -63,7 +63,7 @@ export async function exportFavorites(
   mode: 'copy' | 'move' = 'copy',
   paths?: string[],
   preserveFolderStructure = false,
-) {
+): Promise<{ destination: string; report: ExportReport } | undefined> {
   try {
     const destination = await open({
       multiple: false,
@@ -71,18 +71,46 @@ export async function exportFavorites(
     });
     if (!destination) return;
 
-    await invoke('export_favourites', {
+    const report = await invoke<ExportReport>('export_favourites', {
       destination,
       mode,
       paths: paths && paths.length > 0 ? paths : null,
       preserveFolderStructure,
     });
 
-    return destination;
+    return { destination, report };
   } catch (error) {
     console.error('Failed to export files:', error);
     throw error;
   }
+}
+
+export function formatExportSuccess(
+  mode: 'copy' | 'move',
+  destination: string,
+  report: ExportReport,
+): string {
+  const verb = mode === 'copy' ? 'copied' : 'moved';
+  let message = `Favourites successfully ${verb} to ${destination}`;
+  const notes: string[] = [];
+  if (report.renamed > 0) {
+    const noun = report.renamed === 1 ? 'file was' : 'files were';
+    const whose = report.renamed === 1 ? 'that name was' : 'their names were';
+    notes.push(
+      `${report.renamed} ${noun} renamed because ${whose} already used`,
+    );
+  }
+  if (report.skipped > 0) {
+    const noun = report.skipped === 1 ? 'file was' : 'files were';
+    const pronoun = report.skipped === 1 ? 'it was' : 'they were';
+    notes.push(
+      `${report.skipped} ${noun} skipped because ${pronoun} already in the destination`,
+    );
+  }
+  if (notes.length > 0) {
+    message += `. ${notes.join('. ')}.`;
+  }
+  return message;
 }
 
 export async function clearFavorites() {

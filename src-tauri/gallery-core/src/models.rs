@@ -68,6 +68,17 @@ pub struct ExportOptions {
     pub preserve_folder_structure: bool,
 }
 
+/// Outcome of one export. `copied` counts files transferred under their
+/// original file name (copy or move). `renamed` counts files written as
+/// `name (n).ext` because that name was already taken. `skipped` counts files
+/// left untouched because the source and destination were the same file.
+#[derive(Debug, Clone, Default, Serialize, Deserialize, PartialEq, Eq)]
+pub struct ExportReport {
+    pub copied: u32,
+    pub renamed: u32,
+    pub skipped: u32,
+}
+
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct Workspace {
     pub id: String,
