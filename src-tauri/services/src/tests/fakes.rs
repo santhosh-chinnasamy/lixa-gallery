@@ -5,6 +5,8 @@ use gallery_core::fs::FileSystem;
 use gallery_core::image::ImageProcessor;
 use gallery_core::models::{Favourite, FileMetadata, GalleryError, PhotoMetadata, Result};
 use gallery_core::repos::{CachedPhotoRecord, FavouriteRepository, PhotoRepository};
+use std::ffi::OsString;
+use std::io::ErrorKind;
 use std::path::{Path, PathBuf};
 use std::sync::Mutex;
 
@@ -63,6 +65,62 @@ impl FileSystem for FakeFileSystem {
     async fn create_dir_all(&self, _path: &Path) -> Result<()> {
         Ok(())
     }
+
+    async fn list_dir_names(&self, dir: &Path) -> Result<Vec<OsString>> {
+        let files = self.files.lock().unwrap();
+        Ok(files
+            .iter()
+            .filter(|(path, _)| path.parent() == Some(dir))
+            .filter_map(|(path, _)| path.file_name().map(|name| name.to_os_string()))
+            .collect())
+    }
+
+    async fn copy_exclusive(&self, from: &Path, to: &Path) -> Result<u64> {
+        let mut files = self.files.lock().unwrap();
+        if files.iter().any(|(path, _)| path == to) {
+            return Err(io_error(ErrorKind::AlreadyExists, to));
+        }
+        let mut metadata = files
+            .iter()
+            .find(|(path, _)| path == from)
+            .map(|(_, metadata)| metadata.clone())
+            .unwrap_or(FileMetadata {
+                name: String::new(),
+                modified: 0,
+                created: 0,
+                size: 0,
+            });
+        if let Some(name) = to.file_name().and_then(|name| name.to_str()) {
+            metadata.name = name.to_string();
+        }
+        let size = metadata.size;
+        files.push((to.to_path_buf(), metadata));
+        Ok(size)
+    }
+
+    async fn rename_exclusive(&self, from: &Path, to: &Path) -> Result<()> {
+        let mut files = self.files.lock().unwrap();
+        if files.iter().any(|(path, _)| path == to) {
+            return Err(io_error(ErrorKind::AlreadyExists, to));
+        }
+        let index = files
+            .iter()
+            .position(|(path, _)| path == from)
+            .ok_or_else(|| io_error(ErrorKind::NotFound, from))?;
+        let (_, mut metadata) = files.remove(index);
+        if let Some(name) = to.file_name().and_then(|name| name.to_str()) {
+            metadata.name = name.to_string();
+        }
+        files.push((to.to_path_buf(), metadata));
+        Ok(())
+    }
+}
+
+pub(super) fn io_error(kind: ErrorKind, path: &Path) -> GalleryError {
+    GalleryError::Io(std::io::Error::new(
+        kind,
+        format!("{} ({})", path.display(), kind),
+    ))
 }
 
 pub struct FakeImageProcessor;
