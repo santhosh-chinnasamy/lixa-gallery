@@ -116,9 +116,7 @@ impl GalleryService {
             }
         }
 
-        let final_result;
-
-        if mode == LoadingMode::Lazy {
+        let final_result = if mode == LoadingMode::Lazy {
             let total_found = all_photos.len() + needs_processing.len();
             log::info!(
                 "Lazy mode: Returning {} photos immediately. {} need background processing.",
@@ -172,7 +170,7 @@ impl GalleryService {
                 });
             }
 
-            final_result = Ok(final_photos);
+            Ok(final_photos)
         } else {
             // 2. Concurrently process new thumbnails (Sync Mode)
             if !needs_processing.is_empty() {
@@ -203,13 +201,13 @@ impl GalleryService {
                     all_photos.extend(processed_photos);
                 }
             }
-            final_result = Ok(all_photos);
-        }
+            Ok(all_photos)
+        };
 
         let elapsed = start_time.elapsed();
         let duration_ms = elapsed.as_millis() as u64;
 
-        if let Ok(_) = final_result {
+        if final_result.is_ok() {
             let entry = BenchmarkEntry {
                 timestamp: chrono::Utc::now(),
                 approach_name: "rayon_fixed_pool".to_string(),
@@ -243,7 +241,7 @@ impl GalleryService {
             .convert_image(original_path, thumb_dir)
             .await?;
         self.photo_repo
-            .batch_insert_photos(&[metadata.clone()])
+            .batch_insert_photos(std::slice::from_ref(&metadata))
             .await?;
         Ok(metadata.thumbnail_path)
     }
