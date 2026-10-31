@@ -1,15 +1,19 @@
 use gallery_core::events::EventHub;
-use gallery_core::fs::FileSystem;
+use gallery_core::fs::{collision_key, uniquified_file_name, FileSystem};
 use gallery_core::models::{
-    ExportOptions, Favourite, FavouriteFolderGroup, FileMetadata, GalleryError, PhotoMetadata,
-    Result, Workspace,
+    ExportOptions, ExportReport, Favourite, FavouriteFolderGroup, FileMetadata, GalleryError,
+    PhotoMetadata, Result, Workspace,
 };
 use gallery_core::repos::{FavouriteRepository, PhotoRepository, WorkspaceRepository};
 use std::{
-    collections::HashMap,
+    collections::{HashMap, HashSet},
+    ffi::OsStr,
+    io::ErrorKind,
     path::{Path, PathBuf},
     sync::Arc,
 };
+
+const MAX_NAME_ATTEMPTS: u32 = 10_000;
 
 pub struct FavouriteService {
     favourite_repo: Arc<dyn FavouriteRepository>,
@@ -37,7 +41,7 @@ impl FavouriteService {
         &self,
         events: &dyn EventHub,
         options: ExportOptions,
-    ) -> Result<()> {
+    ) -> Result<ExportReport> {
         let file_paths: Vec<String> = if let Some(paths) = options.paths {
             paths
         } else {
@@ -49,8 +53,10 @@ impl FavouriteService {
                 .collect()
         };
 
-        let mut counter = 0;
-        let mode = options.mode.as_str();
+        let mut report = ExportReport::default();
+        let mut counter = 0u32;
+        let move_files = options.mode == "move";
+        let mut taken_by_dir: HashMap<PathBuf, HashSet<String>> = HashMap::new();
 
         for file_path in file_paths {
             let file = PathBuf::from(&file_path);
@@ -73,25 +79,30 @@ impl FavouriteService {
                 dest
             };
 
-            let destination_path = destination_dir.join(name);
+            self.seed_taken_names(&destination_dir, &mut taken_by_dir)
+                .await?;
 
-            let canonical_src = self.fs.canonicalize(&file).await?;
-            let canonical_dst = self
-                .fs
-                .canonicalize(&destination_path)
-                .await
-                .unwrap_or_else(|_| destination_path.clone());
-
-            if canonical_src == canonical_dst {
-                continue;
-            }
-
-            if mode == "move" {
-                self.fs.rename(&file, &destination_path).await?;
-                // Remove from DB since the file was physically moved
-                self.remove_favourite(file_path).await?;
+            let natural = destination_dir.join(name);
+            if self.is_same_file(&file, &natural).await? {
+                report.skipped += 1;
             } else {
-                self.fs.copy(&file, &destination_path).await?;
+                let taken = taken_by_dir.get_mut(&destination_dir).ok_or_else(|| {
+                    GalleryError::Unknown(
+                        "export destination was not prepared for name reservation".to_string(),
+                    )
+                })?;
+                let renamed = self
+                    .place_without_overwrite(&file, &destination_dir, name, move_files, taken)
+                    .await?;
+                if renamed {
+                    report.renamed += 1;
+                } else {
+                    report.copied += 1;
+                }
+                if move_files {
+                    // The source path is gone. Drop the favourite that pointed at it.
+                    self.remove_favourite(file_path).await?;
+                }
             }
 
             counter += 1;
@@ -100,7 +111,72 @@ impl FavouriteService {
                 .map_err(|e| GalleryError::Unknown(e.to_string()))?;
         }
 
+        Ok(report)
+    }
+
+    async fn seed_taken_names(
+        &self,
+        dir: &Path,
+        taken_by_dir: &mut HashMap<PathBuf, HashSet<String>>,
+    ) -> Result<()> {
+        if taken_by_dir.contains_key(dir) {
+            return Ok(());
+        }
+        let names = self.fs.list_dir_names(dir).await?;
+        let taken = names.iter().map(|name| collision_key(name)).collect();
+        taken_by_dir.insert(dir.to_path_buf(), taken);
         Ok(())
+    }
+
+    async fn is_same_file(&self, src: &Path, dest: &Path) -> Result<bool> {
+        let canonical_src = self.fs.canonicalize(src).await?;
+        match self.fs.canonicalize(dest).await {
+            Ok(canonical_dest) => Ok(canonical_src == canonical_dest),
+            Err(GalleryError::Io(err)) if err.kind() == ErrorKind::NotFound => Ok(false),
+            Err(err) => Err(err),
+        }
+    }
+
+    /// Write `src` into `dir` under `original_name`, or `name (n).ext` when that
+    /// name is already reserved. Returns whether a suffix was required.
+    async fn place_without_overwrite(
+        &self,
+        src: &Path,
+        dir: &Path,
+        original_name: &OsStr,
+        move_files: bool,
+        taken: &mut HashSet<String>,
+    ) -> Result<bool> {
+        for index in 0..MAX_NAME_ATTEMPTS {
+            let candidate = uniquified_file_name(original_name, index);
+            let key = collision_key(&candidate);
+            if taken.contains(&key) {
+                continue;
+            }
+
+            let dest = dir.join(&candidate);
+            let placed = if move_files {
+                self.fs.rename_exclusive(src, &dest).await
+            } else {
+                self.fs.copy_exclusive(src, &dest).await.map(|_| ())
+            };
+            match placed {
+                Ok(()) => {
+                    taken.insert(key);
+                    return Ok(index > 0);
+                }
+                Err(err) if name_is_taken(&err) => {
+                    taken.insert(key);
+                }
+                Err(err) => return Err(err),
+            }
+        }
+
+        Err(GalleryError::Unknown(format!(
+            "could not place '{}' in {} without overwriting an existing file",
+            original_name.to_string_lossy(),
+            dir.display()
+        )))
     }
 
     pub async fn get_favourite_photos(
@@ -258,5 +334,15 @@ impl FavouriteService {
 
     pub async fn get_workspaces(&self) -> Result<Vec<Workspace>> {
         self.workspace_repo.get_workspaces().await
+    }
+}
+
+fn name_is_taken(err: &GalleryError) -> bool {
+    match err {
+        GalleryError::Io(err) => matches!(
+            err.kind(),
+            ErrorKind::AlreadyExists | ErrorKind::IsADirectory
+        ),
+        _ => false,
     }
 }
