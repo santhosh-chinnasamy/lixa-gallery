@@ -74,30 +74,42 @@ pub fn run() {
                         return;
                     }
 
-                    let encoded_path = &uri[prefix.len()..];
+                    let encoded_path =
+                        infra::thumbnail_cache::strip_cache_buster(&uri[prefix.len()..]);
                     let path_str = percent_decode_str(encoded_path)
                         .decode_utf8_lossy()
                         .into_owned();
-                    let original_path = std::path::PathBuf::from(path_str);
+                    let original_path = std::path::PathBuf::from(&path_str);
 
                     let state = app_handle.state::<AppState>();
-                    let thumb_dir = &state.thumbnail_path;
+                    let thumb_dir = state.thumbnail_path.clone();
 
-                    // Simple check if it already exists to avoid redundant generation
-                    // The thumbnail filename logic must match infra::image
-                    let file_stem = original_path
-                        .file_stem()
-                        .and_then(|s| s.to_str())
-                        .unwrap_or("unknown");
-                    let thumb_full_path =
-                        std::path::Path::new(thumb_dir).join(format!("{}.webp", file_stem));
+                    // Same path as infra::image. mtime and size are part of the
+                    // key, so an edited file does not reuse the previous bytes.
+                    let Ok(identity) =
+                        infra::thumbnail_cache::ThumbnailIdentity::read(&original_path)
+                    else {
+                        responder.respond(
+                            tauri::http::Response::builder()
+                                .status(404)
+                                .body(Vec::new())
+                                .unwrap(),
+                        );
+                        return;
+                    };
+                    let thumb_full_path = infra::thumbnail_cache::thumbnail_disk_path(
+                        std::path::Path::new(&thumb_dir),
+                        &original_path,
+                        identity,
+                    );
 
-                    if thumb_full_path.exists() {
+                    if thumb_full_path.is_file() {
                         if let Ok(data) = std::fs::read(&thumb_full_path) {
                             responder.respond(
                                 tauri::http::Response::builder()
                                     .status(200)
                                     .header("Content-Type", "image/webp")
+                                    .header("Cache-Control", "no-cache")
                                     .body(data)
                                     .unwrap(),
                             );
@@ -108,7 +120,7 @@ pub fn run() {
                     // Not found or failed to read, generate on the fly
                     match state
                         .gallery
-                        .get_or_create_thumbnail(&original_path, thumb_dir)
+                        .get_or_create_thumbnail(&original_path, &thumb_dir)
                         .await
                     {
                         Ok(generated_path) => {
@@ -117,6 +129,7 @@ pub fn run() {
                                     tauri::http::Response::builder()
                                         .status(200)
                                         .header("Content-Type", "image/webp")
+                                        .header("Cache-Control", "no-cache")
                                         .body(data)
                                         .unwrap(),
                                 );
@@ -170,6 +183,29 @@ pub fn run() {
             if !thumbnail_path.exists() {
                 std::fs::create_dir_all(&thumbnail_path)
                     .expect("failed to create thumbnail directory");
+            }
+            match infra::thumbnail_cache::purge_obsolete_thumbnails(&thumbnail_path) {
+                Ok(stats) => {
+                    if stats.removed_entries > 0 {
+                        log::info!(
+                            "Removed {} obsolete thumbnail cache entries ({} bytes)",
+                            stats.removed_entries,
+                            stats.removed_bytes
+                        );
+                    }
+                    if stats.errors > 0 {
+                        log::warn!(
+                            "Thumbnail cache migration left {} entries in place",
+                            stats.errors
+                        );
+                    }
+                }
+                Err(err) => {
+                    log::warn!(
+                        "Could not purge obsolete thumbnails in {}: {err}",
+                        thumbnail_path.display()
+                    );
+                }
             }
 
             tauri::async_runtime::block_on(async move {

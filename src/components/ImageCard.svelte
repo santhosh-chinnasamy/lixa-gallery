@@ -1,6 +1,6 @@
 <script lang="ts">
   import * as Card from '$lib/components/ui/card';
-  import { convertFileSrc } from '@tauri-apps/api/core';
+  import { thumbnailUrl } from '$lib/thumbnail';
   import { favorites } from '../stores/galleryStore';
   import Filename from './Filename.svelte';
   import Heart from '@lucide/svelte/icons/heart';
@@ -23,9 +23,7 @@
 
   // Determine the image source: ALWAYS use our custom protocol for thumbnails.
   // It handles both cached and on-the-fly generation efficiently in Rust.
-  let thumbnailSrc = $derived(
-    `lixa-thumbnail://localhost/${encodeURIComponent(photo.path)}`,
-  );
+  let thumbnailSrc = $derived(thumbnailUrl(photo));
 
   let imageLoaded = $state(false);
   let imageError = $state(false);

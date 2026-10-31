@@ -13,14 +13,7 @@ pub struct LocalFileSystem;
 impl FileSystem for LocalFileSystem {
     async fn get_file_metadata(&self, path: &Path) -> Result<FileMetadata> {
         let metadata = fs::metadata(path).await?;
-        let size = metadata.len();
-
-        let modified = metadata
-            .modified()
-            .map_err(|e| GalleryError::Io(e))?
-            .duration_since(UNIX_EPOCH)
-            .map(|d| d.as_secs())
-            .unwrap_or(0);
+        let identity = crate::thumbnail_cache::ThumbnailIdentity::from_metadata(&metadata)?;
 
         let created = metadata
             .created()
@@ -39,8 +32,8 @@ impl FileSystem for LocalFileSystem {
 
         Ok(FileMetadata {
             name,
-            size,
-            modified,
+            size: identity.size,
+            modified: identity.mtime_secs,
             created,
         })
     }
