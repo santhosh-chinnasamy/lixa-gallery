@@ -30,6 +30,7 @@ futures = "0.3.31"
 percent-encoding = "2.3"
 chrono = { version = "0.4", default-features = false, features = ["clock"] }
 dirs = "6"
+tauri-plugin-window-state = "2.4"
 
 [dev-dependencies]
 tempfile = "3"

@@ -5,12 +5,18 @@
   import ControlBar from './ControlBar.svelte';
   import type { PhotoMetadata } from '../types/photo';
   import { createVirtualizer } from '@tanstack/svelte-virtual';
+  import { immediateSubfolders } from '$lib/folderEmptyState';
   import {
     searchQuery,
     sortBy,
     sortOrder,
     gridSize,
+    folderTree,
+    currentFolder,
   } from '../stores/galleryStore';
+  import { loadSubfolder } from './common/ImageOperations';
+  import FolderIcon from '@lucide/svelte/icons/folder';
+  import ChevronRightIcon from '@lucide/svelte/icons/chevron-right';
 
   let { photos = [] }: { photos: PhotoMetadata[] } = $props();
 
@@ -25,6 +31,8 @@
       ? Math.max(1, Math.floor(containerWidth / ($gridSize + 16)))
       : 1,
   );
+
+  let subfolders = $derived(immediateSubfolders($folderTree, $currentFolder));
 
   let processedPhotos = $derived.by(() => {
     let result = [...photos];
@@ -122,18 +130,59 @@
     <div class="h-full p-6 lg:p-10">
       {#if processedPhotos.length === 0}
         <div class="flex h-full min-h-[400px] items-center justify-center">
-          <div
-            class="animate-in fade-in slide-in-from-bottom-4 text-center text-muted-foreground duration-700"
-          >
-            <div class="mb-2 text-lg font-medium">No results found</div>
-            <p class="text-sm">
-              {#if photos.length === 0}
-                This directory doesn't appear to contain any supported files.
-              {:else}
-                No files match your current search and filter criteria.
-              {/if}
-            </p>
-          </div>
+          {#if photos.length === 0 && subfolders.length > 0}
+            <div
+              class="animate-in fade-in slide-in-from-bottom-4 w-full max-w-lg duration-700"
+            >
+              <div class="mb-6 text-center">
+                <div class="mb-2 text-lg font-medium text-foreground">
+                  No photos in this folder
+                </div>
+                <p class="text-sm text-muted-foreground">
+                  There are no supported images here. Open a subfolder to find
+                  them.
+                </p>
+              </div>
+              <div class="space-y-2">
+                {#each subfolders as folder (folder.path)}
+                  <button
+                    type="button"
+                    class="group flex w-full items-center justify-between rounded-xl border bg-background p-4 text-left transition-all hover:border-border hover:bg-accent"
+                    onclick={() => loadSubfolder(folder.path)}
+                  >
+                    <span class="flex min-w-0 items-center gap-3">
+                      <FolderIcon
+                        size={18}
+                        class="shrink-0 text-muted-foreground"
+                      />
+                      <span
+                        class="truncate text-sm font-medium text-foreground"
+                      >
+                        {folder.name}
+                      </span>
+                    </span>
+                    <ChevronRightIcon
+                      size={18}
+                      class="shrink-0 text-muted-foreground transition-transform group-hover:translate-x-1"
+                    />
+                  </button>
+                {/each}
+              </div>
+            </div>
+          {:else}
+            <div
+              class="animate-in fade-in slide-in-from-bottom-4 text-center text-muted-foreground duration-700"
+            >
+              <div class="mb-2 text-lg font-medium">No results found</div>
+              <p class="text-sm">
+                {#if photos.length === 0}
+                  This directory doesn't appear to contain any supported files.
+                {:else}
+                  No files match your current search and filter criteria.
+                {/if}
+              </p>
+            </div>
+          {/if}
         </div>
       {:else}
         <div
