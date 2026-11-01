@@ -19,11 +19,11 @@
   import {
     describeExportError,
     exportFavorites,
-    formatExportSuccess,
   } from '../../components/common/ImageOperations';
   import KeyboardShortcuts from '../../components/common/KeyboardShortcuts.svelte';
   import ConfirmationModal from '../../components/modals/ConfirmationModal.svelte';
   import ExportModal from '../../components/modals/ExportModal.svelte';
+  import ExportResultModal from '../../components/modals/ExportResultModal.svelte';
   import {
     favorites,
     currentFolder,
@@ -34,12 +34,16 @@
     currentFolderFavoritesCount,
     refreshFavourites,
   } from '../../stores/galleryStore';
-  import type { FavouriteFolderGroup, PhotoMetadata } from '../../types/photo';
+  import type { ExportReport, PhotoMetadata } from '../../types/photo';
 
   let exportStatus = $state('');
   let isExporting = $state(false);
   let unlistenExport: UnlistenFn | null = null;
   let stopRequested = false;
+  let showExportResult = $state(false);
+  let exportResultReport = $state<ExportReport | null>(null);
+  let exportResultDestination = $state('');
+  let exportResultMode = $state<'copy' | 'move'>('copy');
 
   function stopExportListener() {
     const stop = unlistenExport;
@@ -171,23 +175,35 @@
         () => stopRequested,
       );
 
+      showExportModal = false;
       if (exported) {
-        showExportModal = false;
         await refreshFavourites();
-        const message = formatExportSuccess(
-          mode,
-          exported.destination,
-          exported.report,
-        );
-        setTimeout(() => alert(message), 100);
-      } else {
-        showExportModal = false;
+        exportResultMode = mode;
+        exportResultDestination = exported.destination;
+        exportResultReport = exported.report;
+        showExportResult = true;
       }
     } catch (error) {
       logError(`Export failed: ${error}`);
       showExportModal = false;
       const detail = describeExportError(error);
-      setTimeout(() => alert(`Export failed. ${detail}`), 100);
+      exportResultMode = mode;
+      exportResultDestination = '';
+      exportResultReport = {
+        copied: 0,
+        renamed: 0,
+        skipped: 0,
+        failed: Math.max(paths?.length ?? 0, 1),
+        failures: [
+          {
+            path: '',
+            reason: detail,
+          },
+        ],
+        cancelled: false,
+        total: Math.max(paths?.length ?? 0, 1),
+      };
+      showExportResult = true;
     } finally {
       stopExportListener();
       isExporting = false;
@@ -490,6 +506,16 @@
   }}
   {isExporting}
   {exportStatus}
+/>
+
+<ExportResultModal
+  bind:open={showExportResult}
+  report={exportResultReport}
+  destination={exportResultDestination}
+  mode={exportResultMode}
+  onClose={() => {
+    showExportResult = false;
+  }}
 />
 
 <!-- Confirmation for Clear Current Folder -->
