@@ -5,11 +5,15 @@
 //! stem alone) is never treated as fresh.
 
 /// Bump when the thumbnail encoding or the cache key changes.
-/// v1 stored `{file_stem}.webp` directly in the cache root.
-pub const CACHE_VERSION: u32 = 2;
+///
+/// * v1 stored `{file_stem}.webp` directly in the cache root.
+/// * v2 hashed the source path but stored sensor pixels, so portrait photos
+///   whose cameras set EXIF Orientation stayed sideways.
+/// * v3 applies that orientation before the thumbnail is resized.
+pub const CACHE_VERSION: u32 = 3;
 
 /// Directory name under the cache root for [`CACHE_VERSION`].
-pub const CACHE_DIR_NAME: &str = "v2";
+pub const CACHE_DIR_NAME: &str = "v3";
 
 /// Hex length of a blake3 path key. The writer and this check both use it.
 pub const CACHE_KEY_HEX_LEN: usize = 64;
@@ -50,8 +54,24 @@ mod tests {
 
     #[test]
     fn cache_dir_name_matches_version() {
+        assert_eq!(
+            CACHE_VERSION, 3,
+            "v3 is the first cache that applies EXIF orientation"
+        );
         assert_eq!(CACHE_DIR_NAME, format!("v{CACHE_VERSION}"));
         assert_eq!("ab".repeat(32).len(), CACHE_KEY_HEX_LEN);
+    }
+
+    #[test]
+    fn previous_orientation_cache_is_not_current() {
+        let hash = "ab".repeat(32);
+        let sideways = format!("/data/.thumbnails/v2/ab/{hash}_10_20.webp");
+        assert!(
+            !stored_thumbnail_is_current(&sideways, 10, 20),
+            "v2 thumbnails ignored EXIF orientation and must be regenerated"
+        );
+        let current = format!("/data/.thumbnails/{CACHE_DIR_NAME}/ab/{hash}_10_20.webp");
+        assert!(stored_thumbnail_is_current(&current, 10, 20));
     }
 
     #[test]
