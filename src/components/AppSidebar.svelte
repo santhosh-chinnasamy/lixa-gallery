@@ -5,7 +5,6 @@
   import HeartIcon from '@lucide/svelte/icons/heart';
   import LayoutGridIcon from '@lucide/svelte/icons/layout-grid';
   import FolderIcon from '@lucide/svelte/icons/folder';
-  import UsersIcon from '@lucide/svelte/icons/users';
   import ChevronRightIcon from '@lucide/svelte/icons/chevron-right';
   import HouseIcon from '@lucide/svelte/icons/house';
   import SettingsIcon from '@lucide/svelte/icons/settings';
@@ -36,15 +35,9 @@
       url: '/favourites',
       icon: HeartIcon,
     },
-    {
-      title: 'People',
-      url: '#',
-      icon: UsersIcon,
-    },
   ];
 
   function isActive(url: string) {
-    if (url === '#') return false;
     return page.url.pathname === url;
   }
 
