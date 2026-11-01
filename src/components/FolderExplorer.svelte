@@ -3,7 +3,9 @@
     folderTree,
     currentFolder,
     expandedFolders,
+    ensureFolderChildren,
   } from '../stores/galleryStore';
+  import { get } from 'svelte/store';
   import { loadSubfolder } from './common/ImageOperations';
   import ChevronRight from '@lucide/svelte/icons/chevron-right';
   import Folder from '@lucide/svelte/icons/folder';
@@ -13,9 +15,16 @@
 
   const { inSidebar = false }: { inSidebar?: boolean } = $props();
 
-  function toggleExpand(path: string, event: MouseEvent) {
+  async function toggleExpand(node: FolderNode, event: MouseEvent) {
     event.stopPropagation();
-    expandedFolders.toggle(path);
+    if (get(expandedFolders).has(node.path)) {
+      expandedFolders.toggle(node.path);
+      return;
+    }
+    expandedFolders.expand(node.path);
+    if (node.has_children && node.children.length === 0) {
+      await ensureFolderChildren(node.path);
+    }
   }
 
   function handleFolderClick(path: string) {
@@ -26,7 +35,7 @@
 {#snippet FolderItem(node: FolderNode, depth: number)}
   {@const isExpanded = $expandedFolders.has(node.path)}
   {@const isActive = $currentFolder === node.path}
-  {@const hasChildren = node.children && node.children.length > 0}
+  {@const hasChildren = node.has_children}
 
   <div class="flex flex-col">
     <div
@@ -40,7 +49,7 @@
     >
       {#if hasChildren}
         <button
-          onclick={(e) => toggleExpand(node.path, e)}
+          onclick={(e) => toggleExpand(node, e)}
           class="shrink-0 rounded p-0.5 opacity-70 transition-opacity hover:bg-black/5 group-hover:opacity-100 dark:hover:bg-white/5"
           aria-label={isExpanded ? 'Collapse' : 'Expand'}
         >
@@ -75,7 +84,7 @@
       </button>
     </div>
 
-    {#if isExpanded && hasChildren}
+    {#if isExpanded && node.children.length > 0}
       <div class="ml-[10px] flex flex-col border-l border-border/40">
         {#each node.children as child (child.path)}
           {@render FolderItem(child, depth + 1)}

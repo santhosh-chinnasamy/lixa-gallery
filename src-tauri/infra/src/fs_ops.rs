@@ -115,15 +115,20 @@ impl FileSystem for LocalFileSystem {
         let mut folders = Vec::new();
 
         while let Some(entry) = entries.next_entry().await? {
-            let path = entry.path();
-            if path.is_dir() {
-                if let Some(folder_name) = path.file_name().and_then(|s| s.to_str()) {
-                    if folder_name.starts_with('.') {
-                        continue;
-                    }
-                }
-                folders.push(path);
+            // `file_type` does not follow symlinks, so a link to a directory
+            // is not reported as a directory. That stops a link back to a
+            // parent from being walked forever.
+            let file_type = match entry.file_type().await {
+                Ok(file_type) => file_type,
+                Err(_) => continue,
+            };
+            if !file_type.is_dir() {
+                continue;
             }
+            if entry.file_name().to_string_lossy().starts_with('.') {
+                continue;
+            }
+            folders.push(entry.path());
         }
         Ok(folders)
     }
@@ -283,19 +288,37 @@ mod tests {
     }
 
     #[tokio::test]
-    async fn test_list_subfolders_ignores_hidden() {
+    async fn list_subfolders_skips_hidden_dirs_and_does_not_follow_symlinks() {
         let dir = tempdir().unwrap();
-        let visible_dir = dir.path().join("albums");
-        std::fs::create_dir(&visible_dir).unwrap();
+        let album = dir.path().join("album");
+        std::fs::create_dir(&album).unwrap();
+        std::fs::create_dir(album.join("day")).unwrap();
+        std::fs::create_dir(dir.path().join(".git")).unwrap();
+        std::fs::create_dir(dir.path().join(".thumbnails")).unwrap();
+        File::create(dir.path().join("photo.jpg")).unwrap();
 
-        let hidden_dir = dir.path().join(".git");
-        std::fs::create_dir(&hidden_dir).unwrap();
+        // A symlink to a directory used to pass `path.is_dir()` and, when it
+        // pointed at a parent, made the recursive tree walk loop.
+        #[cfg(unix)]
+        {
+            std::os::unix::fs::symlink(dir.path(), dir.path().join("loop")).unwrap();
+            std::os::unix::fs::symlink(&album, dir.path().join("alias")).unwrap();
+        }
 
         let fs = LocalFileSystem;
-        let folders = fs.list_subfolders(dir.path()).await.unwrap();
+        let mut names: Vec<String> = fs
+            .list_subfolders(dir.path())
+            .await
+            .unwrap()
+            .iter()
+            .map(|path| path.file_name().unwrap().to_string_lossy().into_owned())
+            .collect();
+        names.sort();
+        assert_eq!(names, vec!["album".to_string()]);
 
-        assert_eq!(folders.len(), 1);
-        assert_eq!(folders[0].file_name().unwrap(), "albums");
+        let nested = fs.list_subfolders(&album).await.unwrap();
+        assert_eq!(nested.len(), 1);
+        assert_eq!(nested[0].file_name().unwrap(), "day");
     }
 
     #[tokio::test]
