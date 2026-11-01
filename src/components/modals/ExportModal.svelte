@@ -24,6 +24,7 @@
     currentFolderPath = null,
     onExport,
     onCancel,
+    onStop,
     isExporting = false,
     exportStatus = '',
   }: {
@@ -36,6 +37,7 @@
       preserveFolderStructure?: boolean,
     ) => void;
     onCancel: () => void;
+    onStop: () => void;
     isExporting?: boolean;
     exportStatus?: string;
   } = $props();
@@ -96,7 +98,18 @@
   }
 </script>
 
-<Dialog bind:open onOpenChange={(v) => !v && onCancel()}>
+<Dialog
+  bind:open
+  onOpenChange={(next) => {
+    if (next) return;
+    if (isExporting) {
+      onStop();
+      open = true;
+      return;
+    }
+    onCancel();
+  }}
+>
   <DialogContent class="sm:max-w-[500px]">
     <DialogHeader>
       <DialogTitle class="flex items-center gap-2">
@@ -282,8 +295,11 @@
     {/if}
 
     <DialogFooter>
-      <Button variant="ghost" onclick={onCancel} disabled={isExporting}>
-        Cancel
+      <Button
+        variant="ghost"
+        onclick={() => (isExporting ? onStop() : onCancel())}
+      >
+        {isExporting ? 'Stop after current file' : 'Cancel'}
       </Button>
     </DialogFooter>
   </DialogContent>
