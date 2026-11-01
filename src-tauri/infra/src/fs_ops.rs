@@ -281,10 +281,18 @@ mod tests {
         File::create(&macos_double).unwrap();
 
         let fs = LocalFileSystem;
+        let raw_path = dir.path().join("shot.CR2");
+        File::create(&raw_path).unwrap();
+
         let images = fs.list_images_in_dir(dir.path()).await.unwrap();
 
-        assert_eq!(images.len(), 1);
-        assert_eq!(images[0].file_name().unwrap(), "test.jpg");
+        assert_eq!(images.len(), 2);
+        assert!(images
+            .iter()
+            .any(|path| path.file_name().unwrap() == "test.jpg"));
+        assert!(images
+            .iter()
+            .any(|path| path.file_name().unwrap() == "shot.CR2"));
     }
 
     #[tokio::test]

@@ -10,6 +10,9 @@
 //! grid thumbnail is a WebP everywhere. WKWebView can also paint the original
 //! TIFF. WebView2 and WebKitGTK cannot, so the viewer there asks the thumbnail
 //! protocol for a decoded preview instead of the original file.
+//!
+//! RAW files are listed on every platform. The sensor data is not demosaiced;
+//! the grid and viewer show the JPEG preview embedded in the file.
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum Platform {
@@ -38,6 +41,9 @@ pub fn webview_renders_original(ext: &str) -> bool {
 
 pub fn is_scanned_image_extension_on(ext: &str, platform: Platform) -> bool {
     let ext = ext.to_ascii_lowercase();
+    if gallery_core::formats::is_raw_extension(&ext) {
+        return true;
+    }
     matches!(
         ext.as_str(),
         "jpg" | "jpeg" | "png" | "webp" | "bmp" | "gif" | "tif" | "tiff" | "avif" | "svg"
@@ -47,6 +53,9 @@ pub fn is_scanned_image_extension_on(ext: &str, platform: Platform) -> bool {
 /// True when the webview can paint this file without a decoded substitute.
 pub fn webview_renders_original_on(ext: &str, platform: Platform) -> bool {
     let ext = ext.to_ascii_lowercase();
+    if gallery_core::formats::is_raw_extension(&ext) {
+        return false;
+    }
     match ext.as_str() {
         "jpg" | "jpeg" | "png" | "webp" | "bmp" | "gif" | "avif" | "svg" => true,
         "tif" | "tiff" | "heic" | "heif" => platform == Platform::MacOs,
@@ -71,7 +80,12 @@ mod tests {
                 );
             }
             assert!(!is_scanned_image_extension_on("txt", platform));
-            assert!(!is_scanned_image_extension_on("cr2", platform));
+            assert!(
+                is_scanned_image_extension_on("cr2", platform),
+                "RAW files are listed so their embedded JPEG can be shown"
+            );
+            assert!(!webview_renders_original_on("cr2", platform));
+            assert!(!webview_renders_original_on("NEF", platform));
 
             let heic = is_scanned_image_extension_on("HEIC", platform);
             let heif = is_scanned_image_extension_on("heif", platform);
@@ -113,9 +127,11 @@ mod tests {
             platform == Platform::MacOs
         );
         assert!(is_scanned_image_extension("tiff"));
+        assert!(is_scanned_image_extension("cr3"));
         assert_eq!(
             webview_renders_original("tiff"),
             platform == Platform::MacOs
         );
+        assert!(!webview_renders_original("dng"));
     }
 }

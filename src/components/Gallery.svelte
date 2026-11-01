@@ -5,6 +5,7 @@
   import ControlBar from './ControlBar.svelte';
   import type { PhotoMetadata } from '../types/photo';
   import type { CullAction } from '../lib/cull';
+  import { dateSortKey } from '$lib/photoView';
   import { createVirtualizer } from '@tanstack/svelte-virtual';
   import { immediateSubfolders } from '$lib/folderEmptyState';
   import { tick } from 'svelte';
@@ -74,9 +75,7 @@
           comparison = a.metadata.name.localeCompare(b.metadata.name);
           break;
         case 'date':
-          comparison =
-            (a.metadata.created || a.metadata.modified) -
-            (b.metadata.created || b.metadata.modified);
+          comparison = dateSortKey(a) - dateSortKey(b);
           break;
         case 'size':
           comparison = a.metadata.size - b.metadata.size;

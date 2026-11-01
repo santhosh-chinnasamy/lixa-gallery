@@ -1,4 +1,5 @@
 use gallery_core::events::EventHub;
+use gallery_core::formats::group_raw_jpeg_pairs;
 use gallery_core::fs::{collision_key, is_cross_device, uniquified_file_name, FileSystem};
 use gallery_core::models::{
     CullFlag, ExportFailure, ExportOptions, ExportReport, Favourite, FavouriteFolderGroup,
@@ -74,22 +75,33 @@ impl FavouriteService {
                 .collect()
         };
 
+        // Expand RAW+JPEG pairs up front so `total` and per-file failures match
+        // the files that will actually be written.
+        let mut jobs: Vec<(String, PathBuf)> = Vec::new();
+        for file_path in &file_paths {
+            for target in self.export_targets(file_path).await {
+                jobs.push((file_path.clone(), target));
+            }
+        }
+
         let mut report = ExportReport {
-            total: file_paths.len() as u32,
+            total: jobs.len() as u32,
             ..ExportReport::default()
         };
         let mut counter = 0u32;
         let move_files = options.mode == "move";
         let mut taken_by_dir: HashMap<PathBuf, HashSet<String>> = HashMap::new();
+        let mut cleared_favourites: HashSet<String> = HashSet::new();
 
-        for file_path in file_paths {
+        for (favourite_path, file) in jobs {
             if cancel.load(Ordering::SeqCst) {
                 report.cancelled = true;
                 break;
             }
 
+            let file_path = file.to_string_lossy().into_owned();
             match self
-                .export_one(&file_path, &options, move_files, &mut taken_by_dir)
+                .export_one(&file, &options, move_files, &mut taken_by_dir)
                 .await
             {
                 Ok(Placed::Skipped) => report.skipped += 1,
@@ -99,12 +111,13 @@ impl FavouriteService {
                     } else {
                         report.copied += 1;
                     }
-                    if move_files {
-                        // The source path is gone. Drop the favourite that pointed at it.
-                        if let Err(err) = self.remove_favourite(file_path.clone()).await {
+                    if move_files && cleared_favourites.insert(favourite_path.clone()) {
+                        // The pick pointed at the primary. Drop it once either
+                        // half of a pair has been moved.
+                        if let Err(err) = self.remove_favourite(favourite_path.clone()).await {
                             push_failure(
                                 &mut report,
-                                &file_path,
+                                &favourite_path,
                                 format!(
                                     "the file was moved, but it could not be cleared from favourites: {err}"
                                 ),
@@ -124,17 +137,43 @@ impl FavouriteService {
         Ok(report)
     }
 
+    /// The picked file plus its RAW or JPEG sibling, when the directory has one.
+    async fn export_targets(&self, path: &str) -> Vec<PathBuf> {
+        let primary = PathBuf::from(path);
+        let mut targets = vec![primary.clone()];
+        let Some(parent) = primary.parent() else {
+            return targets;
+        };
+        let Ok(files) = self.fs.list_images_in_dir(parent).await else {
+            return targets;
+        };
+        let Some(group) = group_raw_jpeg_pairs(files)
+            .into_iter()
+            .find(|group| group.primary == primary || group.sidecar.as_ref() == Some(&primary))
+        else {
+            return targets;
+        };
+        if group.primary != primary {
+            targets.push(group.primary);
+        }
+        if let Some(sidecar) = group.sidecar {
+            if sidecar != primary {
+                targets.push(sidecar);
+            }
+        }
+        targets
+    }
+
     async fn export_one(
         &self,
-        file_path: &str,
+        file: &Path,
         options: &ExportOptions,
         move_files: bool,
         taken_by_dir: &mut HashMap<PathBuf, HashSet<String>>,
     ) -> Result<Placed> {
-        let file = PathBuf::from(file_path);
         let name = file
             .file_name()
-            .ok_or_else(|| GalleryError::InvalidPath(file_path.to_string()))?;
+            .ok_or_else(|| GalleryError::InvalidPath(file.to_string_lossy().into_owned()))?;
 
         let destination_dir = if options.preserve_folder_structure {
             let folder_name = file
@@ -155,7 +194,7 @@ impl FavouriteService {
             .await?;
 
         let natural = destination_dir.join(name);
-        if self.is_same_file(&file, &natural).await? {
+        if self.is_same_file(file, &natural).await? {
             return Ok(Placed::Skipped);
         }
 
@@ -165,7 +204,7 @@ impl FavouriteService {
             )
         })?;
         let renamed = self
-            .place_without_overwrite(&file, &destination_dir, name, move_files, taken)
+            .place_without_overwrite(file, &destination_dir, name, move_files, taken)
             .await?;
         Ok(if renamed {
             Placed::Renamed
@@ -377,6 +416,10 @@ impl FavouriteService {
                     metadata,
                     thumbnail_path: String::new(),
                     path: path_str,
+                    sidecar_path: None,
+                    preview_path: None,
+                    exif: None,
+                    is_raw: false,
                 });
             }
         }

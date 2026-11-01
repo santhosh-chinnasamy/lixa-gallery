@@ -3,7 +3,6 @@
   import {
     gridImageUrl,
     UNSUPPORTED_FORMAT_MESSAGE,
-    viewerImageUrl,
   } from '$lib/imageSource';
   import { LruCache, VIEWER_PRELOAD_LIMIT } from '$lib/lruCache';
   import { cn } from '$lib/utils';
@@ -24,6 +23,11 @@
     shortcutHelpOpen,
     shortcutMatches,
   } from '$lib/shortcuts';
+  import {
+    formatLabel,
+    immediateViewerSrc,
+    resolveViewerSrc,
+  } from '$lib/photoView';
   import Filename from './Filename.svelte';
   import X from '@lucide/svelte/icons/x';
   import Info from '@lucide/svelte/icons/info';
@@ -72,9 +76,6 @@
       : 'unflagged',
   );
   const fileName = $derived(selectedImage?.metadata.name);
-  const viewerSrc = $derived(
-    selectedImage ? viewerImageUrl(selectedImage) : null,
-  );
   const blurSrc = $derived(selectedImage ? gridImageUrl(selectedImage) : null);
 
   // Modal and Image states
@@ -95,6 +96,7 @@
   let showInfo = $state(false);
   let imageWidth = $state(0);
   let imageHeight = $state(0);
+  let viewerSrc = $state('');
 
   let showUI = $state(true);
   let uiTimeoutRef: ReturnType<typeof setTimeout>;
@@ -266,11 +268,18 @@
     indicesToPreload.forEach((index) => {
       const photo = photoSource[index];
       if (photo && !preloadedImages.has(photo.path)) {
-        const src = viewerImageUrl(photo);
-        if (src) {
+        const ready = immediateViewerSrc(photo);
+        if (ready) {
           const img = new Image();
-          img.src = src;
+          img.src = ready;
           preloadedImages.set(photo.path, img);
+        } else if (photo.is_raw) {
+          resolveViewerSrc(photo).then((src) => {
+            if (!src || preloadedImages.has(photo.path)) return;
+            const img = new Image();
+            img.src = src;
+            preloadedImages.set(photo.path, img);
+          });
         }
       }
     });
@@ -499,6 +508,29 @@
   });
 
   $effect(() => {
+    const photo = selectedImage;
+    if (!photo) {
+      viewerSrc = '';
+      return;
+    }
+    let cancelled = false;
+    const ready = immediateViewerSrc(photo);
+    if (ready) {
+      viewerSrc = ready;
+    } else {
+      viewerSrc = '';
+      resolveViewerSrc(photo).then((src) => {
+        if (cancelled) return;
+        if (src) viewerSrc = src;
+        else imageError = true;
+      });
+    }
+    return () => {
+      cancelled = true;
+    };
+  });
+
+  $effect(() => {
     // Automatically runs when zoomScale, containerWidth, or containerHeight changes
     if (zoomScale || containerWidth || containerHeight) {
       clampOffsets();
@@ -610,7 +642,7 @@
 
         <!-- svelte-ignore a11y_no_noninteractive_element_interactions -->
         <!-- svelte-ignore a11y_click_events_have_key_events -->
-        <!-- Main image -->
+        <!-- Main image. RAW files use the extracted preview JPEG. -->
         {#if viewerSrc}
           <img
             bind:this={imageEl}
@@ -639,12 +671,12 @@
 
         <!-- Info Panel Overlay -->
         <div
-          class={`absolute bottom-0 right-0 top-0 z-30 w-72 transform bg-black/60 p-6 text-sm text-white shadow-2xl backdrop-blur-xl transition-transform duration-300 ease-in-out ${
+          class={`absolute bottom-0 right-0 top-0 z-30 w-72 transform overflow-y-auto border-l border-border bg-background/95 p-6 text-sm text-foreground shadow-2xl backdrop-blur-xl transition-transform duration-300 ease-in-out ${
             showInfo ? 'translate-x-0' : 'translate-x-full'
           }`}
         >
           <div
-            class="mb-4 flex items-center justify-between border-b border-white/20 pb-2"
+            class="mb-4 flex items-center justify-between border-b border-border pb-2"
           >
             <h3 class="flex items-center gap-2 text-lg font-semibold">
               <Info size={18} /> Info
@@ -652,7 +684,7 @@
             <Button
               variant="ghost"
               size="icon"
-              class="h-8 w-8 text-white/70 hover:text-white"
+              class="h-8 w-8 text-muted-foreground hover:text-foreground"
               onclick={toggleInfo}
             >
               <X size={16} />
@@ -662,7 +694,7 @@
           <div class="space-y-4">
             <div>
               <p
-                class="text-xs font-medium uppercase tracking-wider text-white/50"
+                class="text-xs font-medium uppercase tracking-wider text-muted-foreground"
               >
                 File Name
               </p>
@@ -672,7 +704,7 @@
             <div class="grid grid-cols-2 gap-4">
               <div>
                 <p
-                  class="text-xs font-medium uppercase tracking-wider text-white/50"
+                  class="text-xs font-medium uppercase tracking-wider text-muted-foreground"
                 >
                   Size
                 </p>
@@ -680,24 +712,26 @@
               </div>
               <div>
                 <p
-                  class="text-xs font-medium uppercase tracking-wider text-white/50"
+                  class="text-xs font-medium uppercase tracking-wider text-muted-foreground"
                 >
                   Format
                 </p>
                 <p class="mt-1 capitalize">
-                  {fileName?.split('.').pop() || 'Unknown'}
+                  {formatLabel(selectedImage)}
                 </p>
               </div>
             </div>
 
             <div>
               <p
-                class="text-xs font-medium uppercase tracking-wider text-white/50"
+                class="text-xs font-medium uppercase tracking-wider text-muted-foreground"
               >
                 Resolution
               </p>
               <p class="mt-1">
-                {#if imageLoaded && imageWidth > 0}
+                {#if selectedImage.exif?.width && selectedImage.exif?.height}
+                  {selectedImage.exif.width} × {selectedImage.exif.height}
+                {:else if imageLoaded && imageWidth > 0}
                   {imageWidth} × {imageHeight}
                 {:else}
                   Loading...
@@ -705,9 +739,98 @@
               </p>
             </div>
 
+            {#if selectedImage.exif?.camera}
+              <div>
+                <p
+                  class="text-xs font-medium uppercase tracking-wider text-muted-foreground"
+                >
+                  Camera
+                </p>
+                <p class="mt-1">{selectedImage.exif.camera}</p>
+              </div>
+            {/if}
+
+            {#if selectedImage.exif?.lens}
+              <div>
+                <p
+                  class="text-xs font-medium uppercase tracking-wider text-muted-foreground"
+                >
+                  Lens
+                </p>
+                <p class="mt-1">{selectedImage.exif.lens}</p>
+              </div>
+            {/if}
+
+            {#if selectedImage.exif?.focal_length || selectedImage.exif?.aperture || selectedImage.exif?.shutter || selectedImage.exif?.iso}
+              <div class="grid grid-cols-2 gap-4">
+                {#if selectedImage.exif?.focal_length}
+                  <div>
+                    <p
+                      class="text-xs font-medium uppercase tracking-wider text-muted-foreground"
+                    >
+                      Focal Length
+                    </p>
+                    <p class="mt-1">{selectedImage.exif.focal_length}</p>
+                  </div>
+                {/if}
+                {#if selectedImage.exif?.aperture}
+                  <div>
+                    <p
+                      class="text-xs font-medium uppercase tracking-wider text-muted-foreground"
+                    >
+                      Aperture
+                    </p>
+                    <p class="mt-1">{selectedImage.exif.aperture}</p>
+                  </div>
+                {/if}
+                {#if selectedImage.exif?.shutter}
+                  <div>
+                    <p
+                      class="text-xs font-medium uppercase tracking-wider text-muted-foreground"
+                    >
+                      Shutter
+                    </p>
+                    <p class="mt-1">{selectedImage.exif.shutter}</p>
+                  </div>
+                {/if}
+                {#if selectedImage.exif?.iso}
+                  <div>
+                    <p
+                      class="text-xs font-medium uppercase tracking-wider text-muted-foreground"
+                    >
+                      ISO
+                    </p>
+                    <p class="mt-1">{selectedImage.exif.iso}</p>
+                  </div>
+                {/if}
+              </div>
+            {/if}
+
+            {#if selectedImage.exif?.date}
+              <div>
+                <p
+                  class="text-xs font-medium uppercase tracking-wider text-muted-foreground"
+                >
+                  Date Taken
+                </p>
+                <p class="mt-1">{selectedImage.exif.date}</p>
+              </div>
+            {/if}
+
+            {#if selectedImage.exif?.orientation}
+              <div>
+                <p
+                  class="text-xs font-medium uppercase tracking-wider text-muted-foreground"
+                >
+                  Orientation
+                </p>
+                <p class="mt-1">{selectedImage.exif.orientation}</p>
+              </div>
+            {/if}
+
             <div>
               <p
-                class="text-xs font-medium uppercase tracking-wider text-white/50"
+                class="text-xs font-medium uppercase tracking-wider text-muted-foreground"
               >
                 Date Modified
               </p>
