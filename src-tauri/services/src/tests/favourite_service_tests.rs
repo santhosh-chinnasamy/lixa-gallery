@@ -1,6 +1,7 @@
 use super::fakes::*;
 use crate::favourite_service::FavouriteService;
-use gallery_core::models::{ExportOptions, FileMetadata, PhotoMetadata, Workspace};
+use gallery_core::models::{CullFlag, ExportOptions, FileMetadata, PhotoMetadata, Workspace};
+use gallery_core::repos::CullFlagRepository;
 use std::path::PathBuf;
 use std::sync::Arc;
 use std::sync::Mutex;
@@ -8,7 +9,7 @@ use std::sync::Mutex;
 #[tokio::test]
 async fn test_favourite_flow() {
     let repo = Arc::new(FakeFavouriteRepository {
-        favourites: Mutex::new(vec![]),
+        flags: Mutex::new(vec![]),
     });
     let photo_repo = Arc::new(FakePhotoRepository {
         photos: Mutex::new(vec![]),
@@ -20,7 +21,7 @@ async fn test_favourite_flow() {
         files: Mutex::new(vec![]),
     });
 
-    let service = FavouriteService::new(repo.clone(), photo_repo, workspace_repo, fs);
+    let service = FavouriteService::new(repo.clone(), repo.clone(), photo_repo, workspace_repo, fs);
 
     service
         .add_favourite("/path/to/photo.jpg".to_string())
@@ -42,7 +43,7 @@ async fn test_favourite_flow() {
 #[tokio::test]
 async fn test_get_favourite_photos_and_groups() {
     let repo = Arc::new(FakeFavouriteRepository {
-        favourites: Mutex::new(vec![]),
+        flags: Mutex::new(vec![]),
     });
     let photo_repo = Arc::new(FakePhotoRepository {
         photos: Mutex::new(vec![PhotoMetadata {
@@ -77,7 +78,7 @@ async fn test_get_favourite_photos_and_groups() {
         )]),
     });
 
-    let service = FavouriteService::new(repo.clone(), photo_repo, workspace_repo, fs);
+    let service = FavouriteService::new(repo.clone(), repo.clone(), photo_repo, workspace_repo, fs);
 
     service
         .add_favourite("/wedding/img1.jpg".to_string())
@@ -112,7 +113,7 @@ async fn test_get_favourite_photos_and_groups() {
 #[tokio::test]
 async fn test_export_favourites_selective() {
     let repo = Arc::new(FakeFavouriteRepository {
-        favourites: Mutex::new(vec![]),
+        flags: Mutex::new(vec![]),
     });
     let photo_repo = Arc::new(FakePhotoRepository {
         photos: Mutex::new(vec![]),
@@ -124,7 +125,7 @@ async fn test_export_favourites_selective() {
         files: Mutex::new(vec![]),
     });
 
-    let service = FavouriteService::new(repo.clone(), photo_repo, workspace_repo, fs);
+    let service = FavouriteService::new(repo.clone(), repo.clone(), photo_repo, workspace_repo, fs);
 
     service.add_favourite("/a/1.jpg".to_string()).await.unwrap();
     service.add_favourite("/b/2.jpg".to_string()).await.unwrap();
@@ -140,4 +141,49 @@ async fn test_export_favourites_selective() {
     };
 
     service.export_favourites(&events, opts).await.unwrap();
+}
+
+#[tokio::test]
+async fn test_set_cull_flag_keeps_favourites_as_picks() {
+    let repo = Arc::new(FakeFavouriteRepository {
+        flags: Mutex::new(vec![]),
+    });
+    let photo_repo = Arc::new(FakePhotoRepository {
+        photos: Mutex::new(vec![]),
+    });
+    let workspace_repo = Arc::new(FakeWorkspaceRepository {
+        workspaces: Mutex::new(vec![]),
+    });
+    let fs = Arc::new(FakeFileSystem {
+        files: Mutex::new(vec![]),
+    });
+
+    let service = FavouriteService::new(repo.clone(), repo.clone(), photo_repo, workspace_repo, fs);
+
+    service
+        .set_cull_flag("/a.jpg".to_string(), CullFlag::Picked)
+        .await
+        .unwrap();
+    service
+        .set_cull_flag("/b.jpg".to_string(), CullFlag::Rejected)
+        .await
+        .unwrap();
+
+    let favs = service.get_favourites().await.unwrap();
+    assert_eq!(favs.len(), 1);
+    assert_eq!(favs[0].path, "/a.jpg");
+
+    let flags = service.get_cull_flags().await.unwrap();
+    assert_eq!(flags.len(), 2);
+    assert_eq!(
+        service.get_cull_flag("/b.jpg").await.unwrap(),
+        CullFlag::Rejected
+    );
+
+    service
+        .set_cull_flag("/a.jpg".to_string(), CullFlag::Unflagged)
+        .await
+        .unwrap();
+    assert!(service.get_favourites().await.unwrap().is_empty());
+    assert_eq!(repo.list_flags().await.unwrap().len(), 1);
 }

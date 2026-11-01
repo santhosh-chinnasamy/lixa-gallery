@@ -3,7 +3,12 @@
   import * as Card from '$lib/components/ui/card';
   import * as Tabs from '$lib/components/ui/tabs';
   import { openLogsFolder, getLogDirectory, info } from '$lib/logger';
-  import { loadingMode, type LoadingMode } from '../../stores/galleryStore';
+  import {
+    autoAdvance,
+    loadingMode,
+    type LoadingMode,
+  } from '../../stores/galleryStore';
+  import ShortcutSection from '../../components/ShortcutSection.svelte';
   import FolderOpenIcon from '@lucide/svelte/icons/folder-open';
   import CopyIcon from '@lucide/svelte/icons/copy';
   import CheckIcon from '@lucide/svelte/icons/check';
@@ -250,6 +255,44 @@
           </Card.Content>
         </Card.Root>
 
+        <Card.Root class="shadow-sm">
+          <Card.Header>
+            <div class="flex items-center gap-2">
+              <KeyboardIcon class="h-5 w-5 text-primary" />
+              <Card.Title>Culling</Card.Title>
+            </div>
+            <Card.Description>
+              After you pick, reject, or unflag from the keyboard, move to the
+              next photo.
+            </Card.Description>
+          </Card.Header>
+          <Card.Content>
+            <div class="flex items-center justify-between gap-4">
+              <div>
+                <div class="text-sm font-medium text-foreground">
+                  Auto-advance
+                </div>
+                <p class="mt-0.5 text-xs text-muted-foreground">
+                  A full pass with P, X, and U. Turn it off to stay on the frame
+                  you just marked.
+                </p>
+              </div>
+              <button
+                type="button"
+                class={`h-8 shrink-0 rounded-md border px-3 text-xs font-medium transition-colors ${
+                  $autoAdvance
+                    ? 'border-primary/30 bg-primary/10 text-primary'
+                    : 'text-muted-foreground hover:text-foreground'
+                }`}
+                aria-pressed={$autoAdvance}
+                onclick={() => autoAdvance.set(!$autoAdvance)}
+              >
+                {$autoAdvance ? 'On' : 'Off'}
+              </button>
+            </div>
+          </Card.Content>
+        </Card.Root>
+
         <!-- Section 3: Privacy & Telemetry Notice -->
         <Card.Root class="shadow-sm">
           <Card.Header>
@@ -270,403 +313,51 @@
 
       <!-- Tab 2: Keyboard Shortcuts -->
       <Tabs.Content value="shortcuts" class="mt-6 space-y-8">
-        <!-- Photo Viewer Shortcuts -->
         <Card.Root class="shadow-sm">
           <Card.Header>
             <div class="flex items-center gap-2">
               <EyeIcon class="h-5 w-5 text-primary" />
-              <Card.Title>Photo Viewer (Modal / Preview)</Card.Title>
+              <Card.Title>Photo Viewer</Card.Title>
             </div>
             <Card.Description>
-              Quick navigation and manipulation shortcuts available while
-              viewing full-resolution images.
+              The same keys as the ? overlay while a frame is open. Drag pans a
+              zoomed frame. Double-click swaps 100% and 250%. The scroll wheel
+              or a pinch zooms.
             </Card.Description>
           </Card.Header>
           <Card.Content>
-            <div class="divide-y divide-border text-sm">
-              <div class="flex items-center justify-between py-3">
-                <span class="font-medium text-foreground">Next Photo</span>
-                <div class="flex items-center gap-1.5">
-                  <kbd
-                    class="shadow-xs inline-flex min-w-[24px] items-center justify-center rounded-md border border-border bg-muted px-2 py-1 font-mono text-xs font-semibold text-foreground"
-                    >→</kbd
-                  >
-                  <span class="text-xs text-muted-foreground">or</span>
-                  <kbd
-                    class="shadow-xs inline-flex min-w-[24px] items-center justify-center rounded-md border border-border bg-muted px-2 py-1 font-mono text-xs font-semibold text-foreground"
-                    >]</kbd
-                  >
-                </div>
-              </div>
-
-              <div class="flex items-center justify-between py-3">
-                <span class="font-medium text-foreground">Previous Photo</span>
-                <div class="flex items-center gap-1.5">
-                  <kbd
-                    class="shadow-xs inline-flex min-w-[24px] items-center justify-center rounded-md border border-border bg-muted px-2 py-1 font-mono text-xs font-semibold text-foreground"
-                    >←</kbd
-                  >
-                  <span class="text-xs text-muted-foreground">or</span>
-                  <kbd
-                    class="shadow-xs inline-flex min-w-[24px] items-center justify-center rounded-md border border-border bg-muted px-2 py-1 font-mono text-xs font-semibold text-foreground"
-                    >[</kbd
-                  >
-                </div>
-              </div>
-
-              <div class="flex items-center justify-between py-3">
-                <span class="font-medium text-foreground">Zoom In</span>
-                <div class="flex items-center gap-1.5">
-                  <kbd
-                    class="shadow-xs inline-flex min-w-[24px] items-center justify-center rounded-md border border-border bg-muted px-2 py-1 font-mono text-xs font-semibold text-foreground"
-                    >Ctrl</kbd
-                  >
-                  <span class="text-xs text-muted-foreground">+</span>
-                  <kbd
-                    class="shadow-xs inline-flex min-w-[24px] items-center justify-center rounded-md border border-border bg-muted px-2 py-1 font-mono text-xs font-semibold text-foreground"
-                    >+</kbd
-                  >
-                  <span class="text-xs text-muted-foreground">or</span>
-                  <kbd
-                    class="shadow-xs inline-flex min-w-[24px] items-center justify-center rounded-md border border-border bg-muted px-2 py-1 font-mono text-xs font-semibold text-foreground"
-                    >+</kbd
-                  >
-                </div>
-              </div>
-
-              <div class="flex items-center justify-between py-3">
-                <span class="font-medium text-foreground">Zoom Out</span>
-                <div class="flex items-center gap-1.5">
-                  <kbd
-                    class="shadow-xs inline-flex min-w-[24px] items-center justify-center rounded-md border border-border bg-muted px-2 py-1 font-mono text-xs font-semibold text-foreground"
-                    >Ctrl</kbd
-                  >
-                  <span class="text-xs text-muted-foreground">+</span>
-                  <kbd
-                    class="shadow-xs inline-flex min-w-[24px] items-center justify-center rounded-md border border-border bg-muted px-2 py-1 font-mono text-xs font-semibold text-foreground"
-                    >-</kbd
-                  >
-                  <span class="text-xs text-muted-foreground">or</span>
-                  <kbd
-                    class="shadow-xs inline-flex min-w-[24px] items-center justify-center rounded-md border border-border bg-muted px-2 py-1 font-mono text-xs font-semibold text-foreground"
-                    >-</kbd
-                  >
-                </div>
-              </div>
-
-              <div class="flex items-center justify-between py-3">
-                <span class="font-medium text-foreground">Reset Zoom</span>
-                <div class="flex items-center gap-1.5">
-                  <kbd
-                    class="shadow-xs inline-flex min-w-[24px] items-center justify-center rounded-md border border-border bg-muted px-2 py-1 font-mono text-xs font-semibold text-foreground"
-                    >Ctrl</kbd
-                  >
-                  <span class="text-xs text-muted-foreground">+</span>
-                  <kbd
-                    class="shadow-xs inline-flex min-w-[24px] items-center justify-center rounded-md border border-border bg-muted px-2 py-1 font-mono text-xs font-semibold text-foreground"
-                    >0</kbd
-                  >
-                  <span class="text-xs text-muted-foreground">or</span>
-                  <kbd
-                    class="shadow-xs inline-flex min-w-[24px] items-center justify-center rounded-md border border-border bg-muted px-2 py-1 font-mono text-xs font-semibold text-foreground"
-                    >0</kbd
-                  >
-                </div>
-              </div>
-
-              <div class="flex items-center justify-between py-3">
-                <div>
-                  <div class="font-medium text-foreground">Pan Image</div>
-                  <div class="text-xs text-muted-foreground">
-                    Reposition image when zoomed in
-                  </div>
-                </div>
-                <kbd
-                  class="shadow-xs inline-flex min-w-[24px] items-center justify-center rounded-md border border-border bg-muted px-2.5 py-1 font-mono text-xs font-semibold text-foreground"
-                  >Drag Mouse / Touch</kbd
-                >
-              </div>
-
-              <div class="flex items-center justify-between py-3">
-                <div>
-                  <div class="font-medium text-foreground">
-                    Quick Zoom Toggle
-                  </div>
-                  <div class="text-xs text-muted-foreground">
-                    Toggle between 100% and 250% zoom
-                  </div>
-                </div>
-                <kbd
-                  class="shadow-xs inline-flex min-w-[24px] items-center justify-center rounded-md border border-border bg-muted px-2.5 py-1 font-mono text-xs font-semibold text-foreground"
-                  >Double Click</kbd
-                >
-              </div>
-
-              <div class="flex items-center justify-between py-3">
-                <div>
-                  <div class="font-medium text-foreground">Smooth Zoom</div>
-                  <div class="text-xs text-muted-foreground">
-                    Continuous proportional zooming
-                  </div>
-                </div>
-                <div class="flex items-center gap-1.5">
-                  <kbd
-                    class="shadow-xs inline-flex min-w-[24px] items-center justify-center rounded-md border border-border bg-muted px-2 py-1 font-mono text-xs font-semibold text-foreground"
-                    >Wheel</kbd
-                  >
-                  <span class="text-xs text-muted-foreground">or</span>
-                  <kbd
-                    class="shadow-xs inline-flex min-w-[24px] items-center justify-center rounded-md border border-border bg-muted px-2 py-1 font-mono text-xs font-semibold text-foreground"
-                    >Pinch</kbd
-                  >
-                </div>
-              </div>
-
-              <div class="flex items-center justify-between py-3">
-                <span class="font-medium text-foreground">Toggle Favorite</span>
-                <div class="flex items-center gap-1.5">
-                  <kbd
-                    class="shadow-xs inline-flex min-w-[24px] items-center justify-center rounded-md border border-border bg-muted px-2 py-1 font-mono text-xs font-semibold text-foreground"
-                    >L</kbd
-                  >
-                  <span class="text-xs text-muted-foreground">or</span>
-                  <kbd
-                    class="shadow-xs inline-flex min-w-[24px] items-center justify-center rounded-md border border-border bg-muted px-2 py-1 font-mono text-xs font-semibold text-foreground"
-                    >F</kbd
-                  >
-                </div>
-              </div>
-
-              <div class="flex items-center justify-between py-3">
-                <span class="font-medium text-foreground"
-                  >Toggle Photo Details</span
-                >
-                <kbd
-                  class="shadow-xs inline-flex min-w-[24px] items-center justify-center rounded-md border border-border bg-muted px-2 py-1 font-mono text-xs font-semibold text-foreground"
-                  >I</kbd
-                >
-              </div>
-
-              <div class="flex items-center justify-between py-3">
-                <span class="font-medium text-foreground">Start Slideshow</span>
-                <kbd
-                  class="shadow-xs inline-flex min-w-[24px] items-center justify-center rounded-md border border-border bg-muted px-2 py-1 font-mono text-xs font-semibold text-foreground"
-                  >P</kbd
-                >
-              </div>
-
-              <div class="flex items-center justify-between py-3">
-                <span class="font-medium text-foreground">Close Viewer</span>
-                <kbd
-                  class="shadow-xs inline-flex min-w-[24px] items-center justify-center rounded-md border border-border bg-muted px-2 py-1 font-mono text-xs font-semibold text-foreground"
-                  >Esc</kbd
-                >
-              </div>
-            </div>
+            <ShortcutSection context="viewer" />
           </Card.Content>
         </Card.Root>
 
-        <!-- Slideshow Presentation Shortcuts -->
         <Card.Root class="shadow-sm">
           <Card.Header>
             <div class="flex items-center gap-2">
               <PlayIcon class="h-5 w-5 text-primary" />
-              <Card.Title>Slideshow Presentation Mode</Card.Title>
+              <Card.Title>Slideshow</Card.Title>
             </div>
             <Card.Description>
-              Keyboard shortcuts available during hands-free photo presentation.
+              Keys while a slideshow is playing. Fullscreen stays on F11.
             </Card.Description>
           </Card.Header>
           <Card.Content>
-            <div class="divide-y divide-border text-sm">
-              <div class="flex items-center justify-between py-3">
-                <span class="font-medium text-foreground">Play / Pause</span>
-                <kbd
-                  class="shadow-xs inline-flex min-w-[24px] items-center justify-center rounded-md border border-border bg-muted px-2 py-1 font-mono text-xs font-semibold text-foreground"
-                  >Space</kbd
-                >
-              </div>
-
-              <div class="flex items-center justify-between py-3">
-                <span class="font-medium text-foreground">Next Slide</span>
-                <div class="flex items-center gap-1.5">
-                  <kbd
-                    class="shadow-xs inline-flex min-w-[24px] items-center justify-center rounded-md border border-border bg-muted px-2 py-1 font-mono text-xs font-semibold text-foreground"
-                    >→</kbd
-                  >
-                  <span class="text-xs text-muted-foreground">or</span>
-                  <kbd
-                    class="shadow-xs inline-flex min-w-[24px] items-center justify-center rounded-md border border-border bg-muted px-2 py-1 font-mono text-xs font-semibold text-foreground"
-                    >PageDown</kbd
-                  >
-                </div>
-              </div>
-
-              <div class="flex items-center justify-between py-3">
-                <span class="font-medium text-foreground">Previous Slide</span>
-                <div class="flex items-center gap-1.5">
-                  <kbd
-                    class="shadow-xs inline-flex min-w-[24px] items-center justify-center rounded-md border border-border bg-muted px-2 py-1 font-mono text-xs font-semibold text-foreground"
-                    >←</kbd
-                  >
-                  <span class="text-xs text-muted-foreground">or</span>
-                  <kbd
-                    class="shadow-xs inline-flex min-w-[24px] items-center justify-center rounded-md border border-border bg-muted px-2 py-1 font-mono text-xs font-semibold text-foreground"
-                    >PageUp</kbd
-                  >
-                </div>
-              </div>
-
-              <div class="flex items-center justify-between py-3">
-                <span class="font-medium text-foreground">Toggle Favorite</span>
-                <div class="flex items-center gap-1.5">
-                  <kbd
-                    class="shadow-xs inline-flex min-w-[24px] items-center justify-center rounded-md border border-border bg-muted px-2 py-1 font-mono text-xs font-semibold text-foreground"
-                    >F</kbd
-                  >
-                  <span class="text-xs text-muted-foreground">or</span>
-                  <kbd
-                    class="shadow-xs inline-flex min-w-[24px] items-center justify-center rounded-md border border-border bg-muted px-2 py-1 font-mono text-xs font-semibold text-foreground"
-                    >L</kbd
-                  >
-                </div>
-              </div>
-
-              <div class="flex items-center justify-between py-3">
-                <span class="font-medium text-foreground"
-                  >Toggle Shuffle Mode</span
-                >
-                <kbd
-                  class="shadow-xs inline-flex min-w-[24px] items-center justify-center rounded-md border border-border bg-muted px-2 py-1 font-mono text-xs font-semibold text-foreground"
-                  >S</kbd
-                >
-              </div>
-
-              <div class="flex items-center justify-between py-3">
-                <span class="font-medium text-foreground"
-                  >Toggle Repeat / Loop</span
-                >
-                <kbd
-                  class="shadow-xs inline-flex min-w-[24px] items-center justify-center rounded-md border border-border bg-muted px-2 py-1 font-mono text-xs font-semibold text-foreground"
-                  >R</kbd
-                >
-              </div>
-
-              <div class="flex items-center justify-between py-3">
-                <span class="font-medium text-foreground"
-                  >Toggle Image Info</span
-                >
-                <kbd
-                  class="shadow-xs inline-flex min-w-[24px] items-center justify-center rounded-md border border-border bg-muted px-2 py-1 font-mono text-xs font-semibold text-foreground"
-                  >I</kbd
-                >
-              </div>
-
-              <div class="flex items-center justify-between py-3">
-                <span class="font-medium text-foreground"
-                  >Toggle Fullscreen</span
-                >
-                <div class="flex items-center gap-1.5">
-                  <kbd
-                    class="shadow-xs inline-flex min-w-[24px] items-center justify-center rounded-md border border-border bg-muted px-2 py-1 font-mono text-xs font-semibold text-foreground"
-                    >F11</kbd
-                  >
-                  <span class="text-xs text-muted-foreground">or</span>
-                  <kbd
-                    class="shadow-xs inline-flex min-w-[24px] items-center justify-center rounded-md border border-border bg-muted px-2 py-1 font-mono text-xs font-semibold text-foreground"
-                    >Enter</kbd
-                  >
-                </div>
-              </div>
-
-              <div class="flex items-center justify-between py-3">
-                <span class="font-medium text-foreground">Exit Slideshow</span>
-                <kbd
-                  class="shadow-xs inline-flex min-w-[24px] items-center justify-center rounded-md border border-border bg-muted px-2 py-1 font-mono text-xs font-semibold text-foreground"
-                  >Esc</kbd
-                >
-              </div>
-            </div>
+            <ShortcutSection context="slideshow" />
           </Card.Content>
         </Card.Root>
 
-        <!-- Gallery & Navigation Shortcuts -->
         <Card.Root class="shadow-sm">
           <Card.Header>
             <div class="flex items-center gap-2">
               <CompassIcon class="h-5 w-5 text-primary" />
-              <Card.Title>Gallery & Navigation</Card.Title>
+              <Card.Title>Grid</Card.Title>
             </div>
             <Card.Description>
-              Global and gallery shortcuts for navigating and managing photo
-              folders.
+              Move through the folder, then mark frames without leaving the
+              grid.
             </Card.Description>
           </Card.Header>
           <Card.Content>
-            <div class="divide-y divide-border text-sm">
-              <div class="flex items-center justify-between py-3">
-                <div>
-                  <div class="font-medium text-foreground">Open Folder</div>
-                  <div class="text-xs text-muted-foreground">
-                    Select a local directory to browse photos
-                  </div>
-                </div>
-                <kbd
-                  class="shadow-xs inline-flex min-w-[24px] items-center justify-center rounded-md border border-border bg-muted px-2 py-1 font-mono text-xs font-semibold text-foreground"
-                  >O</kbd
-                >
-              </div>
-
-              <div class="flex items-center justify-between py-3">
-                <div>
-                  <div class="font-medium text-foreground">
-                    Export Favorites
-                  </div>
-                  <div class="text-xs text-muted-foreground">
-                    Export selected favorites to a destination folder
-                  </div>
-                </div>
-                <kbd
-                  class="shadow-xs inline-flex min-w-[24px] items-center justify-center rounded-md border border-border bg-muted px-2 py-1 font-mono text-xs font-semibold text-foreground"
-                  >E</kbd
-                >
-              </div>
-
-              <div class="flex items-center justify-between py-3">
-                <div>
-                  <div class="font-medium text-foreground">Toggle Sidebar</div>
-                  <div class="text-xs text-muted-foreground">
-                    Expand or collapse navigation sidebar
-                  </div>
-                </div>
-                <div class="flex items-center gap-1.5">
-                  <kbd
-                    class="shadow-xs inline-flex min-w-[24px] items-center justify-center rounded-md border border-border bg-muted px-2 py-1 font-mono text-xs font-semibold text-foreground"
-                    >Ctrl</kbd
-                  >
-                  <span class="text-xs text-muted-foreground">+</span>
-                  <kbd
-                    class="shadow-xs inline-flex min-w-[24px] items-center justify-center rounded-md border border-border bg-muted px-2 py-1 font-mono text-xs font-semibold text-foreground"
-                    >B</kbd
-                  >
-                </div>
-              </div>
-
-              <div class="flex items-center justify-between py-3">
-                <div>
-                  <div class="font-medium text-foreground">
-                    Toggle Fullscreen
-                  </div>
-                  <div class="text-xs text-muted-foreground">
-                    Switch window between normal and fullscreen mode
-                  </div>
-                </div>
-                <kbd
-                  class="shadow-xs inline-flex min-w-[24px] items-center justify-center rounded-md border border-border bg-muted px-2 py-1 font-mono text-xs font-semibold text-foreground"
-                  >F11</kbd
-                >
-              </div>
-            </div>
+            <ShortcutSection context="grid" />
           </Card.Content>
         </Card.Root>
       </Tabs.Content>

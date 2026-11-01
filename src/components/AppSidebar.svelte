@@ -185,20 +185,24 @@
                         : 'text-muted-foreground/70'}
                     />
                     <span class="text-sm">{item.title}</span>
-                    {#if item.title === 'Favourites' && $favorites.size > 0}
-                      <Sidebar.MenuBadge
-                        class="ml-auto bg-primary text-[11px] font-medium text-primary-foreground"
-                        title={$currentFolder &&
-                        $currentFolderFavoritesCount < $favorites.size
-                          ? `${$currentFolderFavoritesCount} in current folder, ${$favorites.size} total`
-                          : `${$favorites.size} favorites`}
-                      >
-                        {#if $currentFolder && $currentFolderFavoritesCount < $favorites.size}
-                          {$currentFolderFavoritesCount} / {$favorites.size}
-                        {:else}
-                          {$favorites.size}
-                        {/if}
-                      </Sidebar.MenuBadge>
+                    {#if item.title === 'Favourites'}
+                      {@const onFavouritesPage =
+                        page.url.pathname === '/favourites'}
+                      {@const badgeCount = onFavouritesPage
+                        ? $favorites.size
+                        : $currentFolder
+                          ? $currentFolderFavoritesCount
+                          : $favorites.size}
+                      {#if badgeCount > 0}
+                        <Sidebar.MenuBadge
+                          class="ml-auto bg-primary text-[11px] font-medium text-primary-foreground"
+                          title={onFavouritesPage
+                            ? `${badgeCount} picked`
+                            : `${badgeCount} picked in this folder`}
+                        >
+                          {badgeCount}
+                        </Sidebar.MenuBadge>
+                      {/if}
                     {/if}
                   </a>
                 {/snippet}

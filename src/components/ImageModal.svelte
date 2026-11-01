@@ -3,7 +3,21 @@
   import { cn } from '$lib/utils';
   import { convertFileSrc } from '@tauri-apps/api/core';
   import { fade, scale as scaleTransition } from 'svelte/transition';
-  import { favorites, photos } from '../stores/galleryStore';
+  import { tick } from 'svelte';
+  import { get } from 'svelte/store';
+  import {
+    favorites,
+    photos,
+    cullFlags,
+    autoAdvance,
+  } from '../stores/galleryStore';
+  import type { CullAction, CullFlag } from '../lib/cull';
+  import {
+    isTextEntry,
+    setShortcutLayer,
+    shortcutHelpOpen,
+    shortcutMatches,
+  } from '$lib/shortcuts';
   import Filename from './Filename.svelte';
   import X from '@lucide/svelte/icons/x';
   import Info from '@lucide/svelte/icons/info';
@@ -45,6 +59,11 @@
   const canShowNext = $derived(currentIndex < photoSource.length - 1);
   const isFavourite = $derived(
     selectedImage ? $favorites.has(selectedImage.path) : false,
+  );
+  const cullFlag = $derived<CullFlag>(
+    selectedImage
+      ? ($cullFlags.get(selectedImage.path) ?? 'unflagged')
+      : 'unflagged',
   );
   const fileName = $derived(selectedImage?.metadata.name);
 
@@ -89,77 +108,84 @@
     offsetY = 0;
   }
 
-  function handleKeydown(event: KeyboardEvent) {
+  async function mark(action: CullAction, advance: boolean) {
     if (!selectedImage) return;
+    const path = selectedImage.path;
+    const index = photoSource.findIndex((photo) => photo.path === path);
+    await cullFlags.apply(path, action);
+    if (!advance || !get(autoAdvance)) return;
+    await tick();
+    const updated = photoSource;
+    const still = updated.findIndex((photo) => photo.path === path);
+    if (still === -1) {
+      if (updated.length === 0) {
+        onClose();
+        return;
+      }
+      selectedImage =
+        updated[Math.min(Math.max(index, 0), updated.length - 1)] ?? null;
+    } else if (still < updated.length - 1) {
+      selectedImage = updated[still + 1];
+    }
+  }
 
-    const isCtrlOrCmd = event.ctrlKey || event.metaKey;
+  function handleKeydown(event: KeyboardEvent) {
+    if (!selectedImage || isSlideshowOpen) return;
+    if (isTextEntry(event.target)) return;
+    if (get(shortcutHelpOpen) || event.defaultPrevented) return;
 
-    // Zoom shortcuts (Ctrl/Cmd +, Ctrl/Cmd -, Ctrl/Cmd 0, or standalone +, -, 0)
-    if (isCtrlOrCmd) {
-      if (event.key === '=' || event.key === '+') {
-        event.preventDefault();
-        zoomIn();
-        return;
-      }
-      if (event.key === '-') {
-        event.preventDefault();
-        zoomOut();
-        return;
-      }
-      if (event.key === '0') {
-        event.preventDefault();
-        resetZoom();
-        return;
-      }
-    } else {
-      if (event.key === '+' || event.key === '=') {
-        event.preventDefault();
-        zoomIn();
-        return;
-      }
-      if (event.key === '-') {
-        event.preventDefault();
-        zoomOut();
-        return;
-      }
-      if (event.key === '0') {
-        event.preventDefault();
-        resetZoom();
-        return;
-      }
+    if (shortcutMatches(event, 'zoom-in')) {
+      event.preventDefault();
+      zoomIn();
+      return;
+    }
+    if (shortcutMatches(event, 'zoom-out')) {
+      event.preventDefault();
+      zoomOut();
+      return;
+    }
+    if (shortcutMatches(event, 'zoom-reset')) {
+      event.preventDefault();
+      resetZoom();
+      return;
     }
 
-    if (event.key === 'ArrowLeft' || event.key === '[') {
+    if (shortcutMatches(event, 'viewer-prev')) {
       event.preventDefault();
       showPrevious();
       return;
     }
-    if (event.key === 'ArrowRight' || event.key === ']') {
+    if (shortcutMatches(event, 'viewer-next')) {
       event.preventDefault();
       showNext();
       return;
     }
-    if (
-      event.key === 'l' ||
-      event.key === 'L' ||
-      event.key === 'f' ||
-      event.key === 'F'
-    ) {
+    if (shortcutMatches(event, 'pick')) {
       event.preventDefault();
-      toggleFavorite();
+      mark('pick', true);
       return;
     }
-    if (event.key === 'i' || event.key === 'I') {
+    if (shortcutMatches(event, 'reject')) {
+      event.preventDefault();
+      mark('reject', true);
+      return;
+    }
+    if (shortcutMatches(event, 'unflag')) {
+      event.preventDefault();
+      mark('unflag', true);
+      return;
+    }
+    if (shortcutMatches(event, 'info')) {
       event.preventDefault();
       toggleInfo();
       return;
     }
-    if (event.key === 'p' || event.key === 'P') {
+    if (shortcutMatches(event, 'start-slideshow')) {
       event.preventDefault();
       isSlideshowOpen = true;
       return;
     }
-    if (event.key === 'Escape') {
+    if (shortcutMatches(event, 'close')) {
       event.preventDefault();
       onClose();
       return;
@@ -167,7 +193,11 @@
   }
 
   function toggleFavorite() {
-    if (selectedImage) favorites.toggle(selectedImage.path);
+    if (selectedImage) mark('pick', false);
+  }
+
+  function toggleReject() {
+    if (selectedImage) mark('reject', false);
   }
 
   function showPrevious() {
@@ -447,6 +477,12 @@
       showUI = true;
     }
   });
+
+  $effect(() => {
+    if (!selectedImage) return;
+    setShortcutLayer('viewer', true);
+    return () => setShortcutLayer('viewer', false);
+  });
 </script>
 
 <svelte:window
@@ -549,7 +585,11 @@
           alt={fileName}
           draggable="false"
           class={`relative z-10 max-h-full max-w-full rounded-lg object-contain shadow-2xl transition-opacity duration-300 ${
-            imageLoaded ? 'opacity-100' : 'opacity-0'
+            imageLoaded
+              ? cullFlag === 'rejected'
+                ? 'opacity-50'
+                : 'opacity-100'
+              : 'opacity-0'
           } ${zoomScale > 1.0 ? 'cursor-grab' : 'cursor-default'} ${isDragging || isTouchDragging ? 'cursor-grabbing' : ''}`}
           style="filter: drop-shadow(0 25px 25px rgb(0 0 0 / 0.5)) {filterStyle
             ? ' ' + filterStyle
@@ -665,7 +705,9 @@
         onFilterChange={(f) => (activeFilter = f)}
         onResetAll={resetAll}
         {isFavourite}
+        isRejected={cullFlag === 'rejected'}
         onToggleFavorite={toggleFavorite}
+        onToggleReject={toggleReject}
         {showInfo}
         onToggleInfo={toggleInfo}
         onStartSlideshow={() => (isSlideshowOpen = true)}
@@ -676,7 +718,14 @@
           showUI ? 'opacity-100' : 'pointer-events-none opacity-0'
         }`}
       >
-        <Filename name={fileName} />
+        <div class="flex items-center justify-center gap-2">
+          <Filename name={fileName} />
+          {#if cullFlag === 'picked'}
+            <span class="text-xs font-medium text-red-300">Picked</span>
+          {:else if cullFlag === 'rejected'}
+            <span class="text-xs font-medium text-white/60">Rejected</span>
+          {/if}
+        </div>
       </div>
     </div>
   </div>

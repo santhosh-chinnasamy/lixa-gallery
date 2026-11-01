@@ -28,6 +28,7 @@
     refreshFavourites,
   } from '../../stores/galleryStore';
   import type { FavouriteFolderGroup, PhotoMetadata } from '../../types/photo';
+  import { setShortcutLayer } from '$lib/shortcuts';
 
   let exportStatus = $state('');
   let showClearAllConfirmation = $state(false);
@@ -49,6 +50,11 @@
   // Auto-refresh when entering page
   $effect(() => {
     refreshFavourites();
+  });
+
+  $effect(() => {
+    setShortcutLayer('favourites', true);
+    return () => setShortcutLayer('favourites', false);
   });
 
   // Automatically adjust scope if no folder is open

@@ -1,7 +1,10 @@
 use async_trait::async_trait;
-use gallery_core::models::{Favourite, FileMetadata, PhotoMetadata, Result, Workspace};
+use gallery_core::models::{
+    CullFlag, Favourite, FileMetadata, PhotoCullState, PhotoMetadata, Result, Workspace,
+};
 use gallery_core::repos::{
-    CachedPhotoRecord, FavouriteRepository, PhotoRepository, WorkspaceRepository,
+    CachedPhotoRecord, CullFlagRepository, FavouriteRepository, PhotoRepository,
+    WorkspaceRepository,
 };
 use sqlx::{
     sqlite::{SqliteConnectOptions, SqliteJournalMode, SqliteSynchronous},
@@ -184,80 +187,181 @@ pub struct SqliteFavouriteRepository {
     pool: SqlitePool,
 }
 
+fn unix_now() -> i64 {
+    std::time::SystemTime::now()
+        .duration_since(std::time::UNIX_EPOCH)
+        .map(|duration| duration.as_secs() as i64)
+        .unwrap_or(0)
+}
+
+fn db_err(error: sqlx::Error) -> gallery_core::models::GalleryError {
+    gallery_core::models::GalleryError::Db(error.to_string())
+}
+
+fn read_flag(value: &str) -> Result<CullFlag> {
+    CullFlag::parse(value).ok_or_else(|| {
+        gallery_core::models::GalleryError::Db(format!("unknown cull flag '{value}'"))
+    })
+}
+
 impl SqliteFavouriteRepository {
     pub fn new(pool: SqlitePool) -> Self {
         Self { pool }
+    }
+
+    async fn write_flag(&self, path: &str, flag: CullFlag) -> Result<()> {
+        if path.is_empty() {
+            return Err(gallery_core::models::GalleryError::InvalidPath(
+                "empty path".to_string(),
+            ));
+        }
+
+        match flag {
+            CullFlag::Unflagged => {
+                sqlx::query("DELETE FROM cull_flags WHERE path = ?1")
+                    .bind(path)
+                    .execute(&self.pool)
+                    .await
+                    .map_err(db_err)?;
+            }
+            CullFlag::Picked | CullFlag::Rejected => {
+                sqlx::query(
+                    "INSERT INTO cull_flags (path, flag, updated_at) VALUES (?1, ?2, ?3)
+                     ON CONFLICT(path) DO UPDATE SET
+                        flag = excluded.flag,
+                        updated_at = excluded.updated_at",
+                )
+                .bind(path)
+                .bind(flag.as_str())
+                .bind(unix_now())
+                .execute(&self.pool)
+                .await
+                .map_err(db_err)?;
+            }
+        }
+
+        Ok(())
+    }
+
+    async fn picked_rows(&self, prefix: Option<&str>) -> Result<Vec<Favourite>> {
+        let rows = match prefix {
+            Some(prefix) => sqlx::query(
+                "SELECT path FROM cull_flags WHERE flag = 'picked' AND path LIKE ?1 || '%'",
+            )
+            .bind(prefix)
+            .fetch_all(&self.pool)
+            .await
+            .map_err(db_err)?,
+            None => sqlx::query("SELECT path FROM cull_flags WHERE flag = 'picked'")
+                .fetch_all(&self.pool)
+                .await
+                .map_err(db_err)?,
+        };
+
+        Ok(rows
+            .into_iter()
+            .map(|row| Favourite {
+                path: row.get("path"),
+            })
+            .collect())
     }
 }
 
 #[async_trait]
 impl FavouriteRepository for SqliteFavouriteRepository {
     async fn add_favourite(&self, path: String) -> Result<()> {
-        sqlx::query("INSERT INTO favourites (path) VALUES (?1) ON CONFLICT(path) DO NOTHING")
-            .bind(path)
-            .execute(&self.pool)
-            .await
-            .map_err(|e| gallery_core::models::GalleryError::Db(e.to_string()))?;
-        Ok(())
+        self.write_flag(&path, CullFlag::Picked).await
     }
 
     async fn get_favourites(&self) -> Result<Vec<Favourite>> {
-        let rows = sqlx::query("SELECT path FROM favourites")
-            .fetch_all(&self.pool)
-            .await
-            .map_err(|e| gallery_core::models::GalleryError::Db(e.to_string()))?;
-
-        let favourites = rows
-            .into_iter()
-            .map(|row| Favourite {
-                path: row.get("path"),
-            })
-            .collect();
-
-        Ok(favourites)
+        self.picked_rows(None).await
     }
 
     async fn remove_favourite(&self, path: String) -> Result<()> {
-        sqlx::query("DELETE FROM favourites WHERE path = ?1")
+        sqlx::query("DELETE FROM cull_flags WHERE path = ?1 AND flag = 'picked'")
             .bind(path)
             .execute(&self.pool)
             .await
-            .map_err(|e| gallery_core::models::GalleryError::Db(e.to_string()))?;
+            .map_err(db_err)?;
         Ok(())
     }
 
     async fn get_favourites_by_prefix(&self, prefix: &str) -> Result<Vec<Favourite>> {
-        let rows = sqlx::query("SELECT path FROM favourites WHERE path LIKE ?1 || '%'")
-            .bind(prefix)
-            .fetch_all(&self.pool)
-            .await
-            .map_err(|e| gallery_core::models::GalleryError::Db(e.to_string()))?;
-
-        let favourites = rows
-            .into_iter()
-            .map(|row| Favourite {
-                path: row.get("path"),
-            })
-            .collect();
-
-        Ok(favourites)
+        self.picked_rows(Some(prefix)).await
     }
 
     async fn clear_favourites(&self) -> Result<()> {
-        sqlx::query("DELETE FROM favourites")
+        sqlx::query("DELETE FROM cull_flags WHERE flag = 'picked'")
             .execute(&self.pool)
             .await
-            .map_err(|e| gallery_core::models::GalleryError::Db(e.to_string()))?;
+            .map_err(db_err)?;
         Ok(())
     }
 
     async fn clear_favourites_by_prefix(&self, prefix: &str) -> Result<()> {
-        sqlx::query("DELETE FROM favourites WHERE path LIKE ?1 || '%'")
+        sqlx::query("DELETE FROM cull_flags WHERE flag = 'picked' AND path LIKE ?1 || '%'")
             .bind(prefix)
             .execute(&self.pool)
             .await
-            .map_err(|e| gallery_core::models::GalleryError::Db(e.to_string()))?;
+            .map_err(db_err)?;
         Ok(())
+    }
+}
+
+#[async_trait]
+impl CullFlagRepository for SqliteFavouriteRepository {
+    async fn set_flag(&self, path: &str, flag: CullFlag) -> Result<()> {
+        self.write_flag(path, flag).await
+    }
+
+    async fn get_flag(&self, path: &str) -> Result<CullFlag> {
+        let row = sqlx::query("SELECT flag FROM cull_flags WHERE path = ?1")
+            .bind(path)
+            .fetch_optional(&self.pool)
+            .await
+            .map_err(db_err)?;
+
+        match row {
+            Some(row) => read_flag(row.get::<String, _>("flag").as_str()),
+            None => Ok(CullFlag::Unflagged),
+        }
+    }
+
+    async fn list_flags(&self) -> Result<Vec<PhotoCullState>> {
+        self.flags_matching(None).await
+    }
+
+    async fn list_flags_by_prefix(&self, prefix: &str) -> Result<Vec<PhotoCullState>> {
+        self.flags_matching(Some(prefix)).await
+    }
+}
+
+impl SqliteFavouriteRepository {
+    async fn flags_matching(&self, prefix: Option<&str>) -> Result<Vec<PhotoCullState>> {
+        let rows = match prefix {
+            Some(prefix) => sqlx::query(
+                "SELECT path, flag FROM cull_flags WHERE path LIKE ?1 || '%' ORDER BY path",
+            )
+            .bind(prefix)
+            .fetch_all(&self.pool)
+            .await
+            .map_err(db_err)?,
+            None => sqlx::query("SELECT path, flag FROM cull_flags ORDER BY path")
+                .fetch_all(&self.pool)
+                .await
+                .map_err(db_err)?,
+        };
+
+        rows.into_iter()
+            .map(|row| {
+                let path: String = row.get("path");
+                let flag_text: String = row.get("flag");
+                Ok(PhotoCullState {
+                    path,
+                    flag: read_flag(&flag_text)?,
+                })
+            })
+            .collect()
     }
 }
 
@@ -351,6 +455,7 @@ impl WorkspaceRepository for SqliteWorkspaceRepository {
 mod tests {
     use super::*;
     use gallery_core::models::FileMetadata;
+    use gallery_core::repos::CullFlagRepository;
 
     async fn setup_test_db() -> SqlitePool {
         let pool = SqlitePool::connect("sqlite::memory:").await.unwrap();
@@ -450,5 +555,87 @@ mod tests {
         repo.remove_workspace("ws-1").await.unwrap();
         let workspaces_after = repo.get_workspaces().await.unwrap();
         assert_eq!(workspaces_after.len(), 0);
+    }
+
+    #[tokio::test]
+    async fn test_cull_flag_persistence() {
+        let pool = setup_test_db().await;
+        let repo = SqliteFavouriteRepository::new(pool);
+
+        assert_eq!(
+            repo.get_flag("/a/1.jpg").await.unwrap(),
+            CullFlag::Unflagged
+        );
+
+        repo.set_flag("/a/1.jpg", CullFlag::Picked).await.unwrap();
+        repo.set_flag("/a/2.jpg", CullFlag::Rejected).await.unwrap();
+        repo.set_flag("/b/3.jpg", CullFlag::Picked).await.unwrap();
+
+        // One row per path: picking again does not duplicate.
+        repo.set_flag("/a/1.jpg", CullFlag::Picked).await.unwrap();
+        let flags = repo.list_flags().await.unwrap();
+        assert_eq!(flags.len(), 3);
+        assert_eq!(repo.get_flag("/a/1.jpg").await.unwrap(), CullFlag::Picked);
+        assert_eq!(repo.get_flag("/a/2.jpg").await.unwrap(), CullFlag::Rejected);
+
+        // Favourites are the picked set. A reject is not a favourite.
+        let favs = repo.get_favourites().await.unwrap();
+        assert_eq!(favs.len(), 2);
+        assert!(favs.iter().all(|fav| fav.path != "/a/2.jpg"));
+
+        // Reject replaces pick. The photo leaves the favourites list.
+        repo.set_flag("/a/1.jpg", CullFlag::Rejected).await.unwrap();
+        assert_eq!(repo.get_flag("/a/1.jpg").await.unwrap(), CullFlag::Rejected);
+        let favs = repo.get_favourites().await.unwrap();
+        assert_eq!(favs.len(), 1);
+        assert_eq!(favs[0].path, "/b/3.jpg");
+
+        let in_a = repo.list_flags_by_prefix("/a/").await.unwrap();
+        assert_eq!(in_a.len(), 2);
+
+        // Unflag deletes the row. Clearing favourites keeps rejects.
+        repo.set_flag("/b/3.jpg", CullFlag::Unflagged)
+            .await
+            .unwrap();
+        assert_eq!(
+            repo.get_flag("/b/3.jpg").await.unwrap(),
+            CullFlag::Unflagged
+        );
+        repo.set_flag("/b/3.jpg", CullFlag::Picked).await.unwrap();
+        repo.clear_favourites().await.unwrap();
+        let remaining = repo.list_flags().await.unwrap();
+        assert!(remaining
+            .iter()
+            .all(|state| state.flag == CullFlag::Rejected));
+        assert!(remaining.iter().any(|state| state.path == "/a/1.jpg"));
+        assert!(repo.get_favourites().await.unwrap().is_empty());
+
+        assert!(repo.set_flag("", CullFlag::Picked).await.is_err());
+    }
+
+    #[tokio::test]
+    async fn test_existing_favourites_migrate_to_picked() {
+        let pool = SqlitePool::connect("sqlite::memory:").await.unwrap();
+        sqlx::query("CREATE TABLE IF NOT EXISTS favourites (path TEXT PRIMARY KEY NOT NULL)")
+            .execute(&pool)
+            .await
+            .unwrap();
+        sqlx::query("INSERT INTO favourites (path) VALUES (?1)")
+            .bind("/shoots/keep.jpg")
+            .execute(&pool)
+            .await
+            .unwrap();
+
+        sqlx::migrate!().run(&pool).await.expect("migrations");
+
+        let repo = SqliteFavouriteRepository::new(pool);
+        let flags = repo.list_flags().await.unwrap();
+        assert_eq!(flags.len(), 1);
+        assert_eq!(flags[0].path, "/shoots/keep.jpg");
+        assert_eq!(flags[0].flag, CullFlag::Picked);
+
+        let favs = repo.get_favourites().await.unwrap();
+        assert_eq!(favs.len(), 1);
+        assert_eq!(favs[0].path, "/shoots/keep.jpg");
     }
 }

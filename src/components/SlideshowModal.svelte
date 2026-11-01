@@ -5,7 +5,16 @@
   import { getCurrentWindow } from '@tauri-apps/api/window';
   import { untrack, onDestroy } from 'svelte';
   import { fade } from 'svelte/transition';
-  import { favorites } from '../stores/galleryStore';
+  import { tick } from 'svelte';
+  import { get } from 'svelte/store';
+  import { cullFlags, autoAdvance } from '../stores/galleryStore';
+  import type { CullAction, CullFlag } from '../lib/cull';
+  import {
+    isTextEntry,
+    setShortcutLayer,
+    shortcutHelpOpen,
+    shortcutMatches,
+  } from '$lib/shortcuts';
   import Heart from '@lucide/svelte/icons/heart';
   import Play from '@lucide/svelte/icons/play';
   import Pause from '@lucide/svelte/icons/pause';
@@ -71,9 +80,12 @@
     return photos[currentIndex] ?? null;
   });
 
-  const isFavourite = $derived(
-    currentPhoto ? $favorites.has(currentPhoto.path) : false,
+  const cullFlag = $derived<CullFlag>(
+    currentPhoto
+      ? ($cullFlags.get(currentPhoto.path) ?? 'unflagged')
+      : 'unflagged',
   );
+  const isFavourite = $derived(cullFlag === 'picked');
 
   const displayIndex = $derived(
     isShuffle ? shuffleIndex + 1 : currentIndex + 1,
@@ -305,10 +317,31 @@
     isLoop = !isLoop;
   }
 
-  function toggleFavorite() {
-    if (currentPhoto) {
-      favorites.toggle(currentPhoto.path);
+  async function mark(action: CullAction, advance: boolean) {
+    if (!currentPhoto) return;
+    const path = currentPhoto.path;
+    const index = currentIndex;
+    await cullFlags.apply(path, action);
+    if (!advance || !get(autoAdvance)) return;
+    await tick();
+    const still = photos.findIndex((photo) => photo.path === path);
+    if (still === -1) {
+      if (photos.length === 0) {
+        handleClose();
+        return;
+      }
+      currentIndex = Math.min(index, photos.length - 1);
+    } else if (still < photos.length - 1) {
+      currentIndex = still + 1;
     }
+  }
+
+  function toggleFavorite() {
+    mark('pick', false);
+  }
+
+  function toggleReject() {
+    mark('reject', false);
   }
 
   async function toggleFullscreen() {
@@ -369,53 +402,59 @@
 
   function handleKeydown(event: KeyboardEvent) {
     if (!open) return;
+    if (isTextEntry(event.target)) return;
+    if (get(shortcutHelpOpen)) return;
 
-    if (event.key === ' ' || event.code === 'Space') {
+    if (shortcutMatches(event, 'play-pause')) {
       event.preventDefault();
       togglePlayPause();
       return;
     }
-    if (event.key === 'ArrowRight' || event.key === 'PageDown') {
+    if (shortcutMatches(event, 'slide-next')) {
       event.preventDefault();
       nextSlide();
       return;
     }
-    if (event.key === 'ArrowLeft' || event.key === 'PageUp') {
+    if (shortcutMatches(event, 'slide-prev')) {
       event.preventDefault();
       prevSlide();
       return;
     }
-    if (
-      event.key === 'f' ||
-      event.key === 'F' ||
-      event.key === 'l' ||
-      event.key === 'L'
-    ) {
+    if (shortcutMatches(event, 'pick')) {
       event.preventDefault();
-      toggleFavorite();
+      mark('pick', true);
       return;
     }
-    if (event.key === 's' || event.key === 'S') {
+    if (shortcutMatches(event, 'reject')) {
+      event.preventDefault();
+      mark('reject', true);
+      return;
+    }
+    if (shortcutMatches(event, 'unflag')) {
+      event.preventDefault();
+      mark('unflag', true);
+      return;
+    }
+    if (shortcutMatches(event, 'shuffle')) {
       event.preventDefault();
       toggleShuffle();
       return;
     }
-    if (event.key === 'r' || event.key === 'R') {
+    if (shortcutMatches(event, 'repeat')) {
       event.preventDefault();
       toggleLoop();
       return;
     }
-    if (event.key === 'i' || event.key === 'I') {
+    if (shortcutMatches(event, 'info')) {
       event.preventDefault();
       showInfo = !showInfo;
       return;
     }
-    if (event.key === 'F11' || event.key === 'Enter') {
-      event.preventDefault();
-      toggleFullscreen();
+    if (event.key === 'F11') {
+      isFullscreen = !isFullscreen;
       return;
     }
-    if (event.key === 'Escape') {
+    if (shortcutMatches(event, 'close')) {
       event.preventDefault();
       handleClose();
       return;
@@ -483,6 +522,12 @@
     if (rafId) cancelAnimationFrame(rafId);
     if (hudTimeoutRef) clearTimeout(hudTimeoutRef);
     if (loadSafetyTimeout) clearTimeout(loadSafetyTimeout);
+  });
+
+  $effect(() => {
+    if (!open) return;
+    setShortcutLayer('slideshow', true);
+    return () => setShortcutLayer('slideshow', false);
   });
 </script>
 
@@ -657,7 +702,9 @@
             onerror={handleImageError}
             in:fade={{ duration: 400 }}
             out:fade={{ duration: 400 }}
-            class="absolute inset-0 m-auto max-h-full max-w-full select-none object-contain"
+            class={`absolute inset-0 m-auto max-h-full max-w-full select-none object-contain ${
+              cullFlag === 'rejected' ? 'opacity-50' : ''
+            }`}
             draggable="false"
           />
         {/key}
@@ -852,13 +899,30 @@
               ? 'bg-red-500/25 text-red-400 hover:bg-red-500/35'
               : 'text-white/70 hover:bg-white/20 hover:text-red-400',
           )}
-          aria-label={isFavourite
-            ? 'Remove from favorites (F/L)'
-            : 'Add to favorites (F/L)'}
-          title={isFavourite ? 'Favorite (F/L)' : 'Mark as Favorite (F/L)'}
+          aria-label={isFavourite ? 'Unflag pick (P)' : 'Pick (P)'}
+          title={isFavourite ? 'Picked (P)' : 'Pick (P)'}
           aria-pressed={isFavourite}
         >
           <Heart size={16} class={isFavourite ? 'fill-current' : ''} />
+        </Button>
+
+        <Button
+          variant="ghost"
+          size="icon"
+          onclick={toggleReject}
+          class={cn(
+            'h-9 w-9 rounded-full transition-all',
+            cullFlag === 'rejected'
+              ? 'bg-white/25 text-white hover:bg-white/35'
+              : 'text-white/70 hover:bg-white/20 hover:text-white',
+          )}
+          aria-label={cullFlag === 'rejected'
+            ? 'Unflag reject (X)'
+            : 'Reject (X)'}
+          title={cullFlag === 'rejected' ? 'Rejected (X)' : 'Reject (X)'}
+          aria-pressed={cullFlag === 'rejected'}
+        >
+          <X size={16} />
         </Button>
       </div>
     </footer>

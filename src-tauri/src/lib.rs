@@ -151,6 +151,8 @@ pub fn run() {
             commands::get_favourite_folder_groups,
             commands::clear_favourites,
             commands::clear_favourites_by_prefix,
+            commands::set_cull_flag,
+            commands::get_cull_flags,
             commands::save_workspace,
             commands::get_workspaces,
             commands::get_folder_tree,
@@ -177,8 +179,7 @@ pub fn run() {
 
                 let fs = std::sync::Arc::new(infra::fs_ops::LocalFileSystem);
                 let photo_repo = std::sync::Arc::new(db::SqlitePhotoRepository::new(pool.clone()));
-                let favourite_repo =
-                    std::sync::Arc::new(db::SqliteFavouriteRepository::new(pool.clone()));
+                let marks = std::sync::Arc::new(db::SqliteFavouriteRepository::new(pool.clone()));
                 let workspace_repo = std::sync::Arc::new(db::SqliteWorkspaceRepository::new(pool));
                 let image_processor = std::sync::Arc::new(infra::image::RayonImageProcessor::new());
                 let benchmark_logger =
@@ -192,7 +193,8 @@ pub fn run() {
                     tokio::runtime::Handle::current(),
                 );
                 let favourite = services::favourite_service::FavouriteService::new(
-                    favourite_repo,
+                    marks.clone(),
+                    marks,
                     photo_repo,
                     workspace_repo,
                     fs,

@@ -1,4 +1,4 @@
-use crate::models::{Favourite, PhotoMetadata, Result, Workspace};
+use crate::models::{CullFlag, Favourite, PhotoCullState, PhotoMetadata, Result, Workspace};
 use async_trait::async_trait;
 
 pub struct CachedPhotoRecord {
@@ -23,6 +23,14 @@ pub trait FavouriteRepository: Send + Sync {
     async fn remove_favourite(&self, path: String) -> Result<()>;
     async fn clear_favourites(&self) -> Result<()>;
     async fn clear_favourites_by_prefix(&self, prefix: &str) -> Result<()>;
+}
+
+#[async_trait]
+pub trait CullFlagRepository: Send + Sync {
+    async fn set_flag(&self, path: &str, flag: CullFlag) -> Result<()>;
+    async fn get_flag(&self, path: &str) -> Result<CullFlag>;
+    async fn list_flags(&self) -> Result<Vec<PhotoCullState>>;
+    async fn list_flags_by_prefix(&self, prefix: &str) -> Result<Vec<PhotoCullState>>;
 }
 
 #[async_trait]

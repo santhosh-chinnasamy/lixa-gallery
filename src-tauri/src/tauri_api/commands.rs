@@ -1,8 +1,8 @@
 use crate::tauri_api::events::TauriEventHub;
 use crate::tauri_api::state::AppState;
 use gallery_core::models::{
-    ExportOptions, Favourite, FavouriteFolderGroup, FolderNode, LoadingMode, PhotoMetadata,
-    Workspace,
+    CullFlag, ExportOptions, Favourite, FavouriteFolderGroup, FolderNode, LoadingMode,
+    PhotoCullState, PhotoMetadata, Workspace,
 };
 use tauri::{AppHandle, State};
 
@@ -97,6 +97,28 @@ pub async fn clear_favourites(state: State<'_, AppState>) -> Result<(), String> 
     state
         .favourite
         .clear_favourites()
+        .await
+        .map_err(|e| e.to_string())
+}
+
+#[tauri::command]
+pub async fn set_cull_flag(
+    state: State<'_, AppState>,
+    path: String,
+    flag: CullFlag,
+) -> Result<(), String> {
+    state
+        .favourite
+        .set_cull_flag(path, flag)
+        .await
+        .map_err(|e| e.to_string())
+}
+
+#[tauri::command]
+pub async fn get_cull_flags(state: State<'_, AppState>) -> Result<Vec<PhotoCullState>, String> {
+    state
+        .favourite
+        .get_cull_flags()
         .await
         .map_err(|e| e.to_string())
 }

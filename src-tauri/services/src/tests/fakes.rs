@@ -3,8 +3,12 @@ use gallery_core::benchmark::{BenchmarkEntry, BenchmarkLogger};
 use gallery_core::events::EventHub;
 use gallery_core::fs::FileSystem;
 use gallery_core::image::ImageProcessor;
-use gallery_core::models::{Favourite, FileMetadata, GalleryError, PhotoMetadata, Result};
-use gallery_core::repos::{CachedPhotoRecord, FavouriteRepository, PhotoRepository};
+use gallery_core::models::{
+    CullFlag, Favourite, FileMetadata, GalleryError, PhotoCullState, PhotoMetadata, Result,
+};
+use gallery_core::repos::{
+    CachedPhotoRecord, CullFlagRepository, FavouriteRepository, PhotoRepository,
+};
 use std::path::{Path, PathBuf};
 use std::sync::Mutex;
 
@@ -125,40 +129,108 @@ impl EventHub for FakeEventHub {
 }
 
 pub struct FakeFavouriteRepository {
-    pub favourites: Mutex<Vec<Favourite>>,
+    pub flags: Mutex<Vec<PhotoCullState>>,
+}
+
+impl FakeFavouriteRepository {
+    fn write_flag(&self, path: &str, flag: CullFlag) -> Result<()> {
+        if path.is_empty() {
+            return Err(GalleryError::InvalidPath("empty path".to_string()));
+        }
+        let mut flags = self.flags.lock().unwrap();
+        flags.retain(|state| state.path != path);
+        if flag != CullFlag::Unflagged {
+            flags.push(PhotoCullState {
+                path: path.to_string(),
+                flag,
+            });
+        }
+        Ok(())
+    }
 }
 
 #[async_trait]
 impl FavouriteRepository for FakeFavouriteRepository {
     async fn add_favourite(&self, path: String) -> Result<()> {
-        self.favourites.lock().unwrap().push(Favourite { path });
-        Ok(())
+        self.write_flag(&path, CullFlag::Picked)
     }
     async fn get_favourites(&self) -> Result<Vec<Favourite>> {
-        Ok(self.favourites.lock().unwrap().clone())
+        Ok(self
+            .flags
+            .lock()
+            .unwrap()
+            .iter()
+            .filter(|state| state.flag == CullFlag::Picked)
+            .map(|state| Favourite {
+                path: state.path.clone(),
+            })
+            .collect())
     }
     async fn get_favourites_by_prefix(&self, prefix: &str) -> Result<Vec<Favourite>> {
-        let favs = self.favourites.lock().unwrap();
-        Ok(favs
+        Ok(self
+            .flags
+            .lock()
+            .unwrap()
             .iter()
-            .filter(|f| f.path.starts_with(prefix))
-            .cloned()
+            .filter(|state| state.flag == CullFlag::Picked && state.path.starts_with(prefix))
+            .map(|state| Favourite {
+                path: state.path.clone(),
+            })
             .collect())
     }
     async fn remove_favourite(&self, path: String) -> Result<()> {
-        self.favourites.lock().unwrap().retain(|f| f.path != path);
+        self.flags
+            .lock()
+            .unwrap()
+            .retain(|state| !(state.path == path && state.flag == CullFlag::Picked));
         Ok(())
     }
     async fn clear_favourites(&self) -> Result<()> {
-        self.favourites.lock().unwrap().clear();
+        self.flags
+            .lock()
+            .unwrap()
+            .retain(|state| state.flag != CullFlag::Picked);
         Ok(())
     }
     async fn clear_favourites_by_prefix(&self, prefix: &str) -> Result<()> {
-        self.favourites
+        self.flags
             .lock()
             .unwrap()
-            .retain(|f| !f.path.starts_with(prefix));
+            .retain(|state| !(state.flag == CullFlag::Picked && state.path.starts_with(prefix)));
         Ok(())
+    }
+}
+
+#[async_trait]
+impl CullFlagRepository for FakeFavouriteRepository {
+    async fn set_flag(&self, path: &str, flag: CullFlag) -> Result<()> {
+        self.write_flag(path, flag)
+    }
+
+    async fn get_flag(&self, path: &str) -> Result<CullFlag> {
+        Ok(self
+            .flags
+            .lock()
+            .unwrap()
+            .iter()
+            .find(|state| state.path == path)
+            .map(|state| state.flag)
+            .unwrap_or(CullFlag::Unflagged))
+    }
+
+    async fn list_flags(&self) -> Result<Vec<PhotoCullState>> {
+        Ok(self.flags.lock().unwrap().clone())
+    }
+
+    async fn list_flags_by_prefix(&self, prefix: &str) -> Result<Vec<PhotoCullState>> {
+        Ok(self
+            .flags
+            .lock()
+            .unwrap()
+            .iter()
+            .filter(|state| state.path.starts_with(prefix))
+            .cloned()
+            .collect())
     }
 }
 
