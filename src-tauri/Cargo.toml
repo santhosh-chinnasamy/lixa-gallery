@@ -50,7 +50,6 @@ futures = "0.3.31"
 log = "0.4"
 thiserror = "2"
 async-trait = "0.1"
-async-recursion = "1.1.1"
 
 
 [profile.dev]

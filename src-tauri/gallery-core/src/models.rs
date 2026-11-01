@@ -44,6 +44,9 @@ pub struct FolderNode {
     pub name: String,
     pub path: String,
     pub children: Vec<FolderNode>,
+    /// Subfolders exist. `children` stays empty until that level is requested.
+    #[serde(default)]
+    pub has_children: bool,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
