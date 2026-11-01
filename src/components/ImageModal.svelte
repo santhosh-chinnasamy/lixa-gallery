@@ -1,8 +1,11 @@
 <script lang="ts">
   import { Button } from '$lib/components/ui/button';
-  import { thumbnailUrl } from '$lib/thumbnail';
+  import {
+    gridImageUrl,
+    UNSUPPORTED_FORMAT_MESSAGE,
+    viewerImageUrl,
+  } from '$lib/imageSource';
   import { cn } from '$lib/utils';
-  import { convertFileSrc } from '@tauri-apps/api/core';
   import { fade, scale as scaleTransition } from 'svelte/transition';
   import { favorites, photos } from '../stores/galleryStore';
   import Filename from './Filename.svelte';
@@ -48,6 +51,10 @@
     selectedImage ? $favorites.has(selectedImage.path) : false,
   );
   const fileName = $derived(selectedImage?.metadata.name);
+  const viewerSrc = $derived(
+    selectedImage ? viewerImageUrl(selectedImage) : null,
+  );
+  const blurSrc = $derived(selectedImage ? gridImageUrl(selectedImage) : null);
 
   // Modal and Image states
   let isSlideshowOpen = $state(false);
@@ -218,9 +225,12 @@
     indicesToPreload.forEach((index) => {
       const photo = photoSource[index];
       if (photo && !preloadedImages.has(photo.path)) {
-        const img = new Image();
-        img.src = convertFileSrc(photo.path);
-        preloadedImages.set(photo.path, img);
+        const src = viewerImageUrl(photo);
+        if (src) {
+          const img = new Image();
+          img.src = src;
+          preloadedImages.set(photo.path, img);
+        }
       }
     });
   }
@@ -508,7 +518,7 @@
         class="relative flex flex-1 cursor-default select-none items-center justify-center overflow-hidden rounded-lg"
       >
         <!-- Loading spinner -->
-        {#if !imageLoaded && !imageError}
+        {#if viewerSrc && !imageLoaded && !imageError}
           <div
             class="absolute inset-0 flex items-center justify-center bg-black/20 backdrop-blur-sm"
           >
@@ -519,21 +529,25 @@
         {/if}
 
         <!-- Error state -->
-        {#if imageError}
+        {#if !viewerSrc || imageError}
           <div
             class="absolute inset-0 flex items-center justify-center bg-black/20 backdrop-blur-sm"
           >
             <div class="text-center text-white">
-              <div class="mb-2 text-lg">Failed to load image</div>
+              <div class="mb-2 text-lg">
+                {viewerSrc
+                  ? 'Failed to load image'
+                  : UNSUPPORTED_FORMAT_MESSAGE}
+              </div>
               <div class="text-sm text-white/70">{fileName}</div>
             </div>
           </div>
         {/if}
 
         <!-- Thumbnail placeholder/fallback -->
-        {#if !imageLoaded || imageError}
+        {#if blurSrc && viewerSrc && (!imageLoaded || imageError)}
           <img
-            src={thumbnailUrl(selectedImage)}
+            src={blurSrc}
             alt=""
             class={`absolute inset-0 h-full w-full rounded-lg object-contain blur-md transition-opacity duration-500 ${
               imageError ? 'opacity-50' : 'opacity-20'
@@ -544,25 +558,27 @@
         <!-- svelte-ignore a11y_no_noninteractive_element_interactions -->
         <!-- svelte-ignore a11y_click_events_have_key_events -->
         <!-- Main image -->
-        <img
-          bind:this={imageEl}
-          src={convertFileSrc(selectedImage.path)}
-          alt={fileName}
-          draggable="false"
-          class={`relative z-10 max-h-full max-w-full rounded-lg object-contain shadow-2xl transition-opacity duration-300 ${
-            imageLoaded ? 'opacity-100' : 'opacity-0'
-          } ${zoomScale > 1.0 ? 'cursor-grab' : 'cursor-default'} ${isDragging || isTouchDragging ? 'cursor-grabbing' : ''}`}
-          style="filter: drop-shadow(0 25px 25px rgb(0 0 0 / 0.5)) {filterStyle
-            ? ' ' + filterStyle
-            : ''}; transform: translate({offsetX}px, {offsetY}px) scale({zoomScale}); transition: {isDragging ||
-          isTouchDragging
-            ? 'none'
-            : 'transform 0.15s ease-out, filter 0.2s ease-in-out'}; transform-origin: center center;"
-          onload={handleImageLoad}
-          onerror={handleImageError}
-          onmousedown={handleMouseDown}
-          ondblclick={handleDoubleClick}
-        />
+        {#if viewerSrc}
+          <img
+            bind:this={imageEl}
+            src={viewerSrc}
+            alt={fileName}
+            draggable="false"
+            class={`relative z-10 max-h-full max-w-full rounded-lg object-contain shadow-2xl transition-opacity duration-300 ${
+              imageLoaded ? 'opacity-100' : 'opacity-0'
+            } ${zoomScale > 1.0 ? 'cursor-grab' : 'cursor-default'} ${isDragging || isTouchDragging ? 'cursor-grabbing' : ''}`}
+            style="filter: drop-shadow(0 25px 25px rgb(0 0 0 / 0.5)) {filterStyle
+              ? ' ' + filterStyle
+              : ''}; transform: translate({offsetX}px, {offsetY}px) scale({zoomScale}); transition: {isDragging ||
+            isTouchDragging
+              ? 'none'
+              : 'transform 0.15s ease-out, filter 0.2s ease-in-out'}; transform-origin: center center;"
+            onload={handleImageLoad}
+            onerror={handleImageError}
+            onmousedown={handleMouseDown}
+            ondblclick={handleDoubleClick}
+          />
+        {/if}
 
         <!-- Info Panel Overlay -->
         <div

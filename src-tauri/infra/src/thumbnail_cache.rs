@@ -6,10 +6,12 @@
 //! source was edited.
 //!
 //! v2 names the file from a versioned hash of the normalized source path, plus
-//! the source mtime (seconds) and size. The same photo always maps to one
-//! path; a different photo, extension, or edit maps to another. Edited copies
-//! replace the previous file for that path. Startup deletes the v1 files so
-//! they are not reused and do not accumulate next to the new cache.
+//! the source mtime (seconds) and size. Those files were encoded from sensor
+//! pixels and ignored EXIF Orientation, so portrait frames stayed sideways.
+//! v3 uses the same key shape and applies orientation before resizing.
+//! The same photo always maps to one path; a different photo, extension, or
+//! edit maps to another. Edited copies replace the previous file for that
+//! path. Startup deletes the v1 files and every `vN` directory with `N < 3`.
 
 use gallery_core::thumbnail_cache::{
     identity_suffix, stored_thumbnail_is_current, CACHE_DIR_NAME, CACHE_KEY_HEX_LEN, CACHE_VERSION,
@@ -68,21 +70,75 @@ pub fn thumbnail_disk_path(
     full
 }
 
-/// Drop a trailing `?v=<mtime>_<size>` cache-buster added by the webview.
+/// Absolute path of a decoded viewer preview for `source` at `identity`.
+///
+/// Previews live beside thumbnails, under `{version}/preview/`, so retiring
+/// a version directory removes both. The filename shape matches the thumbnail,
+/// which lets an edit delete the previous preview for that path.
+pub fn preview_disk_path(cache_dir: &Path, source: &Path, identity: ThumbnailIdentity) -> PathBuf {
+    let relative = relative_cache_path(&source_key_material(source), identity);
+    let mut components = relative.components();
+    let version = components
+        .next()
+        .expect("preview path starts with the cache version");
+    let rest: PathBuf = components.collect();
+    cache_dir.join(version).join("preview").join(rest)
+}
+
+/// A thumbnail-protocol request after the `lixa-thumbnail://localhost/` prefix.
+///
+/// `path` is still percent-encoded. `preview` is set when the viewer asked for
+/// a decoded WebP (`kind=preview`) instead of the 512px grid thumbnail.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub struct ThumbnailRequest<'a> {
+    pub path: &'a str,
+    pub preview: bool,
+}
+
+/// Split a protocol path from the query the webview adds.
 ///
 /// The source path is percent-encoded, so a literal `?` is not part of the
-/// filename the UI sends. Anything that is not that exact suffix is left
-/// unchanged.
-pub fn strip_cache_buster(encoded_path: &str) -> &str {
-    let Some(index) = encoded_path.rfind("?v=") else {
-        return encoded_path;
+/// filename the UI sends. A query is recognized only when every parameter is
+/// `v=<mtime>_<size>` or `kind=preview`. Anything else is left unchanged so a
+/// stray `?` cannot swallow part of the path.
+pub fn parse_thumbnail_request(encoded_path: &str) -> ThumbnailRequest<'_> {
+    let Some((path, query)) = encoded_path.split_once('?') else {
+        return ThumbnailRequest {
+            path: encoded_path,
+            preview: false,
+        };
     };
-    let token = &encoded_path[index + 3..];
-    if is_cache_buster_token(token) {
-        &encoded_path[..index]
-    } else {
-        encoded_path
+    if query.is_empty() {
+        return ThumbnailRequest {
+            path: encoded_path,
+            preview: false,
+        };
     }
+
+    let mut preview = false;
+    for part in query.split('&') {
+        if let Some(value) = part.strip_prefix("v=") {
+            if !is_cache_buster_token(value) {
+                return ThumbnailRequest {
+                    path: encoded_path,
+                    preview: false,
+                };
+            }
+        } else if part == "kind=preview" {
+            preview = true;
+        } else {
+            return ThumbnailRequest {
+                path: encoded_path,
+                preview: false,
+            };
+        }
+    }
+    ThumbnailRequest { path, preview }
+}
+
+/// Drop a recognized `?v=` / `kind=preview` query. See [`parse_thumbnail_request`].
+pub fn strip_cache_buster(encoded_path: &str) -> &str {
+    parse_thumbnail_request(encoded_path).path
 }
 
 /// Delete thumbnails from older cache schemes.
@@ -652,6 +708,42 @@ mod tests {
         );
         assert_eq!(strip_cache_buster("plain.jpg?v=10_"), "plain.jpg?v=10_");
         assert_eq!(strip_cache_buster("?v=0_0"), "");
+        assert_eq!(
+            strip_cache_buster("photo.tif?v=10_20&kind=preview"),
+            "photo.tif"
+        );
+        assert_eq!(
+            strip_cache_buster("photo.tif?kind=preview&v=10_20"),
+            "photo.tif"
+        );
+    }
+
+    #[test]
+    fn preview_query_is_recognized_and_unknown_queries_stay() {
+        let preview = parse_thumbnail_request("shoots%2Fa.tif?v=1700000000_2048&kind=preview");
+        assert_eq!(preview.path, "shoots%2Fa.tif");
+        assert!(preview.preview);
+        let thumb = parse_thumbnail_request("shoots%2Fa.jpg?v=1_2");
+        assert_eq!(thumb.path, "shoots%2Fa.jpg");
+        assert!(!thumb.preview);
+        let unknown = parse_thumbnail_request("plain.jpg?v=10_20&kind=full");
+        assert_eq!(unknown.path, "plain.jpg?v=10_20&kind=full");
+        assert!(!unknown.preview);
+    }
+
+    #[test]
+    fn preview_path_is_under_the_version_directory_and_distinct_from_the_thumb() {
+        let dir = tempfile::tempdir().unwrap();
+        let source = dir.path().join("scan.tif");
+        fs::write(&source, b"tif").unwrap();
+        let id = identity(4, 9);
+        let cache = dir.path().join("cache");
+        let preview = preview_disk_path(&cache, &source, id);
+        let thumb = thumbnail_disk_path(&cache, &source, id);
+        assert_ne!(preview, thumb);
+        assert!(preview.starts_with(cache.join(CACHE_DIR_NAME).join("preview")));
+        assert!(thumb.starts_with(cache.join(CACHE_DIR_NAME)));
+        assert!(!thumb.starts_with(cache.join(CACHE_DIR_NAME).join("preview")));
     }
 
     #[test]
@@ -768,7 +860,11 @@ mod tests {
         fs::create_dir_all(&retired).unwrap();
         fs::write(retired.join("old.webp"), vec![7u8; 16]).unwrap();
 
-        let future = cache.join("v3").join("ab");
+        let sideways = cache.join("v2").join("ab");
+        fs::create_dir_all(&sideways).unwrap();
+        fs::write(sideways.join("sideways.webp"), b"sideways").unwrap();
+
+        let future = cache.join(format!("v{}", CACHE_VERSION + 1)).join("ab");
         fs::create_dir_all(&future).unwrap();
         let future_file = future.join("later.webp");
         fs::write(&future_file, b"future").unwrap();
@@ -789,6 +885,10 @@ mod tests {
         assert!(!legacy.exists());
         assert!(!legacy_upper.exists());
         assert!(!cache.join("v1").exists());
+        assert!(
+            !cache.join("v2").exists(),
+            "v2 thumbnails were encoded without EXIF orientation"
+        );
         assert!(live.exists());
         assert!(cache.join("notes.txt").exists());
         assert!(future_file.exists());

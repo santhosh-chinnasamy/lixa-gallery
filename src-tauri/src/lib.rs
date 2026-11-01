@@ -1,10 +1,19 @@
+use crate::tauri_api::{commands, state::AppState};
+use infra::db;
+use percent_encoding::percent_decode_str;
 use tauri::Manager;
 
 pub mod tauri_api;
 
-use crate::tauri_api::{commands, state::AppState};
-use infra::db;
-use percent_encoding::percent_decode_str;
+fn webp_response(status: u16, body: Vec<u8>) -> tauri::http::Response<Vec<u8>> {
+    let mut response = tauri::http::Response::builder().status(status);
+    if status == 200 {
+        response = response
+            .header("Content-Type", "image/webp")
+            .header("Cache-Control", "no-cache");
+    }
+    response.body(body).expect("webp response")
+}
 
 #[cfg_attr(mobile, tauri::mobile_entry_point)]
 pub fn run() {
@@ -74,9 +83,9 @@ pub fn run() {
                         return;
                     }
 
-                    let encoded_path =
-                        infra::thumbnail_cache::strip_cache_buster(&uri[prefix.len()..]);
-                    let path_str = percent_decode_str(encoded_path)
+                    let request =
+                        infra::thumbnail_cache::parse_thumbnail_request(&uri[prefix.len()..]);
+                    let path_str = percent_decode_str(request.path)
                         .decode_utf8_lossy()
                         .into_owned();
                     let original_path = std::path::PathBuf::from(&path_str);
@@ -84,17 +93,36 @@ pub fn run() {
                     let state = app_handle.state::<AppState>();
                     let thumb_dir = state.thumbnail_path.clone();
 
+                    // TIFF on Windows and Linux cannot be painted by the webview.
+                    // The viewer asks for a decoded WebP instead of the original.
+                    if request.preview {
+                        match infra::image::ensure_decoded_preview(
+                            &original_path,
+                            std::path::Path::new(&thumb_dir),
+                        )
+                        .await
+                        {
+                            Ok(preview_path) => match std::fs::read(&preview_path) {
+                                Ok(data) => responder.respond(webp_response(200, data)),
+                                Err(_) => responder.respond(webp_response(500, Vec::new())),
+                            },
+                            Err(err) => {
+                                log::warn!(
+                                    "Could not build a preview for {}: {err}",
+                                    original_path.display()
+                                );
+                                responder.respond(webp_response(404, Vec::new()));
+                            }
+                        }
+                        return;
+                    }
+
                     // Same path as infra::image. mtime and size are part of the
                     // key, so an edited file does not reuse the previous bytes.
                     let Ok(identity) =
                         infra::thumbnail_cache::ThumbnailIdentity::read(&original_path)
                     else {
-                        responder.respond(
-                            tauri::http::Response::builder()
-                                .status(404)
-                                .body(Vec::new())
-                                .unwrap(),
-                        );
+                        responder.respond(webp_response(404, Vec::new()));
                         return;
                     };
                     let thumb_full_path = infra::thumbnail_cache::thumbnail_disk_path(
@@ -105,14 +133,7 @@ pub fn run() {
 
                     if thumb_full_path.is_file() {
                         if let Ok(data) = std::fs::read(&thumb_full_path) {
-                            responder.respond(
-                                tauri::http::Response::builder()
-                                    .status(200)
-                                    .header("Content-Type", "image/webp")
-                                    .header("Cache-Control", "no-cache")
-                                    .body(data)
-                                    .unwrap(),
-                            );
+                            responder.respond(webp_response(200, data));
                             return;
                         }
                     }
@@ -125,30 +146,13 @@ pub fn run() {
                     {
                         Ok(generated_path) => {
                             if let Ok(data) = std::fs::read(&generated_path) {
-                                responder.respond(
-                                    tauri::http::Response::builder()
-                                        .status(200)
-                                        .header("Content-Type", "image/webp")
-                                        .header("Cache-Control", "no-cache")
-                                        .body(data)
-                                        .unwrap(),
-                                );
+                                responder.respond(webp_response(200, data));
                             } else {
-                                responder.respond(
-                                    tauri::http::Response::builder()
-                                        .status(500)
-                                        .body(Vec::new())
-                                        .unwrap(),
-                                );
+                                responder.respond(webp_response(500, Vec::new()));
                             }
                         }
                         Err(_) => {
-                            responder.respond(
-                                tauri::http::Response::builder()
-                                    .status(404)
-                                    .body(Vec::new())
-                                    .unwrap(),
-                            );
+                            responder.respond(webp_response(404, Vec::new()));
                         }
                     }
                 });

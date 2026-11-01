@@ -71,6 +71,10 @@ The full list — gallery, viewer, and slideshow — is on the [site](https://sa
 - [x] Linux
 - [x] Windows
 
+## Formats
+
+JPEG, PNG, WebP, AVIF, GIF, BMP, SVG, and TIFF on macOS, Windows, and Linux. TIFF is shown from a decoded preview where the system webview cannot paint the original file (Windows and Linux). HEIC and HEIF are listed only on macOS, where the webview can show them. Other platforms leave those files out of the folder listing, because the app does not ship a HEIC decoder.
+
 ## Contribution
 
 Please read the [contributing guidelines](CONTRIBUTING.md) to setup your development machine and proceed.

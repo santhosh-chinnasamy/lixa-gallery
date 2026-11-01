@@ -1,5 +1,6 @@
 pub mod benchmark;
 pub mod db;
+pub mod formats;
 pub mod fs_ops;
 pub mod image;
 pub mod thumbnail_cache;
