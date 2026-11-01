@@ -77,20 +77,18 @@
       <!-- Loading placeholder -->
       {#if !imageLoaded && !imageError}
         <div
-          class="flex h-full w-full animate-pulse items-center justify-center bg-gray-200 dark:bg-gray-700"
+          class="flex h-full w-full animate-pulse items-center justify-center bg-muted"
         >
-          <div class="text-sm text-gray-400">Loading...</div>
+          <div class="text-sm text-muted-foreground">Loading...</div>
         </div>
       {/if}
 
       <!-- Error placeholder -->
       {#if imageError}
-        <div
-          class="flex h-full w-full items-center justify-center bg-gray-100 dark:bg-gray-800"
-        >
-          <div class="p-2 text-center text-xs text-gray-500">
+        <div class="flex h-full w-full items-center justify-center bg-muted">
+          <div class="p-2 text-center text-xs text-muted-foreground">
             <div>Failed to load</div>
-            <div class="max-w-full truncate px-2 text-gray-400">{fileName}</div>
+            <div class="max-w-full truncate px-2">{fileName}</div>
           </div>
         </div>
       {/if}
@@ -109,11 +107,11 @@
     </div>
 
     <button
-      class={`absolute right-2 top-2 rounded-full p-2 shadow-md transition-all duration-200 ${
+      class={`absolute right-2 top-2 rounded-full p-2 shadow-md backdrop-blur-sm transition-opacity duration-200 ${
         isFavourite
-          ? 'bg-red-50 text-red-500 hover:bg-red-100'
-          : 'bg-white/80 text-gray-400 opacity-0 hover:bg-white hover:text-red-500 group-hover:opacity-100'
-      } backdrop-blur-sm`}
+          ? 'bg-background/90 text-red-600'
+          : 'bg-background/80 text-muted-foreground opacity-0 hover:text-red-600 group-hover:opacity-100'
+      }`}
       onclick={toggleFavorite}
       aria-label={isFavourite ? 'Remove from favorites' : 'Add to favorites'}
     >
