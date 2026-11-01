@@ -68,15 +68,31 @@ pub struct ExportOptions {
     pub preserve_folder_structure: bool,
 }
 
+/// One file that could not be exported. `reason` is the underlying error
+/// (for example "Permission denied" or "No space left on device"), not a
+/// generic hint.
+#[derive(Debug, Clone, Default, Serialize, Deserialize, PartialEq, Eq)]
+pub struct ExportFailure {
+    pub path: String,
+    pub reason: String,
+}
+
 /// Outcome of one export. `copied` counts files transferred under their
 /// original file name (copy or move). `renamed` counts files written as
 /// `name (n).ext` because that name was already taken. `skipped` counts files
 /// left untouched because the source and destination were the same file.
+/// `failed` matches `failures`. `cancelled` is set when the user stopped the
+/// export; counts are only the files finished before the stop. `total` is the
+/// number of files in the job.
 #[derive(Debug, Clone, Default, Serialize, Deserialize, PartialEq, Eq)]
 pub struct ExportReport {
     pub copied: u32,
     pub renamed: u32,
     pub skipped: u32,
+    pub failed: u32,
+    pub failures: Vec<ExportFailure>,
+    pub cancelled: bool,
+    pub total: u32,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -120,5 +136,25 @@ mod tests {
         let json = serde_json::to_string(&fav).unwrap();
         let deserialized: Favourite = serde_json::from_str(&json).unwrap();
         assert_eq!(deserialized.path, "/path/to/fav");
+    }
+
+    #[test]
+    fn export_report_keeps_per_file_failures_and_cancellation() {
+        let report = ExportReport {
+            copied: 12,
+            renamed: 0,
+            skipped: 0,
+            failed: 1,
+            failures: vec![ExportFailure {
+                path: "/card/IMG.JPG".to_string(),
+                reason: "Permission denied (os error 13)".to_string(),
+            }],
+            cancelled: true,
+            total: 40,
+        };
+        let json = serde_json::to_string(&report).unwrap();
+        let back: ExportReport = serde_json::from_str(&json).unwrap();
+        assert_eq!(back, report);
+        assert!(json.contains("Permission denied (os error 13)"));
     }
 }
