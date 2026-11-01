@@ -9,6 +9,17 @@ import { invoke } from '@tauri-apps/api/core';
 
 let initialized = false;
 
+const writeToConsole = console.error.bind(console);
+
+/**
+ * Writes an error to the dev console and the native log file.
+ * Failures of the log plugin (for example, a browser preview) are ignored.
+ */
+export function reportError(message: string) {
+  writeToConsole(message);
+  void logError(message).catch(() => {});
+}
+
 /**
  * Initializes frontend log capture, attaching console output and global
  * error/unhandledrejection listeners to pipe logs to the native file target.

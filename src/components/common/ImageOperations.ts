@@ -1,5 +1,7 @@
 import { invoke } from '@tauri-apps/api/core';
 import { open } from '@tauri-apps/plugin-dialog';
+import { errorText, folderOpenError } from '$lib/errorText';
+import { reportError } from '$lib/logger';
 import {
   photos,
   isLoading,
@@ -9,6 +11,7 @@ import {
   loadFolderTree,
   loadingMode,
 } from '../../stores/galleryStore';
+import { toasts } from '../../stores/toastStore';
 import { get } from 'svelte/store';
 import type { PhotoMetadata } from '../../types/photo';
 
@@ -22,15 +25,25 @@ export async function loadPath(folderPath: string, isRoot = true) {
     });
     photos.set(loadedPhotos);
     currentFolder.set(folderPath);
+    toasts.dismissAll();
     if (isRoot) {
       recentFolders.add(folderPath);
       await loadFolderTree(folderPath);
       invoke('save_workspace', { path: folderPath }).catch((e) =>
-        console.error('Failed to record workspace:', e),
+        reportError(
+          `Failed to record workspace for ${folderPath}. ${errorText(e)}`,
+        ),
       );
     }
   } catch (error) {
-    console.error('Failed to load photos from path:', error);
+    const message = folderOpenError(folderPath, error);
+    reportError(message);
+    toasts.show(message, {
+      label: 'Retry',
+      run: () => {
+        void loadPath(folderPath, isRoot);
+      },
+    });
   } finally {
     isLoading.set(false);
   }
@@ -51,10 +64,11 @@ export async function loadPhotos() {
       return;
     }
 
-    isLoading.set(true);
     await loadPath(folder);
   } catch (error) {
-    console.error('Failed to load photos:', error);
+    const message = `Couldn't open a folder. ${errorText(error)}`;
+    reportError(message);
+    toasts.show(message);
     isLoading.set(false);
   }
 }
@@ -80,7 +94,7 @@ export async function exportFavorites(
 
     return destination;
   } catch (error) {
-    console.error('Failed to export files:', error);
+    reportError(`Couldn't export favourites. ${errorText(error)}`);
     throw error;
   }
 }
