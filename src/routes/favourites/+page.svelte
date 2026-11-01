@@ -17,6 +17,7 @@
   import KeyboardShortcuts from '../../components/common/KeyboardShortcuts.svelte';
   import ConfirmationModal from '../../components/modals/ConfirmationModal.svelte';
   import ExportModal from '../../components/modals/ExportModal.svelte';
+  import ExportResultModal from '../../components/modals/ExportResultModal.svelte';
   import {
     favorites,
     currentFolder,
@@ -27,12 +28,18 @@
     currentFolderFavoritesCount,
     refreshFavourites,
   } from '../../stores/galleryStore';
-  import type { FavouriteFolderGroup, PhotoMetadata } from '../../types/photo';
+  import type {
+    ExportResult,
+    FavouriteFolderGroup,
+    PhotoMetadata,
+  } from '../../types/photo';
 
   let exportStatus = $state('');
   let showClearAllConfirmation = $state(false);
   let showClearFolderConfirmation = $state(false);
   let showExportModal = $state(false);
+  let showExportResult = $state(false);
+  let exportResult = $state<ExportResult | null>(null);
   let isExporting = $state(false);
   let isSlideshowOpen = $state(false);
 
@@ -125,32 +132,39 @@
 
       setTimeout(() => unsubscribe(), 15000);
 
-      const destination = await exportFavorites(
+      const result = await exportFavorites(
         mode,
         paths,
         preserveFolderStructure,
       );
 
-      if (destination) {
-        showExportModal = false;
+      showExportModal = false;
+      if (result) {
         await refreshFavourites();
-        setTimeout(
-          () =>
-            alert(
-              `Favourites successfully ${mode === 'copy' ? 'copied' : 'moved'} to ${destination}`,
-            ),
-          100,
-        );
-      } else {
-        showExportModal = false;
+        exportResult = result;
+        showExportResult = true;
       }
     } catch (error) {
       console.error('Export failed:', error);
       showExportModal = false;
-      setTimeout(
-        () => alert('Export failed. Please check the destination permissions.'),
-        100,
-      );
+      const reason = error instanceof Error ? error.message : String(error);
+      exportResult = {
+        destination: '',
+        mode,
+        copied: 0,
+        moved: 0,
+        skipped: 0,
+        failed: Math.max(paths?.length ?? 0, 1),
+        files: [
+          {
+            source: '',
+            destination: null,
+            status: 'failed',
+            reason,
+          },
+        ],
+      };
+      showExportResult = true;
     } finally {
       isExporting = false;
       exportStatus = '';
@@ -450,6 +464,14 @@
   }}
   {isExporting}
   {exportStatus}
+/>
+
+<ExportResultModal
+  bind:open={showExportResult}
+  result={exportResult}
+  onClose={() => {
+    showExportResult = false;
+  }}
 />
 
 <!-- Confirmation for Clear Current Folder -->

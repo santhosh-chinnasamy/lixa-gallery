@@ -1,8 +1,8 @@
 use crate::tauri_api::events::TauriEventHub;
 use crate::tauri_api::state::AppState;
 use gallery_core::models::{
-    ExportOptions, Favourite, FavouriteFolderGroup, FolderNode, LoadingMode, PhotoMetadata,
-    Workspace,
+    ExportOptions, ExportResult, Favourite, FavouriteFolderGroup, FolderNode, LoadingMode,
+    PhotoMetadata, Workspace,
 };
 use tauri::{AppHandle, State};
 
@@ -27,7 +27,7 @@ pub async fn export_favourites(
     mode: String,
     paths: Option<Vec<String>>,
     preserve_folder_structure: Option<bool>,
-) -> Result<(), String> {
+) -> Result<ExportResult, String> {
     let events = TauriEventHub::new(app);
     let options = ExportOptions {
         destination,

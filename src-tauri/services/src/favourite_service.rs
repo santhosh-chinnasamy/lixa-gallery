@@ -1,8 +1,8 @@
 use gallery_core::events::EventHub;
 use gallery_core::fs::FileSystem;
 use gallery_core::models::{
-    ExportOptions, Favourite, FavouriteFolderGroup, FileMetadata, GalleryError, PhotoMetadata,
-    Result, Workspace,
+    ExportFileResult, ExportFileStatus, ExportOptions, ExportResult, Favourite,
+    FavouriteFolderGroup, FileMetadata, GalleryError, PhotoMetadata, Result, Workspace,
 };
 use gallery_core::repos::{FavouriteRepository, PhotoRepository, WorkspaceRepository};
 use std::{
@@ -10,6 +10,15 @@ use std::{
     path::{Path, PathBuf},
     sync::Arc,
 };
+
+fn failed_file(source: &str, destination: Option<String>, reason: String) -> ExportFileResult {
+    ExportFileResult {
+        source: source.to_string(),
+        destination,
+        status: ExportFileStatus::Failed,
+        reason: Some(reason),
+    }
+}
 
 pub struct FavouriteService {
     favourite_repo: Arc<dyn FavouriteRepository>,
@@ -37,9 +46,9 @@ impl FavouriteService {
         &self,
         events: &dyn EventHub,
         options: ExportOptions,
-    ) -> Result<()> {
-        let file_paths: Vec<String> = if let Some(paths) = options.paths {
-            paths
+    ) -> Result<ExportResult> {
+        let file_paths: Vec<String> = if let Some(paths) = &options.paths {
+            paths.clone()
         } else {
             self.favourite_repo
                 .get_favourites()
@@ -49,58 +58,116 @@ impl FavouriteService {
                 .collect()
         };
 
-        let mut counter = 0;
-        let mode = options.mode.as_str();
+        let mut files = Vec::with_capacity(file_paths.len());
 
-        for file_path in file_paths {
-            let file = PathBuf::from(&file_path);
-            let name = file
-                .file_name()
-                .ok_or_else(|| GalleryError::InvalidPath(file_path.clone()))?;
-
-            let destination_dir = if options.preserve_folder_structure {
-                let folder_name = file
-                    .parent()
-                    .and_then(|p| p.file_name())
-                    .and_then(|s| s.to_str())
-                    .unwrap_or("photos");
-                let sub_dir = PathBuf::from(&options.destination).join(folder_name);
-                self.fs.create_dir_all(&sub_dir).await?;
-                sub_dir
-            } else {
-                let dest = PathBuf::from(&options.destination);
-                self.fs.create_dir_all(&dest).await?;
-                dest
-            };
-
-            let destination_path = destination_dir.join(name);
-
-            let canonical_src = self.fs.canonicalize(&file).await?;
-            let canonical_dst = self
-                .fs
-                .canonicalize(&destination_path)
-                .await
-                .unwrap_or_else(|_| destination_path.clone());
-
-            if canonical_src == canonical_dst {
-                continue;
-            }
-
-            if mode == "move" {
-                self.fs.rename(&file, &destination_path).await?;
-                // Remove from DB since the file was physically moved
-                self.remove_favourite(file_path).await?;
-            } else {
-                self.fs.copy(&file, &destination_path).await?;
-            }
-
-            counter += 1;
+        for (index, file_path) in file_paths.iter().enumerate() {
+            files.push(self.export_one(file_path, &options).await);
             events
-                .emit_progress("export-progress", counter)
+                .emit_progress("export-progress", (index + 1) as u32)
                 .map_err(|e| GalleryError::Unknown(e.to_string()))?;
         }
 
-        Ok(())
+        Ok(Self::summarize(options, files))
+    }
+
+    async fn export_one(&self, file_path: &str, options: &ExportOptions) -> ExportFileResult {
+        let file = PathBuf::from(file_path);
+        let Some(name) = file.file_name().map(|name| name.to_owned()) else {
+            return failed_file(
+                file_path,
+                None,
+                GalleryError::InvalidPath(file_path.to_string()).to_string(),
+            );
+        };
+
+        let destination_dir = if options.preserve_folder_structure {
+            let folder_name = file
+                .parent()
+                .and_then(|p| p.file_name())
+                .and_then(|s| s.to_str())
+                .unwrap_or("photos");
+            PathBuf::from(&options.destination).join(folder_name)
+        } else {
+            PathBuf::from(&options.destination)
+        };
+
+        if let Err(error) = self.fs.create_dir_all(&destination_dir).await {
+            return failed_file(file_path, None, error.to_string());
+        }
+
+        let destination_path = destination_dir.join(name);
+        let destination = destination_path.to_string_lossy().to_string();
+
+        let canonical_src = match self.fs.canonicalize(&file).await {
+            Ok(path) => path,
+            Err(error) => return failed_file(file_path, Some(destination), error.to_string()),
+        };
+        let canonical_dst = self
+            .fs
+            .canonicalize(&destination_path)
+            .await
+            .unwrap_or_else(|_| destination_path.clone());
+
+        if canonical_src == canonical_dst {
+            return ExportFileResult {
+                source: file_path.to_string(),
+                destination: Some(destination),
+                status: ExportFileStatus::Skipped,
+                reason: Some("Source and destination are the same file".to_string()),
+            };
+        }
+
+        if options.mode == "move" {
+            if let Err(error) = self.fs.rename(&file, &destination_path).await {
+                return failed_file(file_path, Some(destination), error.to_string());
+            }
+            if let Err(error) = self.remove_favourite(file_path.to_string()).await {
+                return failed_file(
+                    file_path,
+                    Some(destination),
+                    format!("Moved the file, but it could not be removed from favourites: {error}"),
+                );
+            }
+            ExportFileResult {
+                source: file_path.to_string(),
+                destination: Some(destination),
+                status: ExportFileStatus::Moved,
+                reason: None,
+            }
+        } else if let Err(error) = self.fs.copy(&file, &destination_path).await {
+            failed_file(file_path, Some(destination), error.to_string())
+        } else {
+            ExportFileResult {
+                source: file_path.to_string(),
+                destination: Some(destination),
+                status: ExportFileStatus::Copied,
+                reason: None,
+            }
+        }
+    }
+
+    fn summarize(options: ExportOptions, files: Vec<ExportFileResult>) -> ExportResult {
+        let mut copied = 0;
+        let mut moved = 0;
+        let mut skipped = 0;
+        let mut failed = 0;
+        for file in &files {
+            match file.status {
+                ExportFileStatus::Copied => copied += 1,
+                ExportFileStatus::Moved => moved += 1,
+                ExportFileStatus::Skipped => skipped += 1,
+                ExportFileStatus::Failed => failed += 1,
+            }
+        }
+        ExportResult {
+            destination: options.destination,
+            mode: options.mode,
+            copied,
+            moved,
+            skipped,
+            failed,
+            files,
+        }
     }
 
     pub async fn get_favourite_photos(

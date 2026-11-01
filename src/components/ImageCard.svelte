@@ -1,7 +1,6 @@
 <script lang="ts">
   import * as Card from '$lib/components/ui/card';
-  import { convertFileSrc } from '@tauri-apps/api/core';
-  import { favorites } from '../stores/galleryStore';
+  import { favorites, gridFit } from '../stores/galleryStore';
   import Filename from './Filename.svelte';
   import Heart from '@lucide/svelte/icons/heart';
   import type { PhotoMetadata } from '../types/photo';
@@ -20,6 +19,7 @@
 
   let isFavourite = $derived($favorites.has(photo.path));
   let fileName = $derived(photo.metadata.name);
+  let showWholeFrame = $derived($gridFit === 'fit');
 
   // Determine the image source: ALWAYS use our custom protocol for thumbnails.
   // It handles both cached and on-the-fly generation efficiently in Rust.
@@ -62,7 +62,7 @@
 </script>
 
 <Card.Root
-  class={`group relative cursor-pointer transition-all duration-200 ease-in-out hover:scale-[1.02] hover:shadow-lg focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-blue-500 focus-visible:ring-offset-2`}
+  class="group relative cursor-pointer transition-colors duration-150 hover:border-foreground/30 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-offset-2 focus-visible:ring-offset-background"
   {tabindex}
   onclick={handleClick}
   onkeypress={handleKeyPress}
@@ -70,25 +70,25 @@
   <Card.Content class="relative overflow-hidden rounded-lg p-0">
     <!-- Image container with consistent aspect ratio -->
     <div
-      class="aspect-[1/1] h-auto w-full overflow-hidden bg-gray-100 dark:bg-gray-800"
+      class={`aspect-[1/1] h-auto w-full overflow-hidden ${
+        showWholeFrame ? 'bg-neutral-300 dark:bg-neutral-800' : 'bg-muted'
+      }`}
     >
       <!-- Loading placeholder -->
       {#if !imageLoaded && !imageError}
         <div
-          class="flex h-full w-full animate-pulse items-center justify-center bg-gray-200 dark:bg-gray-700"
+          class="flex h-full w-full animate-pulse items-center justify-center bg-muted"
         >
-          <div class="text-sm text-gray-400">Loading...</div>
+          <div class="text-sm text-muted-foreground">Loading...</div>
         </div>
       {/if}
 
       <!-- Error placeholder -->
       {#if imageError}
-        <div
-          class="flex h-full w-full items-center justify-center bg-gray-100 dark:bg-gray-800"
-        >
-          <div class="p-2 text-center text-xs text-gray-500">
+        <div class="flex h-full w-full items-center justify-center bg-muted">
+          <div class="p-2 text-center text-xs text-muted-foreground">
             <div>Failed to load</div>
-            <div class="max-w-full truncate px-2 text-gray-400">{fileName}</div>
+            <div class="max-w-full truncate px-2">{fileName}</div>
           </div>
         </div>
       {/if}
@@ -98,20 +98,20 @@
         src={thumbnailSrc}
         alt={fileName}
         loading={isVisible ? 'eager' : 'lazy'}
-        class={`h-full w-full object-cover transition-all duration-300 group-hover:scale-105 ${
-          imageLoaded ? 'opacity-100' : 'opacity-0'
-        }`}
+        class={`h-full w-full transition-opacity duration-300 ${
+          showWholeFrame ? 'object-contain' : 'object-cover'
+        } ${imageLoaded ? 'opacity-100' : 'opacity-0'}`}
         onload={handleImageLoad}
         onerror={handleImageError}
       />
     </div>
 
     <button
-      class={`absolute right-2 top-2 rounded-full p-2 shadow-md transition-all duration-200 ${
+      class={`absolute right-2 top-2 rounded-full p-2 shadow-md backdrop-blur-sm transition-opacity duration-200 ${
         isFavourite
-          ? 'bg-red-50 text-red-500 hover:bg-red-100'
-          : 'bg-white/80 text-gray-400 opacity-0 hover:bg-white hover:text-red-500 group-hover:opacity-100'
-      } backdrop-blur-sm`}
+          ? 'bg-background/90 text-red-600'
+          : 'bg-background/80 text-muted-foreground opacity-0 hover:text-red-600 group-hover:opacity-100'
+      }`}
       onclick={toggleFavorite}
       aria-label={isFavourite ? 'Remove from favorites' : 'Add to favorites'}
     >

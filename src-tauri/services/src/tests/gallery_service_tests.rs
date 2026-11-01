@@ -17,6 +17,7 @@ async fn test_scan_folder_finds_new_images() {
                 size: 500,
             },
         )]),
+        fail_copies: Mutex::new(vec![]),
     });
     let repo = Arc::new(FakePhotoRepository {
         photos: Mutex::new(vec![]),

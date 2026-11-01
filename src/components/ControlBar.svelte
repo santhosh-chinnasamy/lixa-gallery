@@ -1,7 +1,6 @@
 <script lang="ts">
   import { Input } from '$lib/components/ui/input';
   import { Label } from '$lib/components/ui/label';
-  import { Switch } from '$lib/components/ui/switch';
   import { Slider } from '$lib/components/ui/slider';
   import * as Select from '$lib/components/ui/select';
   import * as Sidebar from '$lib/components/ui/sidebar';
@@ -16,13 +15,10 @@
     sortBy,
     sortOrder,
     gridSize,
-    loadingMode,
+    gridFit,
     type SortOption,
-    type LoadingMode,
   } from '../stores/galleryStore';
   import { loadPhotos } from './common/ImageOperations';
-  import Zap from '@lucide/svelte/icons/zap';
-  import Clock from '@lucide/svelte/icons/clock';
   import Play from '@lucide/svelte/icons/play';
 
   let {
@@ -50,10 +46,6 @@
 
   function toggleSortOrder() {
     sortOrder.update((current) => (current === 'asc' ? 'desc' : 'asc'));
-  }
-
-  function toggleLoadingMode() {
-    loadingMode.set($loadingMode === 'lazy' ? 'sync' : 'lazy');
   }
 </script>
 
@@ -93,27 +85,8 @@
 
   <!-- Bottom Row: Search, Filters, and Sorting -->
   <div class="flex flex-wrap items-center justify-between gap-4">
-    <!-- Performance & Search Area -->
+    <!-- Search -->
     <div class="flex min-w-[120px] flex-1 items-center gap-3">
-      <!-- Performance Toggle -->
-      <Button
-        variant="outline"
-        size="icon"
-        class={`h-9 w-9 shrink-0 transition-all duration-200 ${
-          $loadingMode === 'lazy'
-            ? 'border-blue-200 bg-blue-50 text-blue-600 hover:bg-blue-100 dark:border-blue-800 dark:bg-blue-900/20 dark:text-blue-400'
-            : 'bg-background/50 text-muted-foreground'
-        }`}
-        onclick={toggleLoadingMode}
-        title={`Performance Mode: ${$loadingMode === 'lazy' ? 'Lazy (Instant Load)' : 'Sync (Wait for all)'}`}
-      >
-        {#if $loadingMode === 'lazy'}
-          <Zap class="h-4 w-4 fill-current" />
-        {:else}
-          <Clock class="h-4 w-4" />
-        {/if}
-      </Button>
-
       <div class="relative w-full max-w-md">
         <Search
           class="absolute left-2.5 top-2.5 h-4 w-4 text-muted-foreground transition-colors focus-within:text-primary"
@@ -173,7 +146,46 @@
 
       <div class="hidden h-6 w-px shrink-0 bg-border md:block"></div>
 
-      <!-- Sizing Group -->
+      <!-- Framing + sizing. Fill crops to the square; Fit shows the whole frame. -->
+      <div class="flex shrink-0 items-center gap-2">
+        <Label
+          class="hidden shrink-0 text-xs font-medium text-muted-foreground sm:block"
+          >Frame</Label
+        >
+        <div
+          class="flex h-9 items-center rounded-md border bg-muted/40 p-0.5"
+          role="group"
+          aria-label="Thumbnail framing"
+        >
+          <button
+            type="button"
+            class={`h-full rounded px-2.5 text-xs font-medium transition-colors ${
+              $gridFit === 'fill'
+                ? 'shadow-xs bg-background text-foreground'
+                : 'text-muted-foreground hover:text-foreground'
+            }`}
+            aria-pressed={$gridFit === 'fill'}
+            onclick={() => gridFit.set('fill')}
+            title="Crop thumbnails to fill the square"
+          >
+            Fill
+          </button>
+          <button
+            type="button"
+            class={`h-full rounded px-2.5 text-xs font-medium transition-colors ${
+              $gridFit === 'fit'
+                ? 'shadow-xs bg-background text-foreground'
+                : 'text-muted-foreground hover:text-foreground'
+            }`}
+            aria-pressed={$gridFit === 'fit'}
+            onclick={() => gridFit.set('fit')}
+            title="Show the whole photo"
+          >
+            Fit
+          </button>
+        </div>
+      </div>
+
       <div class="flex min-w-[80px] max-w-[150px] flex-1 items-center gap-3">
         <Label
           class="hidden shrink-0 text-xs font-medium text-muted-foreground sm:block"

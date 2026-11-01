@@ -1,6 +1,8 @@
 use super::fakes::*;
 use crate::favourite_service::FavouriteService;
-use gallery_core::models::{ExportOptions, FileMetadata, PhotoMetadata, Workspace};
+use gallery_core::models::{
+    ExportFileStatus, ExportOptions, FileMetadata, PhotoMetadata, Workspace,
+};
 use std::path::PathBuf;
 use std::sync::Arc;
 use std::sync::Mutex;
@@ -18,6 +20,7 @@ async fn test_favourite_flow() {
     });
     let fs = Arc::new(FakeFileSystem {
         files: Mutex::new(vec![]),
+        fail_copies: Mutex::new(vec![]),
     });
 
     let service = FavouriteService::new(repo.clone(), photo_repo, workspace_repo, fs);
@@ -75,6 +78,7 @@ async fn test_get_favourite_photos_and_groups() {
                 size: 300,
             },
         )]),
+        fail_copies: Mutex::new(vec![]),
     });
 
     let service = FavouriteService::new(repo.clone(), photo_repo, workspace_repo, fs);
@@ -122,6 +126,7 @@ async fn test_export_favourites_selective() {
     });
     let fs = Arc::new(FakeFileSystem {
         files: Mutex::new(vec![]),
+        fail_copies: Mutex::new(vec![]),
     });
 
     let service = FavouriteService::new(repo.clone(), photo_repo, workspace_repo, fs);
@@ -139,5 +144,71 @@ async fn test_export_favourites_selective() {
         preserve_folder_structure: true,
     };
 
-    service.export_favourites(&events, opts).await.unwrap();
+    let result = service.export_favourites(&events, opts).await.unwrap();
+    assert_eq!(result.copied, 1);
+    assert_eq!(result.moved, 0);
+    assert_eq!(result.skipped, 0);
+    assert_eq!(result.failed, 0);
+    assert_eq!(result.files.len(), 1);
+    assert_eq!(result.files[0].status, ExportFileStatus::Copied);
+    assert_eq!(result.files[0].source, "/a/1.jpg");
+    assert_eq!(result.destination, "/export");
+
+    let favs = service.get_favourites().await.unwrap();
+    assert_eq!(favs.len(), 2);
+}
+
+#[tokio::test]
+async fn test_export_reports_skip_and_file_failure() {
+    let repo = Arc::new(FakeFavouriteRepository {
+        favourites: Mutex::new(vec![]),
+    });
+    let photo_repo = Arc::new(FakePhotoRepository {
+        photos: Mutex::new(vec![]),
+    });
+    let workspace_repo = Arc::new(FakeWorkspaceRepository {
+        workspaces: Mutex::new(vec![]),
+    });
+    let fs = Arc::new(FakeFileSystem {
+        files: Mutex::new(vec![]),
+        fail_copies: Mutex::new(vec!["/shots/broken.jpg".to_string()]),
+    });
+
+    let service = FavouriteService::new(repo, photo_repo, workspace_repo, fs);
+    let events = FakeEventHub;
+
+    let skipped = ExportOptions {
+        destination: "/already".to_string(),
+        mode: "copy".to_string(),
+        paths: Some(vec!["/already/keep.jpg".to_string()]),
+        preserve_folder_structure: false,
+    };
+    let skipped_result = service.export_favourites(&events, skipped).await.unwrap();
+    assert_eq!(skipped_result.skipped, 1);
+    assert_eq!(skipped_result.files[0].status, ExportFileStatus::Skipped);
+    assert!(skipped_result.files[0]
+        .reason
+        .as_deref()
+        .unwrap()
+        .contains("same file"));
+
+    let failed = ExportOptions {
+        destination: "/export".to_string(),
+        mode: "copy".to_string(),
+        paths: Some(vec![
+            "/shots/broken.jpg".to_string(),
+            "/shots/ok.jpg".to_string(),
+        ]),
+        preserve_folder_structure: true,
+    };
+    let failed_result = service.export_favourites(&events, failed).await.unwrap();
+    assert_eq!(failed_result.failed, 1);
+    assert_eq!(failed_result.copied, 1);
+    assert_eq!(failed_result.files[0].status, ExportFileStatus::Failed);
+    assert!(failed_result.files[0]
+        .reason
+        .as_deref()
+        .unwrap()
+        .contains("permission denied"));
+    assert_eq!(failed_result.files[1].status, ExportFileStatus::Copied);
 }

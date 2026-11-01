@@ -5,12 +5,14 @@
   import AppSidebar from '../components/AppSidebar.svelte';
   import type { KeyboardActions } from '../types/events';
   import { initLogger } from '$lib/logger';
+  import { initTheme } from '../stores/themeStore';
   import type { Snippet } from 'svelte';
 
   let { children }: { children?: Snippet } = $props();
 
   $effect(() => {
     initLogger();
+    return initTheme();
   });
 
   const toggleFullScreen = async () => {

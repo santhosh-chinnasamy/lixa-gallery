@@ -10,6 +10,7 @@ use std::sync::Mutex;
 
 pub struct FakeFileSystem {
     pub files: Mutex<Vec<(PathBuf, FileMetadata)>>,
+    pub fail_copies: Mutex<Vec<String>>,
 }
 
 #[async_trait]
@@ -48,7 +49,14 @@ impl FileSystem for FakeFileSystem {
             .collect())
     }
 
-    async fn copy(&self, _from: &Path, _to: &Path) -> Result<u64> {
+    async fn copy(&self, from: &Path, _to: &Path) -> Result<u64> {
+        let fails = self.fail_copies.lock().unwrap();
+        if fails.iter().any(|path| Path::new(path) == from) {
+            return Err(GalleryError::Io(std::io::Error::new(
+                std::io::ErrorKind::PermissionDenied,
+                "permission denied",
+            )));
+        }
         Ok(0)
     }
 
