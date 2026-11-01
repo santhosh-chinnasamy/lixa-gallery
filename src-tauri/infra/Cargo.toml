@@ -5,6 +5,8 @@ edition.workspace = true
 
 [dependencies]
 gallery-core = { path = "../gallery-core" }
+blake3 = "1.5"
+unicode-normalization = "0.1"
 sqlx = { version = "0.8.6", features = ["sqlite", "runtime-tokio"] }
 rayon = "1.10"
 image = { version = "0.25.6", features = ["avif", "tiff", "webp", "jpeg", "png", "bmp", "gif"] }

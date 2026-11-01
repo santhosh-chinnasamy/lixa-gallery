@@ -4,3 +4,4 @@ pub mod fs;
 pub mod image;
 pub mod models;
 pub mod repos;
+pub mod thumbnail_cache;

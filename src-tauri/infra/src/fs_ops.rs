@@ -13,14 +13,7 @@ pub struct LocalFileSystem;
 impl FileSystem for LocalFileSystem {
     async fn get_file_metadata(&self, path: &Path) -> Result<FileMetadata> {
         let metadata = fs::metadata(path).await?;
-        let size = metadata.len();
-
-        let modified = metadata
-            .modified()
-            .map_err(|e| GalleryError::Io(e))?
-            .duration_since(UNIX_EPOCH)
-            .map(|d| d.as_secs())
-            .unwrap_or(0);
+        let identity = crate::thumbnail_cache::ThumbnailIdentity::from_metadata(&metadata)?;
 
         let created = metadata
             .created()
@@ -39,8 +32,8 @@ impl FileSystem for LocalFileSystem {
 
         Ok(FileMetadata {
             name,
-            size,
-            modified,
+            size: identity.size,
+            modified: identity.mtime_secs,
             created,
         })
     }
@@ -55,21 +48,7 @@ impl FileSystem for LocalFileSystem {
                 continue;
             }
             if let Some(ext) = path.extension().and_then(|s| s.to_str()) {
-                if matches!(
-                    ext.to_lowercase().as_str(),
-                    "jpg"
-                        | "jpeg"
-                        | "png"
-                        | "webp"
-                        | "bmp"
-                        | "gif"
-                        | "tiff"
-                        | "tif"
-                        | "avif"
-                        | "heic"
-                        | "heif"
-                        | "svg"
-                ) {
+                if crate::formats::is_scanned_image_extension(ext) {
                     images.push(path);
                 }
             }
@@ -135,6 +114,50 @@ mod tests {
 
         assert_eq!(images.len(), 1);
         assert_eq!(images[0].file_name().unwrap(), "test.jpg");
+    }
+
+    #[tokio::test]
+    async fn listing_includes_tiff_and_follows_the_platform_heic_rule() {
+        let dir = tempdir().unwrap();
+        for name in [
+            "keep.jpg",
+            "scan.tif",
+            "scan.TIFF",
+            "phone.heic",
+            "phone.HEIF",
+            "notes.txt",
+        ] {
+            File::create(dir.path().join(name)).unwrap();
+        }
+
+        let images = LocalFileSystem
+            .list_images_in_dir(dir.path())
+            .await
+            .unwrap();
+        let mut names: Vec<String> = images
+            .iter()
+            .map(|path| path.file_name().unwrap().to_string_lossy().into_owned())
+            .collect();
+        names.sort();
+
+        assert!(names.iter().any(|name| name == "keep.jpg"));
+        assert!(names.iter().any(|name| name == "scan.tif"));
+        assert!(names.iter().any(|name| name == "scan.TIFF"));
+        assert!(!names.iter().any(|name| name == "notes.txt"));
+
+        let heic_listed = names
+            .iter()
+            .any(|name| name.eq_ignore_ascii_case("phone.heic"));
+        let heif_listed = names
+            .iter()
+            .any(|name| name.eq_ignore_ascii_case("phone.HEIF"));
+        let macos = cfg!(target_os = "macos");
+        assert_eq!(heic_listed, macos);
+        assert_eq!(heif_listed, macos);
+        assert_eq!(
+            heic_listed,
+            crate::formats::is_scanned_image_extension("heic")
+        );
     }
 
     #[tokio::test]

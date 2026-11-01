@@ -1,6 +1,6 @@
 <script lang="ts">
   import * as Card from '$lib/components/ui/card';
-  import { convertFileSrc } from '@tauri-apps/api/core';
+  import { gridImageUrl, UNSUPPORTED_FORMAT_MESSAGE } from '$lib/imageSource';
   import { favorites } from '../stores/galleryStore';
   import Filename from './Filename.svelte';
   import Heart from '@lucide/svelte/icons/heart';
@@ -21,11 +21,9 @@
   let isFavourite = $derived($favorites.has(photo.path));
   let fileName = $derived(photo.metadata.name);
 
-  // Determine the image source: ALWAYS use our custom protocol for thumbnails.
-  // It handles both cached and on-the-fly generation efficiently in Rust.
-  let thumbnailSrc = $derived(
-    `lixa-thumbnail://localhost/${encodeURIComponent(photo.path)}`,
-  );
+  // Decoded WebP thumbnail, or the original HEIC on macOS. Null means this
+  // platform cannot show the file, so the card does not request it.
+  let imageSrc = $derived(gridImageUrl(photo));
 
   let imageLoaded = $state(false);
   let imageError = $state(false);
@@ -72,38 +70,51 @@
     <div
       class="aspect-[1/1] h-auto w-full overflow-hidden bg-gray-100 dark:bg-gray-800"
     >
-      <!-- Loading placeholder -->
-      {#if !imageLoaded && !imageError}
+      {#if imageSrc === null}
         <div
-          class="flex h-full w-full animate-pulse items-center justify-center bg-gray-200 dark:bg-gray-700"
+          class="flex h-full w-full items-center justify-center bg-gray-100 px-3 text-center dark:bg-gray-800"
         >
-          <div class="text-sm text-gray-400">Loading...</div>
-        </div>
-      {/if}
-
-      <!-- Error placeholder -->
-      {#if imageError}
-        <div
-          class="flex h-full w-full items-center justify-center bg-gray-100 dark:bg-gray-800"
-        >
-          <div class="p-2 text-center text-xs text-gray-500">
-            <div>Failed to load</div>
-            <div class="max-w-full truncate px-2 text-gray-400">{fileName}</div>
+          <div class="text-xs text-gray-500">
+            <div>{UNSUPPORTED_FORMAT_MESSAGE}</div>
+            <div class="mt-1 max-w-full truncate text-gray-400">{fileName}</div>
           </div>
         </div>
-      {/if}
+      {:else}
+        <!-- Loading placeholder -->
+        {#if !imageLoaded && !imageError}
+          <div
+            class="flex h-full w-full animate-pulse items-center justify-center bg-gray-200 dark:bg-gray-700"
+          >
+            <div class="text-sm text-gray-400">Loading...</div>
+          </div>
+        {/if}
 
-      <!-- Actual image -->
-      <img
-        src={thumbnailSrc}
-        alt={fileName}
-        loading={isVisible ? 'eager' : 'lazy'}
-        class={`h-full w-full object-cover transition-all duration-300 group-hover:scale-105 ${
-          imageLoaded ? 'opacity-100' : 'opacity-0'
-        }`}
-        onload={handleImageLoad}
-        onerror={handleImageError}
-      />
+        <!-- Error placeholder -->
+        {#if imageError}
+          <div
+            class="flex h-full w-full items-center justify-center bg-gray-100 dark:bg-gray-800"
+          >
+            <div class="p-2 text-center text-xs text-gray-500">
+              <div>Failed to load</div>
+              <div class="max-w-full truncate px-2 text-gray-400">
+                {fileName}
+              </div>
+            </div>
+          </div>
+        {/if}
+
+        <!-- Actual image -->
+        <img
+          src={imageSrc}
+          alt={fileName}
+          loading={isVisible ? 'eager' : 'lazy'}
+          class={`h-full w-full object-cover transition-all duration-300 group-hover:scale-105 ${
+            imageLoaded ? 'opacity-100' : 'opacity-0'
+          }`}
+          onload={handleImageLoad}
+          onerror={handleImageError}
+        />
+      {/if}
     </div>
 
     <button

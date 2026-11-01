@@ -1,7 +1,7 @@
 <script lang="ts">
   import { Button } from '$lib/components/ui/button';
   import { cn } from '$lib/utils';
-  import { convertFileSrc } from '@tauri-apps/api/core';
+  import { UNSUPPORTED_FORMAT_MESSAGE, viewerImageUrl } from '$lib/imageSource';
   import { getCurrentWindow } from '@tauri-apps/api/window';
   import { untrack, onDestroy } from 'svelte';
   import { fade } from 'svelte/transition';
@@ -98,30 +98,32 @@
   // Preload upcoming photos
   function preloadUpcoming(startPos: number) {
     if (photos.length <= 1) return;
-    const toPreload: string[] = [];
+    const toPreload: PhotoMetadata[] = [];
 
     if (isShuffle && shuffleOrder.length === photos.length) {
       for (let offset = 1; offset <= 3; offset++) {
         const nextPos = (startPos + offset) % shuffleOrder.length;
         const photoIdx = shuffleOrder[nextPos];
         if (photoIdx !== undefined && photos[photoIdx]) {
-          toPreload.push(photos[photoIdx].path);
+          toPreload.push(photos[photoIdx]);
         }
       }
     } else {
       for (let offset = 1; offset <= 3; offset++) {
         const nextPos = (startPos + offset) % photos.length;
         if (photos[nextPos]) {
-          toPreload.push(photos[nextPos].path);
+          toPreload.push(photos[nextPos]);
         }
       }
     }
 
-    toPreload.forEach((path) => {
-      if (!preloadedPaths.has(path)) {
-        preloadedPaths.add(path);
+    toPreload.forEach((photo) => {
+      if (!preloadedPaths.has(photo.path)) {
+        preloadedPaths.add(photo.path);
+        const src = viewerImageUrl(photo);
+        if (!src) return;
         const img = new Image();
-        img.src = convertFileSrc(path);
+        img.src = src;
       }
     });
   }
@@ -650,16 +652,27 @@
       <!-- Keyed Image Crossfade: completely eliminates WebKit texture reuse ghosting -->
       {#if currentPhoto}
         {#key currentPhoto.path}
-          <img
-            src={convertFileSrc(currentPhoto.path)}
-            alt={currentPhoto.metadata.name}
-            onload={handleImageLoad}
-            onerror={handleImageError}
-            in:fade={{ duration: 400 }}
-            out:fade={{ duration: 400 }}
-            class="absolute inset-0 m-auto max-h-full max-w-full select-none object-contain"
-            draggable="false"
-          />
+          {@const slideSrc = viewerImageUrl(currentPhoto)}
+          {#if slideSrc}
+            <img
+              src={slideSrc}
+              alt={currentPhoto.metadata.name}
+              onload={handleImageLoad}
+              onerror={handleImageError}
+              in:fade={{ duration: 400 }}
+              out:fade={{ duration: 400 }}
+              class="absolute inset-0 m-auto max-h-full max-w-full select-none object-contain"
+              draggable="false"
+            />
+          {:else}
+            <div
+              class="absolute inset-0 z-10 flex items-center justify-center px-8 text-center text-white"
+              in:fade={{ duration: 400 }}
+              out:fade={{ duration: 400 }}
+            >
+              <p class="text-lg">{UNSUPPORTED_FORMAT_MESSAGE}</p>
+            </div>
+          {/if}
         {/key}
       {/if}
 
