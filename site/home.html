@@ -67,25 +67,27 @@
 
 <section id="shortcuts">
   <h2 class="h2">Every action has a key.</h2>
-  <p class="lede">Taken from the handlers in the app. <kbd>O</kbd> opens a folder on the gallery screen. <kbd>E</kbd> exports from the favourites page. <kbd>L</kbd> marks the focused thumbnail, or the frame open in the viewer and slideshow. The sidebar is <kbd>Ctrl</kbd> or <kbd>⌘</kbd> <kbd>B</kbd>, and fullscreen is <kbd>F11</kbd>. These stay quiet while a text field is focused.</p>
+  <p class="lede">Taken from <code>src/lib/shortcuts.ts</code>, the same list as Settings and the <kbd>?</kbd> overlay. <kbd>P</kbd>, <kbd>L</kbd>, and <kbd>F</kbd> pick. <kbd>X</kbd> rejects. <kbd>U</kbd> clears the flag. Arrow keys move through the grid. These stay quiet while a text field is focused.</p>
   <div class="keymap">
     <div class="col">
-      <h3>Gallery</h3>
+      <h3>Grid</h3>
+      <div class="row"><span>Move</span><span class="keys"><kbd>←</kbd><kbd>→</kbd><kbd>↑</kbd><kbd>↓</kbd></span></div>
+      <div class="row"><span>Pick</span><span class="keys"><kbd class="keep">P</kbd><kbd class="keep">L</kbd><kbd class="keep">F</kbd></span></div>
+      <div class="row"><span>Reject</span><span class="keys"><kbd>X</kbd></span></div>
+      <div class="row"><span>Unflag</span><span class="keys"><kbd>U</kbd></span></div>
+      <div class="row"><span>Open the frame</span><span class="keys"><kbd>Enter</kbd><kbd>Space</kbd></span></div>
+      <div class="row"><span>Start slideshow</span><span class="keys"><kbd>S</kbd></span></div>
       <div class="row"><span>Open folder</span><span class="keys"><kbd>O</kbd></span></div>
-      <div class="row"><span>Toggle favourite</span><span class="keys"><kbd class="keep">L</kbd></span></div>
-      <div class="row"><span>Open the frame</span><span class="keys"><kbd>Enter</kbd></span></div>
-      <div class="row"><span>Export favourites</span><span class="keys"><kbd>E</kbd></span></div>
-      <div class="row"><span>Toggle sidebar</span><span class="keys"><kbd>Ctrl</kbd><kbd>B</kbd><span class="or">or</span><kbd>⌘</kbd><kbd>B</kbd></span></div>
-      <div class="row"><span>Fullscreen</span><span class="keys"><kbd>F11</kbd></span></div>
+      <div class="row"><span>Shortcut list</span><span class="keys"><kbd>?</kbd></span></div>
     </div>
     <div class="col">
       <h3>Viewer</h3>
-      <div class="row"><span>Previous</span><span class="keys"><kbd>←</kbd><kbd>[</kbd></span></div>
-      <div class="row"><span>Next</span><span class="keys"><kbd>→</kbd><kbd>]</kbd></span></div>
-      <div class="row"><span>Favourite</span><span class="keys"><kbd class="keep">L</kbd><kbd class="keep">F</kbd></span></div>
+      <div class="row"><span>Previous / next</span><span class="keys"><kbd>←</kbd><kbd>→</kbd><kbd>[</kbd><kbd>]</kbd></span></div>
+      <div class="row"><span>Pick</span><span class="keys"><kbd class="keep">P</kbd><kbd class="keep">L</kbd><kbd class="keep">F</kbd></span></div>
+      <div class="row"><span>Reject / unflag</span><span class="keys"><kbd>X</kbd><kbd>U</kbd></span></div>
       <div class="row"><span>Zoom in / out / reset</span><span class="keys"><kbd>+</kbd><kbd>-</kbd><kbd>0</kbd></span></div>
       <div class="row"><span>Photo details</span><span class="keys"><kbd>I</kbd></span></div>
-      <div class="row"><span>Start slideshow</span><span class="keys"><kbd>P</kbd></span></div>
+      <div class="row"><span>Start slideshow</span><span class="keys"><kbd>S</kbd></span></div>
       <div class="row"><span>Close</span><span class="keys"><kbd>Esc</kbd></span></div>
       <p class="note">Drag pans a zoomed frame. Double-click swaps 100% and 250%. The scroll wheel or a pinch zooms. Plus and equals zoom in; minus and zero follow, with or without Ctrl or ⌘.</p>
     </div>
@@ -94,11 +96,12 @@
       <div class="row"><span>Play / pause</span><span class="keys"><kbd>Space</kbd></span></div>
       <div class="row"><span>Next</span><span class="keys"><kbd>→</kbd><kbd>PgDn</kbd></span></div>
       <div class="row"><span>Previous</span><span class="keys"><kbd>←</kbd><kbd>PgUp</kbd></span></div>
-      <div class="row"><span>Favourite</span><span class="keys"><kbd class="keep">F</kbd><kbd class="keep">L</kbd></span></div>
+      <div class="row"><span>Pick</span><span class="keys"><kbd class="keep">P</kbd><kbd class="keep">L</kbd><kbd class="keep">F</kbd></span></div>
+      <div class="row"><span>Reject / unflag</span><span class="keys"><kbd>X</kbd><kbd>U</kbd></span></div>
       <div class="row"><span>Shuffle</span><span class="keys"><kbd>S</kbd></span></div>
       <div class="row"><span>Repeat</span><span class="keys"><kbd>R</kbd></span></div>
       <div class="row"><span>Image info</span><span class="keys"><kbd>I</kbd></span></div>
-      <div class="row"><span>Fullscreen</span><span class="keys"><kbd>F11</kbd><kbd>Enter</kbd></span></div>
+      <div class="row"><span>Fullscreen</span><span class="keys"><kbd>F11</kbd></span></div>
       <div class="row"><span>Exit</span><span class="keys"><kbd>Esc</kbd></span></div>
     </div>
   </div>

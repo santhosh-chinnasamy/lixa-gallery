@@ -1,10 +1,12 @@
 use gallery_core::events::EventHub;
 use gallery_core::fs::{collision_key, is_cross_device, uniquified_file_name, FileSystem};
 use gallery_core::models::{
-    ExportFailure, ExportOptions, ExportReport, Favourite, FavouriteFolderGroup, FileMetadata,
-    GalleryError, PhotoMetadata, Result, Workspace,
+    CullFlag, ExportFailure, ExportOptions, ExportReport, Favourite, FavouriteFolderGroup,
+    FileMetadata, GalleryError, PhotoCullState, PhotoMetadata, Result, Workspace,
 };
-use gallery_core::repos::{FavouriteRepository, PhotoRepository, WorkspaceRepository};
+use gallery_core::repos::{
+    CullFlagRepository, FavouriteRepository, PhotoRepository, WorkspaceRepository,
+};
 use std::{
     collections::{HashMap, HashSet},
     ffi::OsStr,
@@ -20,6 +22,7 @@ const MAX_NAME_ATTEMPTS: u32 = 10_000;
 
 pub struct FavouriteService {
     favourite_repo: Arc<dyn FavouriteRepository>,
+    flag_repo: Arc<dyn CullFlagRepository>,
     photo_repo: Arc<dyn PhotoRepository>,
     workspace_repo: Arc<dyn WorkspaceRepository>,
     fs: Arc<dyn FileSystem>,
@@ -28,16 +31,30 @@ pub struct FavouriteService {
 impl FavouriteService {
     pub fn new(
         favourite_repo: Arc<dyn FavouriteRepository>,
+        flag_repo: Arc<dyn CullFlagRepository>,
         photo_repo: Arc<dyn PhotoRepository>,
         workspace_repo: Arc<dyn WorkspaceRepository>,
         fs: Arc<dyn FileSystem>,
     ) -> Self {
         Self {
             favourite_repo,
+            flag_repo,
             photo_repo,
             workspace_repo,
             fs,
         }
+    }
+
+    pub async fn set_cull_flag(&self, path: String, flag: CullFlag) -> Result<()> {
+        self.flag_repo.set_flag(&path, flag).await
+    }
+
+    pub async fn get_cull_flag(&self, path: &str) -> Result<CullFlag> {
+        self.flag_repo.get_flag(path).await
+    }
+
+    pub async fn get_cull_flags(&self) -> Result<Vec<PhotoCullState>> {
+        self.flag_repo.list_flags().await
     }
 
     pub async fn export_favourites(

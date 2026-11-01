@@ -10,9 +10,10 @@ use std::sync::{Arc, Mutex};
 
 fn service_for(fs: Arc<ExportFs>) -> (FavouriteService, Arc<FakeFavouriteRepository>) {
     let favourites = Arc::new(FakeFavouriteRepository {
-        favourites: Mutex::new(vec![]),
+        flags: Mutex::new(vec![]),
     });
     let service = FavouriteService::new(
+        favourites.clone(),
         favourites.clone(),
         Arc::new(FakePhotoRepository {
             photos: Mutex::new(vec![]),
@@ -129,7 +130,7 @@ async fn cross_device_rename_copies_then_deletes_the_source() {
     assert_eq!(fs.copy_count(), 1);
     assert!(fs.read("/shoot/IMG_0001.JPG").is_none());
     assert_eq!(fs.read("/out/IMG_0001.JPG").unwrap(), b"photo-bytes");
-    assert!(favourites.favourites.lock().unwrap().is_empty());
+    assert!(favourites.flags.lock().unwrap().is_empty());
     let removed = fs.removed_paths();
     assert!(
         removed.iter().any(|path| path.ends_with("IMG_0001.JPG")),
@@ -212,9 +213,9 @@ async fn short_copy_keeps_the_source_and_the_next_file_still_moves() {
     assert!(fs.read("/out/a.jpg").is_none());
     assert!(fs.read("/shoot/b.jpg").is_none());
     assert_eq!(fs.read("/out/b.jpg").unwrap(), b"second-ok");
-    assert_eq!(favourites.favourites.lock().unwrap().len(), 1);
+    assert_eq!(favourites.flags.lock().unwrap().len(), 1);
     assert_eq!(
-        favourites.favourites.lock().unwrap()[0].path,
+        favourites.flags.lock().unwrap()[0].path,
         "/shoot/a.jpg"
     );
 
@@ -330,7 +331,7 @@ async fn source_is_kept_when_it_cannot_be_deleted_after_the_copy() {
         fs.read("/out/a.jpg").is_none(),
         "the finished copy is removed so the file is not in both places"
     );
-    assert_eq!(favourites.favourites.lock().unwrap().len(), 1);
+    assert_eq!(favourites.flags.lock().unwrap().len(), 1);
 }
 
 #[tokio::test]
@@ -386,9 +387,9 @@ async fn one_permission_failure_does_not_stop_the_rest() {
     assert!(fs.read("/out/b.jpg").is_none());
     assert!(fs.read("/shoot/c.jpg").is_none());
     assert_eq!(fs.read("/out/c.jpg").unwrap(), b"ccc");
-    assert_eq!(favourites.favourites.lock().unwrap().len(), 1);
+    assert_eq!(favourites.flags.lock().unwrap().len(), 1);
     assert_eq!(
-        favourites.favourites.lock().unwrap()[0].path,
+        favourites.flags.lock().unwrap()[0].path,
         "/shoot/b.jpg"
     );
 }

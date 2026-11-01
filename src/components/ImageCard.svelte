@@ -1,24 +1,32 @@
 <script lang="ts">
   import * as Card from '$lib/components/ui/card';
   import { gridImageUrl, UNSUPPORTED_FORMAT_MESSAGE } from '$lib/imageSource';
-  import { favorites, gridFit } from '../stores/galleryStore';
+  import { cullFlags, gridFit } from '../stores/galleryStore';
   import Filename from './Filename.svelte';
   import Heart from '@lucide/svelte/icons/heart';
+  import X from '@lucide/svelte/icons/x';
   import type { PhotoMetadata } from '../types/photo';
+  import type { CullFlag } from '../lib/cull';
 
   let {
     photo,
     tabindex = 0,
+    isActive = false,
+    galleryIndex = 0,
     handleImageClick,
     isVisible = true,
   }: {
     photo: PhotoMetadata;
     tabindex?: number;
+    isActive?: boolean;
+    galleryIndex?: number;
     handleImageClick: (photo: PhotoMetadata) => void;
     isVisible?: boolean;
   } = $props();
 
-  let isFavourite = $derived($favorites.has(photo.path));
+  let flag = $derived<CullFlag>($cullFlags.get(photo.path) ?? 'unflagged');
+  let isPicked = $derived(flag === 'picked');
+  let isRejected = $derived(flag === 'rejected');
   let fileName = $derived(photo.metadata.name);
   let showWholeFrame = $derived($gridFit === 'fit');
 
@@ -31,23 +39,10 @@
 
   const handleClick = () => handleImageClick(photo);
 
-  const toggleFavorite = (event?: Event) => {
+  const onBadgeClick = (event?: Event) => {
     if (event) event.stopPropagation();
-    favorites.toggle(photo.path);
+    cullFlags.apply(photo.path, flag === 'rejected' ? 'unflag' : 'pick');
   };
-
-  const keyboardActions = {
-    Enter: handleClick,
-    l: toggleFavorite,
-  } as const;
-
-  function handleKeyPress(event: KeyboardEvent) {
-    const action = keyboardActions[event.key as keyof typeof keyboardActions];
-    if (action) {
-      event.preventDefault();
-      (action as Function)(event);
-    }
-  }
 
   function handleImageLoad() {
     imageLoaded = true;
@@ -61,15 +56,20 @@
 </script>
 
 <Card.Root
-  class="group relative cursor-pointer transition-colors duration-150 hover:border-foreground/30 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-offset-2 focus-visible:ring-offset-background"
+  class={`group relative cursor-pointer transition-colors duration-150 hover:border-foreground/30 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-offset-2 focus-visible:ring-offset-background ${
+    isActive ? 'ring-2 ring-primary ring-offset-2 ring-offset-background' : ''
+  }`}
   {tabindex}
+  data-gallery-index={galleryIndex}
+  role="gridcell"
+  aria-selected={isActive}
+  aria-label={fileName}
   onclick={handleClick}
-  onkeypress={handleKeyPress}
 >
   <Card.Content class="relative overflow-hidden rounded-lg p-0">
     <!-- Image container with consistent aspect ratio -->
     <div
-      class={`aspect-[1/1] h-auto w-full overflow-hidden ${
+      class={`relative aspect-[1/1] h-auto w-full overflow-hidden ${
         showWholeFrame ? 'bg-neutral-300 dark:bg-neutral-800' : 'bg-muted'
       }`}
     >
@@ -88,7 +88,7 @@
           <div
             class="flex h-full w-full animate-pulse items-center justify-center bg-muted"
           >
-            <div class="text-sm">Loading...</div>
+            <div class="text-sm text-muted-foreground">Loading...</div>
           </div>
         {/if}
 
@@ -117,23 +117,39 @@
           onload={handleImageLoad}
           onerror={handleImageError}
         />
+        {#if isRejected}
+          <div
+            class="pointer-events-none absolute inset-0 bg-background/55"
+          ></div>
+        {/if}
       {/if}
     </div>
 
     <button
       class={`absolute right-2 top-2 rounded-full p-2 shadow-md backdrop-blur-sm transition-opacity duration-200 ${
-        isFavourite
+        isPicked
           ? 'bg-background/90 text-red-600'
-          : 'bg-background/80 text-muted-foreground opacity-0 hover:text-red-600 group-hover:opacity-100'
+          : isRejected
+            ? 'bg-background/90 text-foreground'
+            : 'bg-background/80 text-muted-foreground opacity-0 hover:text-red-600 group-hover:opacity-100'
       }`}
-      onclick={toggleFavorite}
-      aria-label={isFavourite ? 'Remove from favorites' : 'Add to favorites'}
+      onclick={onBadgeClick}
+      aria-label={isPicked
+        ? 'Unflag pick'
+        : isRejected
+          ? 'Unflag reject'
+          : 'Pick'}
+      aria-pressed={isPicked}
     >
-      <Heart size={16} class={isFavourite ? 'fill-current' : ''} />
+      {#if isRejected && !isPicked}
+        <X size={16} />
+      {:else}
+        <Heart size={16} class={isPicked ? 'fill-current' : ''} />
+      {/if}
     </button>
 
     <div
-      class="absolute bottom-0 left-0 right-0 bg-gradient-to-t from-black/60 to-transparent p-3 opacity-0 transition-opacity duration-200 group-hover:opacity-100"
+      class="absolute bottom-0 left-0 right-0 bg-gradient-to-t from-black/60 to-transparent p-3 opacity-0 transition-opacity duration-200 group-hover:opacity-100 group-focus:opacity-100"
     >
       <Filename name={fileName} />
     </div>

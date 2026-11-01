@@ -35,6 +35,7 @@
     refreshFavourites,
   } from '../../stores/galleryStore';
   import type { ExportReport, PhotoMetadata } from '../../types/photo';
+  import { setShortcutLayer } from '$lib/shortcuts';
 
   let exportStatus = $state('');
   let isExporting = $state(false);
@@ -89,6 +90,11 @@
   // Auto-refresh when entering page
   $effect(() => {
     refreshFavourites();
+  });
+
+  $effect(() => {
+    setShortcutLayer('favourites', true);
+    return () => setShortcutLayer('favourites', false);
   });
 
   // Automatically adjust scope if no folder is open
