@@ -32,3 +32,18 @@ export interface ExportOptions {
   paths?: string[];
   preserve_folder_structure?: boolean;
 }
+
+export interface ExportFailure {
+  path: string;
+  reason: string;
+}
+
+export interface ExportReport {
+  copied: number;
+  renamed: number;
+  skipped: number;
+  failed: number;
+  failures: ExportFailure[];
+  cancelled: boolean;
+  total: number;
+}

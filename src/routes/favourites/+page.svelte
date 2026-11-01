@@ -8,12 +8,18 @@
   import ChevronRightIcon from '@lucide/svelte/icons/chevron-right';
   import DownloadIcon from '@lucide/svelte/icons/download';
   import Play from '@lucide/svelte/icons/play';
-  import { listen } from '@tauri-apps/api/event';
+  import { invoke } from '@tauri-apps/api/core';
+  import { listen, type UnlistenFn } from '@tauri-apps/api/event';
+  import { onDestroy } from 'svelte';
   import Gallery from '../../components/Gallery.svelte';
   import ImageCard from '../../components/ImageCard.svelte';
   import ImageModal from '../../components/ImageModal.svelte';
   import SlideshowModal from '../../components/SlideshowModal.svelte';
-  import { exportFavorites } from '../../components/common/ImageOperations';
+  import {
+    describeExportError,
+    exportFavorites,
+    formatExportSuccess,
+  } from '../../components/common/ImageOperations';
   import KeyboardShortcuts from '../../components/common/KeyboardShortcuts.svelte';
   import ConfirmationModal from '../../components/modals/ConfirmationModal.svelte';
   import ExportModal from '../../components/modals/ExportModal.svelte';
@@ -30,10 +36,39 @@
   import type { FavouriteFolderGroup, PhotoMetadata } from '../../types/photo';
 
   let exportStatus = $state('');
+  let isExporting = $state(false);
+  let unlistenExport: UnlistenFn | null = null;
+  let stopRequested = false;
+
+  function stopExportListener() {
+    const stop = unlistenExport;
+    unlistenExport = null;
+    stop?.();
+  }
+
+  onDestroy(() => {
+    const exporting = isExporting;
+    stopRequested = true;
+    stopExportListener();
+    if (exporting) {
+      invoke('cancel_export').catch((error) => {
+        console.error('Failed to cancel export:', error);
+      });
+    }
+  });
+
+  async function requestStopExport() {
+    stopRequested = true;
+    exportStatus = 'Stopping after the current file...';
+    try {
+      await invoke('cancel_export');
+    } catch (error) {
+      console.error('Failed to cancel export:', error);
+    }
+  }
   let showClearAllConfirmation = $state(false);
   let showClearFolderConfirmation = $state(false);
   let showExportModal = $state(false);
-  let isExporting = $state(false);
   let isSlideshowOpen = $state(false);
 
   // Modal viewer state for All Folders view
@@ -115,46 +150,49 @@
     paths?: string[],
     preserveFolderStructure = true,
   ) {
+    stopRequested = false;
     try {
       isExporting = true;
       exportStatus = 'Preparing export...';
+      // Cleared before the folder dialog so Cancel during that dialog is not
+      // wiped when the export command starts, and a previous run cannot stick.
+      await invoke('begin_export');
       const totalExporting = paths ? paths.length : $favorites.size;
-      const unsubscribe = await listen('export-progress', (event) => {
+      unlistenExport = await listen('export-progress', (event) => {
+        if (stopRequested) return;
         exportStatus = `Exporting ${event.payload} / ${totalExporting} files...`;
       });
 
-      setTimeout(() => unsubscribe(), 15000);
-
-      const destination = await exportFavorites(
+      const exported = await exportFavorites(
         mode,
         paths,
         preserveFolderStructure,
+        () => stopRequested,
       );
 
-      if (destination) {
+      if (exported) {
         showExportModal = false;
         await refreshFavourites();
-        setTimeout(
-          () =>
-            alert(
-              `Favourites successfully ${mode === 'copy' ? 'copied' : 'moved'} to ${destination}`,
-            ),
-          100,
+        const message = formatExportSuccess(
+          mode,
+          exported.destination,
+          exported.report,
         );
+        setTimeout(() => alert(message), 100);
       } else {
         showExportModal = false;
       }
     } catch (error) {
       console.error('Export failed:', error);
       showExportModal = false;
-      setTimeout(
-        () => alert('Export failed. Please check the destination permissions.'),
-        100,
-      );
+      const detail = describeExportError(error);
+      setTimeout(() => alert(`Export failed. ${detail}`), 100);
     } finally {
+      stopExportListener();
       isExporting = false;
       exportStatus = '';
       exportTargetFolder = null;
+      stopRequested = false;
     }
   }
 </script>
@@ -444,6 +482,7 @@
   currentFolderPath={exportTargetFolder ||
     ($favouriteScope === 'current' ? $currentFolder : null)}
   onExport={handleExport}
+  onStop={requestStopExport}
   onCancel={() => {
     showExportModal = false;
     exportTargetFolder = null;

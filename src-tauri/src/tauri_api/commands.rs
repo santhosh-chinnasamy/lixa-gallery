@@ -1,9 +1,11 @@
 use crate::tauri_api::events::TauriEventHub;
 use crate::tauri_api::state::AppState;
 use gallery_core::models::{
-    ExportOptions, Favourite, FavouriteFolderGroup, FolderNode, LoadingMode, PhotoMetadata,
-    Workspace,
+    ExportOptions, ExportReport, Favourite, FavouriteFolderGroup, FolderNode, LoadingMode,
+    PhotoMetadata, Workspace,
 };
+use std::sync::atomic::Ordering;
+use std::sync::Arc;
 use tauri::{AppHandle, State};
 
 #[tauri::command]
@@ -27,7 +29,7 @@ pub async fn export_favourites(
     mode: String,
     paths: Option<Vec<String>>,
     preserve_folder_structure: Option<bool>,
-) -> Result<(), String> {
+) -> Result<ExportReport, String> {
     let events = TauriEventHub::new(app);
     let options = ExportOptions {
         destination,
@@ -35,11 +37,26 @@ pub async fn export_favourites(
         paths,
         preserve_folder_structure: preserve_folder_structure.unwrap_or(false),
     };
+    let cancel = Arc::clone(&state.export_cancel);
     state
         .favourite
-        .export_favourites(&events, options)
+        .export_favourites(&events, options, &cancel)
         .await
         .map_err(|e| e.to_string())
+}
+
+/// Clear cancellation so a new export is not stopped by the previous one.
+/// Called before the destination dialog, so Cancel during that dialog sticks.
+#[tauri::command]
+pub fn begin_export(state: State<'_, AppState>) {
+    state.export_cancel.store(false, Ordering::SeqCst);
+}
+
+/// Ask the running export to stop between files. The file already in flight
+/// finishes or is cleaned up first.
+#[tauri::command]
+pub fn cancel_export(state: State<'_, AppState>) {
+    state.export_cancel.store(true, Ordering::SeqCst);
 }
 
 #[tauri::command]

@@ -1,7 +1,8 @@
 use super::fakes::*;
 use crate::favourite_service::FavouriteService;
-use gallery_core::models::{ExportOptions, FileMetadata, PhotoMetadata, Workspace};
+use gallery_core::models::{ExportOptions, ExportReport, FileMetadata, PhotoMetadata, Workspace};
 use std::path::PathBuf;
+use std::sync::atomic::AtomicBool;
 use std::sync::Arc;
 use std::sync::Mutex;
 
@@ -124,7 +125,7 @@ async fn test_export_favourites_selective() {
         files: Mutex::new(vec![]),
     });
 
-    let service = FavouriteService::new(repo.clone(), photo_repo, workspace_repo, fs);
+    let service = FavouriteService::new(repo.clone(), photo_repo, workspace_repo, fs.clone());
 
     service.add_favourite("/a/1.jpg".to_string()).await.unwrap();
     service.add_favourite("/b/2.jpg".to_string()).await.unwrap();
@@ -139,5 +140,25 @@ async fn test_export_favourites_selective() {
         preserve_folder_structure: true,
     };
 
-    service.export_favourites(&events, opts).await.unwrap();
+    let report = service
+        .export_favourites(&events, opts, &AtomicBool::new(false))
+        .await
+        .unwrap();
+    assert_eq!(
+        report,
+        ExportReport {
+            copied: 1,
+            renamed: 0,
+            skipped: 0,
+            total: 1,
+            ..ExportReport::default()
+        }
+    );
+    let files = fs.files.lock().unwrap();
+    assert!(files
+        .iter()
+        .any(|(path, _)| path == &PathBuf::from("/export/a/1.jpg")));
+    assert!(files
+        .iter()
+        .all(|(path, _)| path != &PathBuf::from("/export/b/2.jpg")));
 }

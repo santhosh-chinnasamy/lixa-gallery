@@ -1,15 +1,22 @@
 use gallery_core::events::EventHub;
-use gallery_core::fs::FileSystem;
+use gallery_core::fs::{collision_key, is_cross_device, uniquified_file_name, FileSystem};
 use gallery_core::models::{
-    ExportOptions, Favourite, FavouriteFolderGroup, FileMetadata, GalleryError, PhotoMetadata,
-    Result, Workspace,
+    ExportFailure, ExportOptions, ExportReport, Favourite, FavouriteFolderGroup, FileMetadata,
+    GalleryError, PhotoMetadata, Result, Workspace,
 };
 use gallery_core::repos::{FavouriteRepository, PhotoRepository, WorkspaceRepository};
 use std::{
-    collections::HashMap,
+    collections::{HashMap, HashSet},
+    ffi::OsStr,
+    io::ErrorKind,
     path::{Path, PathBuf},
-    sync::Arc,
+    sync::{
+        atomic::{AtomicBool, Ordering},
+        Arc,
+    },
 };
+
+const MAX_NAME_ATTEMPTS: u32 = 10_000;
 
 pub struct FavouriteService {
     favourite_repo: Arc<dyn FavouriteRepository>,
@@ -37,8 +44,9 @@ impl FavouriteService {
         &self,
         events: &dyn EventHub,
         options: ExportOptions,
-    ) -> Result<()> {
-        let file_paths: Vec<String> = if let Some(paths) = options.paths {
+        cancel: &AtomicBool,
+    ) -> Result<ExportReport> {
+        let file_paths: Vec<String> = if let Some(paths) = options.paths.clone() {
             paths
         } else {
             self.favourite_repo
@@ -49,58 +57,252 @@ impl FavouriteService {
                 .collect()
         };
 
-        let mut counter = 0;
-        let mode = options.mode.as_str();
+        let mut report = ExportReport {
+            total: file_paths.len() as u32,
+            ..ExportReport::default()
+        };
+        let mut counter = 0u32;
+        let move_files = options.mode == "move";
+        let mut taken_by_dir: HashMap<PathBuf, HashSet<String>> = HashMap::new();
 
         for file_path in file_paths {
-            let file = PathBuf::from(&file_path);
-            let name = file
-                .file_name()
-                .ok_or_else(|| GalleryError::InvalidPath(file_path.clone()))?;
-
-            let destination_dir = if options.preserve_folder_structure {
-                let folder_name = file
-                    .parent()
-                    .and_then(|p| p.file_name())
-                    .and_then(|s| s.to_str())
-                    .unwrap_or("photos");
-                let sub_dir = PathBuf::from(&options.destination).join(folder_name);
-                self.fs.create_dir_all(&sub_dir).await?;
-                sub_dir
-            } else {
-                let dest = PathBuf::from(&options.destination);
-                self.fs.create_dir_all(&dest).await?;
-                dest
-            };
-
-            let destination_path = destination_dir.join(name);
-
-            let canonical_src = self.fs.canonicalize(&file).await?;
-            let canonical_dst = self
-                .fs
-                .canonicalize(&destination_path)
-                .await
-                .unwrap_or_else(|_| destination_path.clone());
-
-            if canonical_src == canonical_dst {
-                continue;
+            if cancel.load(Ordering::SeqCst) {
+                report.cancelled = true;
+                break;
             }
 
-            if mode == "move" {
-                self.fs.rename(&file, &destination_path).await?;
-                // Remove from DB since the file was physically moved
-                self.remove_favourite(file_path).await?;
-            } else {
-                self.fs.copy(&file, &destination_path).await?;
+            match self
+                .export_one(&file_path, &options, move_files, &mut taken_by_dir)
+                .await
+            {
+                Ok(Placed::Skipped) => report.skipped += 1,
+                Ok(placed) => {
+                    if placed == Placed::Renamed {
+                        report.renamed += 1;
+                    } else {
+                        report.copied += 1;
+                    }
+                    if move_files {
+                        // The source path is gone. Drop the favourite that pointed at it.
+                        if let Err(err) = self.remove_favourite(file_path.clone()).await {
+                            push_failure(
+                                &mut report,
+                                &file_path,
+                                format!(
+                                    "the file was moved, but it could not be cleared from favourites: {err}"
+                                ),
+                            );
+                        }
+                    }
+                }
+                Err(err) => push_failure(&mut report, &file_path, failure_reason(&err)),
             }
 
             counter += 1;
-            events
-                .emit_progress("export-progress", counter)
-                .map_err(|e| GalleryError::Unknown(e.to_string()))?;
+            if let Err(err) = events.emit_progress("export-progress", counter) {
+                log::warn!("export progress stopped updating: {err}");
+            }
+        }
+
+        Ok(report)
+    }
+
+    async fn export_one(
+        &self,
+        file_path: &str,
+        options: &ExportOptions,
+        move_files: bool,
+        taken_by_dir: &mut HashMap<PathBuf, HashSet<String>>,
+    ) -> Result<Placed> {
+        let file = PathBuf::from(file_path);
+        let name = file
+            .file_name()
+            .ok_or_else(|| GalleryError::InvalidPath(file_path.to_string()))?;
+
+        let destination_dir = if options.preserve_folder_structure {
+            let folder_name = file
+                .parent()
+                .and_then(|p| p.file_name())
+                .and_then(|s| s.to_str())
+                .unwrap_or("photos");
+            let sub_dir = PathBuf::from(&options.destination).join(folder_name);
+            self.fs.create_dir_all(&sub_dir).await?;
+            sub_dir
+        } else {
+            let dest = PathBuf::from(&options.destination);
+            self.fs.create_dir_all(&dest).await?;
+            dest
+        };
+
+        self.seed_taken_names(&destination_dir, taken_by_dir)
+            .await?;
+
+        let natural = destination_dir.join(name);
+        if self.is_same_file(&file, &natural).await? {
+            return Ok(Placed::Skipped);
+        }
+
+        let taken = taken_by_dir.get_mut(&destination_dir).ok_or_else(|| {
+            GalleryError::Unknown(
+                "export destination was not prepared for name reservation".to_string(),
+            )
+        })?;
+        let renamed = self
+            .place_without_overwrite(&file, &destination_dir, name, move_files, taken)
+            .await?;
+        Ok(if renamed {
+            Placed::Renamed
+        } else {
+            Placed::Copied
+        })
+    }
+
+    async fn seed_taken_names(
+        &self,
+        dir: &Path,
+        taken_by_dir: &mut HashMap<PathBuf, HashSet<String>>,
+    ) -> Result<()> {
+        if taken_by_dir.contains_key(dir) {
+            return Ok(());
+        }
+        let names = self.fs.list_dir_names(dir).await?;
+        let taken = names.iter().map(|name| collision_key(name)).collect();
+        taken_by_dir.insert(dir.to_path_buf(), taken);
+        Ok(())
+    }
+
+    async fn is_same_file(&self, src: &Path, dest: &Path) -> Result<bool> {
+        let canonical_src = self.fs.canonicalize(src).await?;
+        match self.fs.canonicalize(dest).await {
+            Ok(canonical_dest) => Ok(canonical_src == canonical_dest),
+            Err(GalleryError::Io(err)) if err.kind() == ErrorKind::NotFound => Ok(false),
+            Err(err) => Err(err),
+        }
+    }
+
+    /// Write `src` into `dir` under `original_name`, or `name (n).ext` when that
+    /// name is already reserved. Returns whether a suffix was required.
+    async fn place_without_overwrite(
+        &self,
+        src: &Path,
+        dir: &Path,
+        original_name: &OsStr,
+        move_files: bool,
+        taken: &mut HashSet<String>,
+    ) -> Result<bool> {
+        for index in 0..MAX_NAME_ATTEMPTS {
+            let candidate = uniquified_file_name(original_name, index);
+            let key = collision_key(&candidate);
+            if taken.contains(&key) {
+                continue;
+            }
+
+            let dest = dir.join(&candidate);
+            let placed = if move_files {
+                self.move_exclusive(src, &dest).await
+            } else {
+                self.fs.copy_exclusive(src, &dest).await.map(|_| ())
+            };
+            match placed {
+                Ok(()) => {
+                    taken.insert(key);
+                    return Ok(index > 0);
+                }
+                Err(err) if name_is_taken(&err) => {
+                    taken.insert(key);
+                }
+                Err(err) => return Err(err),
+            }
+        }
+
+        Err(GalleryError::Unknown(format!(
+            "could not place '{}' in {} without overwriting an existing file",
+            original_name.to_string_lossy(),
+            dir.display()
+        )))
+    }
+
+    /// Rename on the same drive. Across drives, copy with the exclusive
+    /// create, fsync, check the size, and only then delete the source.
+    async fn move_exclusive(&self, src: &Path, dest: &Path) -> Result<()> {
+        match self.fs.rename_exclusive(src, dest).await {
+            Ok(()) => Ok(()),
+            Err(GalleryError::Io(err)) if is_cross_device(&err) => {
+                // Unix rename claims the name with an empty placeholder first.
+                // That placeholder is removed before the cross-device error is
+                // returned; drop a leftover so the exclusive copy can use the
+                // name. A non-empty file is left alone.
+                self.remove_empty_placeholder(dest).await?;
+                self.copy_verify_then_delete_source(src, dest).await
+            }
+            Err(err) => Err(err),
+        }
+    }
+
+    async fn remove_empty_placeholder(&self, dest: &Path) -> Result<()> {
+        match self.fs.file_len(dest).await {
+            Ok(0) => self.fs.remove_file(dest).await,
+            Ok(_) => Ok(()),
+            Err(GalleryError::Io(err)) if err.kind() == ErrorKind::NotFound => Ok(()),
+            Err(err) => Err(err),
+        }
+    }
+
+    /// Copy `src` to `dest`, fsync, and require the destination size to match.
+    /// The source is deleted only after that check. Any failure deletes the
+    /// destination (when one was created) and leaves the source in place.
+    async fn copy_verify_then_delete_source(&self, src: &Path, dest: &Path) -> Result<()> {
+        let copied = match self.fs.copy_exclusive(src, dest).await {
+            Ok(bytes) => bytes,
+            // The name is already a real file. Leave it untouched; the caller
+            // tries the next suffix.
+            Err(err) if name_is_taken(&err) => return Err(err),
+            Err(err) => return Err(self.cleanup_partial(dest, err).await),
+        };
+
+        if let Err(err) = self.fs.sync_file(dest).await {
+            return Err(self.cleanup_partial(dest, err).await);
+        }
+
+        let src_len = match self.fs.file_len(src).await {
+            Ok(len) => len,
+            Err(err) => return Err(self.cleanup_partial(dest, err).await),
+        };
+        let dest_len = match self.fs.file_len(dest).await {
+            Ok(len) => len,
+            Err(err) => return Err(self.cleanup_partial(dest, err).await),
+        };
+        if src_len != dest_len || dest_len != copied {
+            let mismatch = GalleryError::Unknown(format!(
+                "destination size ({dest_len} bytes) did not match the source ({src_len} bytes) after copying, so the original was kept"
+            ));
+            return Err(self.cleanup_partial(dest, mismatch).await);
+        }
+
+        if let Err(err) = self.fs.remove_file(src).await {
+            // The copy is complete, but the original is still there. Remove the
+            // copy so the file is not left in both places.
+            if let Err(rollback) = self.fs.remove_file(dest).await {
+                return Err(GalleryError::Unknown(format!(
+                    "could not remove the original ({err}) and could not remove the export copy ({rollback})"
+                )));
+            }
+            return Err(GalleryError::Unknown(format!(
+                "could not remove the original after copying ({err}), so the export copy was removed and the original was kept"
+            )));
         }
 
         Ok(())
+    }
+
+    async fn cleanup_partial(&self, dest: &Path, err: GalleryError) -> GalleryError {
+        match self.fs.remove_file(dest).await {
+            Ok(()) => err,
+            Err(cleanup) => GalleryError::Unknown(format!(
+                "{}; also failed to remove the partial copy ({cleanup})",
+                failure_reason(&err)
+            )),
+        }
     }
 
     pub async fn get_favourite_photos(
@@ -258,5 +460,38 @@ impl FavouriteService {
 
     pub async fn get_workspaces(&self) -> Result<Vec<Workspace>> {
         self.workspace_repo.get_workspaces().await
+    }
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+enum Placed {
+    Copied,
+    Renamed,
+    Skipped,
+}
+
+fn push_failure(report: &mut ExportReport, path: &str, reason: String) {
+    log::warn!("export failed for {path}: {reason}");
+    report.failed += 1;
+    report.failures.push(ExportFailure {
+        path: path.to_string(),
+        reason,
+    });
+}
+
+fn failure_reason(err: &GalleryError) -> String {
+    match err {
+        GalleryError::Io(err) => err.to_string(),
+        err => err.to_string(),
+    }
+}
+
+fn name_is_taken(err: &GalleryError) -> bool {
+    match err {
+        GalleryError::Io(err) => matches!(
+            err.kind(),
+            ErrorKind::AlreadyExists | ErrorKind::IsADirectory
+        ),
+        _ => false,
     }
 }
