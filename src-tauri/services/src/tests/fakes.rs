@@ -10,6 +10,7 @@ use std::sync::Mutex;
 
 pub struct FakeFileSystem {
     pub files: Mutex<Vec<(PathBuf, FileMetadata)>>,
+    pub copied: Mutex<Vec<(PathBuf, PathBuf)>>,
 }
 
 #[async_trait]
@@ -48,7 +49,11 @@ impl FileSystem for FakeFileSystem {
             .collect())
     }
 
-    async fn copy(&self, _from: &Path, _to: &Path) -> Result<u64> {
+    async fn copy(&self, from: &Path, to: &Path) -> Result<u64> {
+        self.copied
+            .lock()
+            .unwrap()
+            .push((from.to_path_buf(), to.to_path_buf()));
         Ok(0)
     }
 
@@ -78,7 +83,15 @@ impl ImageProcessor for FakeImageProcessor {
             },
             thumbnail_path: "thumb".to_string(),
             path: path.to_string_lossy().to_string(),
+            sidecar_path: None,
+            preview_path: None,
+            exif: None,
+            is_raw: gallery_core::formats::is_raw_path(path),
         })
+    }
+
+    async fn read_exif(&self, _file_path: &Path) -> Result<Option<gallery_core::models::ExifInfo>> {
+        Ok(None)
     }
 }
 
@@ -97,6 +110,9 @@ impl PhotoRepository for FakePhotoRepository {
                 thumbnail_path: p.thumbnail_path.clone(),
                 mtime: p.metadata.modified as i64,
                 size: p.metadata.size as i64,
+                exif: p.exif.clone(),
+                preview_path: p.preview_path.clone(),
+                sidecar_path: p.sidecar_path.clone(),
             })
             .collect())
     }

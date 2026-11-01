@@ -35,7 +35,7 @@
 
   const sortOptions: { value: SortOption; label: string }[] = [
     { value: 'name', label: 'Name' },
-    { value: 'date', label: 'Date Created' },
+    { value: 'date', label: 'Date Taken' },
     { value: 'size', label: 'File Size' },
   ];
 

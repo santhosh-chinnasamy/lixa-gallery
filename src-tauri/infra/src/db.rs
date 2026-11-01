@@ -1,5 +1,6 @@
 use async_trait::async_trait;
-use gallery_core::models::{Favourite, FileMetadata, PhotoMetadata, Result, Workspace};
+use gallery_core::formats::is_raw_path;
+use gallery_core::models::{ExifInfo, Favourite, FileMetadata, PhotoMetadata, Result, Workspace};
 use gallery_core::repos::{
     CachedPhotoRecord, FavouriteRepository, PhotoRepository, WorkspaceRepository,
 };
@@ -7,7 +8,10 @@ use sqlx::{
     sqlite::{SqliteConnectOptions, SqliteJournalMode, SqliteSynchronous},
     QueryBuilder, Row, Sqlite, SqlitePool,
 };
-use std::{path::PathBuf, str::FromStr};
+use std::{
+    path::{Path, PathBuf},
+    str::FromStr,
+};
 
 pub async fn setup_db(app_data_dir: PathBuf, pkg_name: &str) -> SqlitePool {
     let mut db_path = app_data_dir.clone();
@@ -68,7 +72,7 @@ impl SqlitePhotoRepository {
 impl PhotoRepository for SqlitePhotoRepository {
     async fn get_cached_photos_for_path(&self, prefix: &str) -> Result<Vec<CachedPhotoRecord>> {
         let rows = sqlx::query(
-            "SELECT path, thumbnail_path, mtime, size
+            "SELECT path, thumbnail_path, mtime, size, exif_json, preview_path, sidecar_path
              FROM photos
              WHERE path LIKE ?1 || '%'",
         )
@@ -79,11 +83,17 @@ impl PhotoRepository for SqlitePhotoRepository {
 
         let result = rows
             .into_iter()
-            .map(|row| CachedPhotoRecord {
-                path: row.get("path"),
-                thumbnail_path: row.get("thumbnail_path"),
-                mtime: row.get("mtime"),
-                size: row.get("size"),
+            .map(|row| {
+                let exif_json: Option<String> = row.get("exif_json");
+                CachedPhotoRecord {
+                    path: row.get("path"),
+                    thumbnail_path: row.get("thumbnail_path"),
+                    mtime: row.get("mtime"),
+                    size: row.get("size"),
+                    exif: exif_json.and_then(|json| serde_json::from_str::<ExifInfo>(&json).ok()),
+                    preview_path: row.get("preview_path"),
+                    sidecar_path: row.get("sidecar_path"),
+                }
             })
             .collect();
 
@@ -99,7 +109,7 @@ impl PhotoRepository for SqlitePhotoRepository {
         const CHUNK: usize = 500;
         for chunk in paths.chunks(CHUNK) {
             let mut qb: QueryBuilder<Sqlite> = QueryBuilder::new(
-                "SELECT path, name, thumbnail_path, mtime, ctime, size FROM photos WHERE path IN (",
+                "SELECT path, name, thumbnail_path, mtime, ctime, size, exif_json, preview_path, sidecar_path FROM photos WHERE path IN (",
             );
             let mut separated = qb.separated(", ");
             for p in chunk {
@@ -114,6 +124,8 @@ impl PhotoRepository for SqlitePhotoRepository {
                 .map_err(|e| gallery_core::models::GalleryError::Db(e.to_string()))?;
 
             for row in rows {
+                let path: String = row.get("path");
+                let exif_json: Option<String> = row.get("exif_json");
                 results.push(PhotoMetadata {
                     metadata: FileMetadata {
                         name: row.get("name"),
@@ -122,7 +134,11 @@ impl PhotoRepository for SqlitePhotoRepository {
                         size: row.get::<i64, _>("size") as u64,
                     },
                     thumbnail_path: row.get("thumbnail_path"),
-                    path: row.get("path"),
+                    path: path.clone(),
+                    sidecar_path: row.get("sidecar_path"),
+                    preview_path: row.get("preview_path"),
+                    exif: exif_json.and_then(|json| serde_json::from_str::<ExifInfo>(&json).ok()),
+                    is_raw: is_raw_path(Path::new(&path)),
                 });
             }
         }
@@ -144,15 +160,22 @@ impl PhotoRepository for SqlitePhotoRepository {
         const CHUNK: usize = 1_000;
         for chunk in photos.chunks(CHUNK) {
             let mut qb: QueryBuilder<Sqlite> = QueryBuilder::new(
-                "INSERT INTO photos (path, name, thumbnail_path, mtime, ctime, size) ",
+                "INSERT INTO photos (path, name, thumbnail_path, mtime, ctime, size, exif_json, preview_path, sidecar_path) ",
             );
             qb.push_values(chunk, |mut b, p| {
+                let exif_json = p
+                    .exif
+                    .as_ref()
+                    .and_then(|exif| serde_json::to_string(exif).ok());
                 b.push_bind(&p.path)
                     .push_bind(&p.metadata.name)
                     .push_bind(&p.thumbnail_path)
                     .push_bind(p.metadata.modified as i64)
                     .push_bind(p.metadata.created as i64)
-                    .push_bind(p.metadata.size as i64);
+                    .push_bind(p.metadata.size as i64)
+                    .push_bind(exif_json)
+                    .push_bind(&p.preview_path)
+                    .push_bind(&p.sidecar_path);
             });
             qb.push(
                 " ON CONFLICT(path) DO UPDATE SET
@@ -160,11 +183,17 @@ impl PhotoRepository for SqlitePhotoRepository {
                     thumbnail_path=excluded.thumbnail_path,
                     mtime=excluded.mtime,
                     ctime=excluded.ctime,
-                    size=excluded.size
+                    size=excluded.size,
+                    exif_json=COALESCE(excluded.exif_json, photos.exif_json),
+                    preview_path=COALESCE(excluded.preview_path, photos.preview_path),
+                    sidecar_path=excluded.sidecar_path
                   WHERE photos.mtime <> excluded.mtime
                      OR photos.size  <> excluded.size
                      OR photos.thumbnail_path <> excluded.thumbnail_path
-                     OR photos.name  <> excluded.name",
+                     OR photos.name  <> excluded.name
+                     OR IFNULL(photos.exif_json, '') <> IFNULL(COALESCE(excluded.exif_json, photos.exif_json), '')
+                     OR IFNULL(photos.preview_path, '') <> IFNULL(COALESCE(excluded.preview_path, photos.preview_path), '')
+                     OR IFNULL(photos.sidecar_path, '') <> IFNULL(excluded.sidecar_path, '')",
             );
 
             qb.build()
@@ -391,6 +420,15 @@ mod tests {
             },
             thumbnail_path: "thumb".to_string(),
             path: "img.jpg".to_string(),
+            sidecar_path: Some("img.cr2".to_string()),
+            preview_path: None,
+            exif: Some(gallery_core::models::ExifInfo {
+                camera: Some("Canon EOS R5".to_string()),
+                shutter: Some("1/200".to_string()),
+                captured_at: Some(1_700_000_000),
+                ..Default::default()
+            }),
+            is_raw: false,
         }];
 
         repo.batch_insert_photos(&photos).await.unwrap();
@@ -398,6 +436,14 @@ mod tests {
         let cached = repo.get_cached_photos_for_path("").await.unwrap();
         assert_eq!(cached.len(), 1);
         assert_eq!(cached[0].path, "img.jpg");
+        assert_eq!(
+            cached[0]
+                .exif
+                .as_ref()
+                .and_then(|exif| exif.camera.as_deref()),
+            Some("Canon EOS R5")
+        );
+        assert_eq!(cached[0].sidecar_path.as_deref(), Some("img.cr2"));
 
         let fetched = repo
             .get_photos_by_paths(&["img.jpg".to_string()])
@@ -405,6 +451,18 @@ mod tests {
             .unwrap();
         assert_eq!(fetched.len(), 1);
         assert_eq!(fetched[0].metadata.name, "img.jpg");
+        assert_eq!(
+            fetched[0]
+                .exif
+                .as_ref()
+                .and_then(|exif| exif.camera.as_deref()),
+            Some("Canon EOS R5")
+        );
+        assert_eq!(
+            fetched[0].exif.as_ref().unwrap().captured_at,
+            Some(1_700_000_000)
+        );
+        assert_eq!(fetched[0].sidecar_path.as_deref(), Some("img.cr2"));
     }
 
     #[tokio::test]

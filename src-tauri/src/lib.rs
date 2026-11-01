@@ -143,6 +143,7 @@ pub fn run() {
         )
         .invoke_handler(tauri::generate_handler![
             commands::scan_folder,
+            commands::ensure_raw_preview,
             commands::export_favourites,
             commands::add_favourite,
             commands::remove_favourite,

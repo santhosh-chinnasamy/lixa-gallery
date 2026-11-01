@@ -32,11 +32,72 @@ pub struct FileMetadata {
     pub size: u64,
 }
 
+/// Shooting settings read once from the file and cached on the photo row.
+/// Missing tags stay unset so the info panel can hide them.
+#[derive(Debug, Clone, Serialize, Deserialize, Default, PartialEq)]
+pub struct ExifInfo {
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub camera: Option<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub lens: Option<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub focal_length: Option<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub aperture: Option<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub shutter: Option<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub iso: Option<u32>,
+    /// Camera clock as written, with no timezone conversion.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub date: Option<String>,
+    /// `DateTimeOriginal` as a unix second, for sorting. Naive camera time.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub captured_at: Option<i64>,
+    /// Fractional second of `DateTimeOriginal`, in microseconds.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub captured_subsec: Option<u32>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub width: Option<u32>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub height: Option<u32>,
+    /// Short label when the file is tagged with a non-upright orientation.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub orientation: Option<String>,
+}
+
+impl ExifInfo {
+    pub fn is_empty(&self) -> bool {
+        self.camera.is_none()
+            && self.lens.is_none()
+            && self.focal_length.is_none()
+            && self.aperture.is_none()
+            && self.shutter.is_none()
+            && self.iso.is_none()
+            && self.date.is_none()
+            && self.width.is_none()
+            && self.height.is_none()
+            && self.orientation.is_none()
+    }
+}
+
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct PhotoMetadata {
     pub metadata: FileMetadata,
     pub thumbnail_path: String,
     pub path: String,
+    /// RAW sibling of a JPEG, or the JPEG sibling when the primary is the RAW.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub sidecar_path: Option<String>,
+    /// JPEG the viewer should open instead of `path` (embedded RAW preview).
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub preview_path: Option<String>,
+    /// `Some` after a read, including an empty struct when the file had no tags.
+    /// `None` means this process has not read the file yet.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub exif: Option<ExifInfo>,
+    #[serde(default)]
+    pub is_raw: bool,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -92,6 +153,10 @@ mod tests {
             },
             thumbnail_path: "/tmp/thumb.webp".to_string(),
             path: "/home/user/test.jpg".to_string(),
+            sidecar_path: None,
+            preview_path: None,
+            exif: None,
+            is_raw: false,
         };
 
         let json = serde_json::to_string(&metadata).unwrap();
@@ -99,6 +164,22 @@ mod tests {
 
         assert_eq!(deserialized.metadata.name, "test.jpg");
         assert_eq!(deserialized.path, "/home/user/test.jpg");
+        assert!(deserialized.exif.is_none());
+        assert!(!deserialized.is_raw);
+    }
+
+    #[test]
+    fn photo_metadata_from_older_rows_defaults_the_new_fields() {
+        let json = r#"{
+            "metadata": {"name": "old.jpg", "modified": 1, "created": 1, "size": 2},
+            "thumbnail_path": "/t.webp",
+            "path": "/old.jpg"
+        }"#;
+        let photo: PhotoMetadata = serde_json::from_str(json).unwrap();
+        assert!(photo.sidecar_path.is_none());
+        assert!(photo.preview_path.is_none());
+        assert!(photo.exif.is_none());
+        assert!(!photo.is_raw);
     }
 
     #[test]
