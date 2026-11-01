@@ -53,7 +53,17 @@ Pre-built binaries are provided via [Cachix](https://app.cachix.org/cache/lixa-g
 
 ## Keyboard shortcuts
 
-The full list — gallery, viewer, and slideshow — is on the [site](https://santhosh-chinnasamy.github.io/lixa-gallery/#shortcuts). It is taken from the shortcut handlers in the app.
+Press `?` for the shortcuts that apply to the view you are in. Settings shows the same list. Both are rendered from [`src/lib/shortcuts.ts`](src/lib/shortcuts.ts).
+
+While culling a folder:
+
+- `←` `→` `↑` `↓`, `Home`, `End`, `PgUp`, `PgDn` move through the grid
+- `P`, `L`, or `F` picks. `L` and `F` are the old favourite keys
+- `X` rejects. `U` clears the flag
+- `Enter` or `Space` opens the frame. `S` starts the slideshow
+- With Advance on, `P`, `X`, and `U` move to the next photo
+
+The full list — gallery, viewer, and slideshow — is on the [site](https://santhosh-chinnasamy.github.io/lixa-gallery/#shortcuts).
 
 ## Screenshots / Demo
 

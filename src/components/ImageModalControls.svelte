@@ -10,6 +10,7 @@
   import RotateCcw from '@lucide/svelte/icons/rotate-ccw';
   import Info from '@lucide/svelte/icons/info';
   import Play from '@lucide/svelte/icons/play';
+  import X from '@lucide/svelte/icons/x';
 
   let {
     currentIndex,
@@ -26,7 +27,9 @@
     onFilterChange,
     onResetAll,
     isFavourite,
+    isRejected = false,
     onToggleFavorite,
+    onToggleReject,
     showInfo,
     onToggleInfo,
     onStartSlideshow,
@@ -46,7 +49,9 @@
     onFilterChange: (filter: 'none' | 'grayscale' | 'sepia' | 'invert') => void;
     onResetAll: () => void;
     isFavourite: boolean;
+    isRejected?: boolean;
     onToggleFavorite: () => void;
+    onToggleReject?: () => void;
     showInfo: boolean;
     onToggleInfo: () => void;
     onStartSlideshow?: () => void;
@@ -195,12 +200,26 @@
           ? 'bg-red-500/20 text-red-400 hover:bg-red-500/30'
           : 'text-white/80 hover:bg-white/15 hover:text-red-400',
       )}
-      aria-label={isFavourite
-        ? 'Remove from favorites (L)'
-        : 'Add to favorites (L)'}
+      aria-label={isFavourite ? 'Unflag pick (P)' : 'Pick (P)'}
       aria-pressed={isFavourite}
     >
       <Heart size={18} class={isFavourite ? 'fill-current' : ''} />
+    </Button>
+
+    <Button
+      variant="ghost"
+      size="icon"
+      onclick={onToggleReject}
+      class={cn(
+        'h-9 w-9 rounded-full transition-all duration-200',
+        isRejected
+          ? 'bg-white/20 text-white hover:bg-white/30'
+          : 'text-white/80 hover:bg-white/15 hover:text-white',
+      )}
+      aria-label={isRejected ? 'Unflag reject (X)' : 'Reject (X)'}
+      aria-pressed={isRejected}
+    >
+      <X size={16} />
     </Button>
 
     <!-- Info toggle button -->
@@ -228,8 +247,8 @@
         size="icon"
         onclick={onStartSlideshow}
         class="h-9 w-9 rounded-full text-white/80 transition-all duration-200 hover:bg-white/15 hover:text-white"
-        aria-label="Start Slideshow (P)"
-        title="Start Slideshow (P)"
+        aria-label="Start slideshow (S)"
+        title="Start slideshow (S)"
       >
         <Play size={15} class="fill-current" />
       </Button>

@@ -1,3 +1,5 @@
+export type { CullFlag, PhotoCullState } from '../lib/cull';
+
 export interface PhotoMetadata {
   metadata: FileMetadata;
   thumbnail_path: string;

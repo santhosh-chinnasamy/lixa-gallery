@@ -9,9 +9,10 @@ use std::sync::{Arc, Mutex};
 
 fn service_for(fs: Arc<ExportFs>) -> (FavouriteService, Arc<FakeFavouriteRepository>) {
     let favourites = Arc::new(FakeFavouriteRepository {
-        favourites: Mutex::new(vec![]),
+        flags: Mutex::new(vec![]),
     });
     let service = FavouriteService::new(
+        favourites.clone(),
         favourites.clone(),
         Arc::new(FakePhotoRepository {
             photos: Mutex::new(vec![]),
@@ -82,11 +83,11 @@ async fn copy_and_move_keep_both_same_named_files() {
             if move_files {
                 assert!(fs.read(first).is_none());
                 assert!(fs.read(second).is_none());
-                assert!(favourites.favourites.lock().unwrap().is_empty());
+                assert!(favourites.flags.lock().unwrap().is_empty());
             } else {
                 assert_eq!(fs.read(first).unwrap(), b"from-card-a");
                 assert_eq!(fs.read(second).unwrap(), b"from-card-b");
-                assert_eq!(favourites.favourites.lock().unwrap().len(), 2);
+                assert_eq!(favourites.flags.lock().unwrap().len(), 2);
             }
         }
     }
@@ -125,10 +126,10 @@ async fn existing_destination_file_is_kept_for_copy_and_move() {
 
         if mode == "move" {
             assert!(fs.read("/shoot/IMG_0001.JPG").is_none());
-            assert!(favourites.favourites.lock().unwrap().is_empty());
+            assert!(favourites.flags.lock().unwrap().is_empty());
         } else {
             assert_eq!(fs.read("/shoot/IMG_0001.JPG").unwrap(), b"incoming");
-            assert_eq!(favourites.favourites.lock().unwrap().len(), 1);
+            assert_eq!(favourites.flags.lock().unwrap().len(), 1);
         }
     }
 }
@@ -275,7 +276,7 @@ async fn exporting_a_file_onto_itself_is_skipped() {
         );
         assert_eq!(fs.names_under("/export"), vec!["IMG_0001.JPG".to_string()]);
         assert_eq!(fs.read("/export/IMG_0001.JPG").unwrap(), b"same-file");
-        assert_eq!(favourites.favourites.lock().unwrap().len(), 1);
+        assert_eq!(favourites.flags.lock().unwrap().len(), 1);
     }
 }
 
