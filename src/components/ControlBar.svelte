@@ -17,8 +17,11 @@
     sortOrder,
     gridSize,
     loadingMode,
+    cullFilter,
+    autoAdvance,
     type SortOption,
     type LoadingMode,
+    type CullFilter,
   } from '../stores/galleryStore';
   import { loadPhotos } from './common/ImageOperations';
   import Zap from '@lucide/svelte/icons/zap';
@@ -28,10 +31,21 @@
   let {
     onStartSlideshow,
     canStartSlideshow = false,
+    photoCount = 0,
+    pickedCount = 0,
   }: {
     onStartSlideshow?: () => void;
     canStartSlideshow?: boolean;
+    photoCount?: number;
+    pickedCount?: number;
   } = $props();
+
+  const filterOptions: { value: CullFilter; label: string }[] = [
+    { value: 'all', label: 'All' },
+    { value: 'picked', label: 'Picked' },
+    { value: 'rejected', label: 'Rejected' },
+    { value: 'unflagged', label: 'Unflagged' },
+  ];
 
   const sortOptions: { value: SortOption; label: string }[] = [
     { value: 'name', label: 'Name' },
@@ -65,6 +79,14 @@
     <div class="flex items-center gap-2 overflow-hidden">
       <Sidebar.Trigger class="-ml-2" />
       <Breadcrumbs />
+      {#if photoCount > 0}
+        <span
+          class="shrink-0 text-xs tabular-nums text-muted-foreground"
+          title="Picked in this folder"
+        >
+          {pickedCount} picked / {photoCount}
+        </span>
+      {/if}
     </div>
     <div class="flex items-center gap-2">
       {#if canStartSlideshow}
@@ -73,7 +95,7 @@
           variant="outline"
           size="sm"
           class="h-8 shrink-0 gap-1.5 bg-background text-xs font-medium transition-colors hover:border-primary/50 hover:text-primary"
-          title="Start Slideshow"
+          title="Start slideshow (S)"
         >
           <Play size={13} class="fill-current" />
           <span class="hidden sm:inline">Slideshow</span>
@@ -94,7 +116,7 @@
   <!-- Bottom Row: Search, Filters, and Sorting -->
   <div class="flex flex-wrap items-center justify-between gap-4">
     <!-- Performance & Search Area -->
-    <div class="flex min-w-[120px] flex-1 items-center gap-3">
+    <div class="flex min-w-[120px] flex-1 flex-wrap items-center gap-3">
       <!-- Performance Toggle -->
       <Button
         variant="outline"
@@ -113,6 +135,41 @@
           <Clock class="h-4 w-4" />
         {/if}
       </Button>
+
+      <div
+        class="flex items-center rounded-md border bg-background/50 p-0.5"
+        role="group"
+        aria-label="Cull filter"
+      >
+        {#each filterOptions as option (option.value)}
+          <button
+            type="button"
+            class={`rounded px-2 py-1 text-xs font-medium transition-colors ${
+              $cullFilter === option.value
+                ? 'bg-primary/10 text-primary'
+                : 'text-muted-foreground hover:text-foreground'
+            }`}
+            aria-pressed={$cullFilter === option.value}
+            onclick={() => cullFilter.set(option.value)}
+          >
+            {option.label}
+          </button>
+        {/each}
+      </div>
+
+      <button
+        type="button"
+        class={`h-9 shrink-0 rounded-md border px-2.5 text-xs font-medium transition-colors ${
+          $autoAdvance
+            ? 'border-primary/30 bg-primary/10 text-primary'
+            : 'bg-background/50 text-muted-foreground hover:text-foreground'
+        }`}
+        aria-pressed={$autoAdvance}
+        title="After P, X, or U, move to the next photo"
+        onclick={() => autoAdvance.set(!$autoAdvance)}
+      >
+        Advance
+      </button>
 
       <div class="relative w-full max-w-md">
         <Search

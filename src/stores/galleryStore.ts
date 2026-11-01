@@ -1,5 +1,11 @@
 import { invoke } from '@tauri-apps/api/core';
 import { derived, get, writable } from 'svelte/store';
+import {
+  flagAfterAction,
+  type CullAction,
+  type CullFlag,
+  type PhotoCullState,
+} from '../lib/cull';
 import type { FavouriteFolderGroup, PhotoMetadata } from '../types/photo';
 
 export interface FolderNode {
@@ -20,6 +26,122 @@ export type LoadingMode = 'sync' | 'lazy';
 export const searchQuery = writable<string>('');
 export const sortBy = writable<SortOption>('name');
 export const sortOrder = writable<SortOrder>('asc');
+
+export type CullFilter = 'all' | 'picked' | 'rejected' | 'unflagged';
+
+function createCullFilterStore() {
+  const STORAGE_KEY = 'cull_filter';
+  const stored =
+    typeof localStorage !== 'undefined'
+      ? localStorage.getItem(STORAGE_KEY)
+      : null;
+  const initial: CullFilter =
+    stored === 'picked' ||
+    stored === 'rejected' ||
+    stored === 'unflagged' ||
+    stored === 'all'
+      ? stored
+      : 'all';
+  const { subscribe, set } = writable<CullFilter>(initial);
+  return {
+    subscribe,
+    set: (filter: CullFilter) => {
+      if (typeof localStorage !== 'undefined') {
+        localStorage.setItem(STORAGE_KEY, filter);
+      }
+      set(filter);
+    },
+  };
+}
+
+export const cullFilter = createCullFilterStore();
+
+function createAutoAdvanceStore() {
+  const STORAGE_KEY = 'cull_auto_advance';
+  const initial =
+    typeof localStorage === 'undefined'
+      ? true
+      : localStorage.getItem(STORAGE_KEY) !== 'off';
+  const { subscribe, set } = writable<boolean>(initial);
+  return {
+    subscribe,
+    set: (enabled: boolean) => {
+      if (typeof localStorage !== 'undefined') {
+        localStorage.setItem(STORAGE_KEY, enabled ? 'on' : 'off');
+      }
+      set(enabled);
+    },
+  };
+}
+
+export const autoAdvance = createAutoAdvanceStore();
+
+type StoredFlag = Exclude<CullFlag, 'unflagged'>;
+
+function createCullFlagStore() {
+  const flags = writable<Map<string, StoredFlag>>(new Map());
+
+  function current(): Map<string, StoredFlag> {
+    return get(flags);
+  }
+
+  function flagOf(path: string): CullFlag {
+    return current().get(path) ?? 'unflagged';
+  }
+
+  async function persist(path: string, flag: CullFlag) {
+    await invoke('set_cull_flag', { path, flag });
+    flags.update((map) => {
+      const next = new Map(map);
+      if (flag === 'unflagged') next.delete(path);
+      else next.set(path, flag);
+      return next;
+    });
+  }
+
+  return {
+    subscribe: flags.subscribe,
+    flagOf,
+    persist,
+    apply: async (path: string, action: CullAction) => {
+      await persist(path, flagAfterAction(flagOf(path), action));
+    },
+    initialize: async () => {
+      try {
+        const rows = await invoke<PhotoCullState[]>('get_cull_flags');
+        const next = new Map<string, StoredFlag>();
+        for (const row of rows) {
+          if (row.flag === 'picked' || row.flag === 'rejected') {
+            next.set(row.path, row.flag);
+          }
+        }
+        flags.set(next);
+      } catch (error) {
+        console.error('Error loading cull flags:', error);
+      }
+    },
+    dropPicked: () => {
+      flags.update((map) => {
+        const next = new Map(map);
+        for (const [path, flag] of next) {
+          if (flag === 'picked') next.delete(path);
+        }
+        return next;
+      });
+    },
+    dropPickedPrefix: (prefix: string) => {
+      flags.update((map) => {
+        const next = new Map(map);
+        for (const [path, flag] of next) {
+          if (flag === 'picked' && path.startsWith(prefix)) next.delete(path);
+        }
+        return next;
+      });
+    },
+  };
+}
+
+export const cullFlags = createCullFlagStore();
 
 function createLoadingModeStore() {
   const STORAGE_KEY = 'loading_mode';
@@ -144,61 +266,31 @@ function createRecentFoldersStore() {
 
 export const recentFolders = createRecentFoldersStore();
 
-type FavoriteStore = Set<string>;
+const pickedPaths = derived(cullFlags, ($flags) => {
+  const picked = new Set<string>();
+  for (const [path, flag] of $flags) {
+    if (flag === 'picked') picked.add(path);
+  }
+  return picked;
+});
 
-function createFavoritesStore() {
-  const { subscribe, set, update } = writable<FavoriteStore>(new Set());
-
-  return {
-    subscribe,
-    initialize: async () => {
-      try {
-        const favs = await invoke<Array<{ path: string }>>('get_favourites');
-        const paths = new Set(favs.map((f) => f.path));
-        set(paths);
-      } catch (error) {
-        console.error('Error loading favorites:', error);
-      }
-    },
-    add: (path: string) =>
-      update((favorites) => {
-        favorites.add(path);
-        return favorites;
-      }),
-    remove: (path: string) =>
-      update((favorites) => {
-        favorites.delete(path);
-        return favorites;
-      }),
-    has: (path: string) => {
-      const favoriteSet = get({ subscribe });
-      return favoriteSet.has(path);
-    },
-    toggle: async (path: string) => {
-      const favoriteSet = get({ subscribe });
-      if (favoriteSet.has(path)) {
-        await invoke('remove_favourite', { path });
-        favorites.remove(path);
-      } else {
-        await invoke('add_favourite', { path });
-        favorites.add(path);
-      }
-    },
-    clear: async () => {
-      await invoke('clear_favourites');
-      set(new Set());
-      favouritePhotos.set([]);
-      favouriteFolderGroups.set([]);
-    },
-    clearPrefix: async (prefix: string) => {
-      await invoke('clear_favourites_by_prefix', { prefix });
-      await favorites.initialize();
-      await refreshFavourites();
-    },
-  };
-}
-
-export const favorites = createFavoritesStore();
+export const favorites = {
+  subscribe: pickedPaths.subscribe,
+  initialize: () => cullFlags.initialize(),
+  has: (path: string) => get(pickedPaths).has(path),
+  toggle: (path: string) => cullFlags.apply(path, 'pick'),
+  clear: async () => {
+    await invoke('clear_favourites');
+    cullFlags.dropPicked();
+    favouritePhotos.set([]);
+    favouriteFolderGroups.set([]);
+  },
+  clearPrefix: async (prefix: string) => {
+    await invoke('clear_favourites_by_prefix', { prefix });
+    cullFlags.dropPickedPrefix(prefix);
+    await refreshFavourites();
+  },
+};
 
 export type FavouriteScope = 'current' | 'all';
 export const favouriteScope = writable<FavouriteScope>('current');

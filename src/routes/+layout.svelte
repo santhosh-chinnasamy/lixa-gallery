@@ -3,6 +3,7 @@
   import { getCurrentWindow } from '@tauri-apps/api/window';
   import '../app.css';
   import AppSidebar from '../components/AppSidebar.svelte';
+  import ShortcutOverlay from '../components/ShortcutOverlay.svelte';
   import type { KeyboardActions } from '../types/events';
   import { initLogger } from '$lib/logger';
   import type { Snippet } from 'svelte';
@@ -36,6 +37,7 @@
 </script>
 
 <svelte:window onkeydown={handleKeydown} />
+<ShortcutOverlay />
 <Sidebar.Provider open={true}>
   <div
     class="flex h-screen w-full overflow-hidden bg-background font-sans text-foreground antialiased"

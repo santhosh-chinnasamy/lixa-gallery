@@ -1,20 +1,27 @@
 <script lang="ts">
+  import { get } from 'svelte/store';
   import type { KeyboardActions } from '../../types/events';
+  import {
+    isTextEntry,
+    shortcutContext,
+    shortcutHelpOpen,
+  } from '$lib/shortcuts';
 
   let { actions } = $props<{ actions: KeyboardActions }>();
 
   const handleKeydown = (event: KeyboardEvent) => {
-    // Ignore shortcuts if the user is typing in an input field
-    if (
-      document.activeElement instanceof HTMLInputElement ||
-      document.activeElement instanceof HTMLTextAreaElement ||
-      (document.activeElement as HTMLElement)?.isContentEditable
-    ) {
+    if (isTextEntry(event.target) || isTextEntry(document.activeElement))
       return;
-    }
+    if (get(shortcutHelpOpen) || event.defaultPrevented) return;
+    const context = get(shortcutContext);
+    if (context === 'viewer' || context === 'slideshow') return;
+    if (event.metaKey || event.ctrlKey || event.altKey) return;
+
+    const pressed =
+      event.key.length === 1 ? event.key.toLowerCase() : event.key;
 
     try {
-      const action = actions[event.key];
+      const action = actions[pressed] ?? actions[event.key];
       if (action) {
         event.preventDefault();
         action();

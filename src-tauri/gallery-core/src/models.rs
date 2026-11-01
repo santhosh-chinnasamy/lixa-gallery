@@ -51,6 +51,68 @@ pub struct Favourite {
     pub path: String,
 }
 
+/// Pick / reject / unflagged for a single photo.
+///
+/// Stored the same way favourites were: one SQLite row keyed by path.
+/// A missing row is [`CullFlag::Unflagged`]. Picked and rejected cannot both
+/// be set, because this is one enum rather than two booleans.
+///
+/// Sidecar export (issue #90) should map through [`CullFlag::to_xmp_pick`]
+/// (`1` picked, `0` unflagged, `-1` rejected). That integer is the Lightroom
+/// pick flag, not a star rating. A rating or colour label belongs in its own
+/// column beside this value.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Serialize, Deserialize)]
+#[serde(rename_all = "lowercase")]
+pub enum CullFlag {
+    Unflagged,
+    Picked,
+    Rejected,
+}
+
+impl CullFlag {
+    pub fn as_str(self) -> &'static str {
+        match self {
+            Self::Unflagged => "unflagged",
+            Self::Picked => "picked",
+            Self::Rejected => "rejected",
+        }
+    }
+
+    pub fn parse(value: &str) -> Option<Self> {
+        match value {
+            "unflagged" => Some(Self::Unflagged),
+            "picked" => Some(Self::Picked),
+            "rejected" => Some(Self::Rejected),
+            _ => None,
+        }
+    }
+
+    /// Lightroom Classic `xmp:Pick` / `crs:Pick`: `1`, `0`, or `-1`.
+    pub fn to_xmp_pick(self) -> i32 {
+        match self {
+            Self::Picked => 1,
+            Self::Unflagged => 0,
+            Self::Rejected => -1,
+        }
+    }
+
+    /// Inverse of [`CullFlag::to_xmp_pick`]. Any other integer is unflagged,
+    /// so a star rating is not accidentally read as a pick.
+    pub fn from_xmp_pick(value: i32) -> Self {
+        match value {
+            1 => Self::Picked,
+            -1 => Self::Rejected,
+            _ => Self::Unflagged,
+        }
+    }
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
+pub struct PhotoCullState {
+    pub path: String,
+    pub flag: CullFlag,
+}
+
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct FavouriteFolderGroup {
     pub folder_path: String,
@@ -109,5 +171,29 @@ mod tests {
         let json = serde_json::to_string(&fav).unwrap();
         let deserialized: Favourite = serde_json::from_str(&json).unwrap();
         assert_eq!(deserialized.path, "/path/to/fav");
+    }
+
+    #[test]
+    fn cull_flag_round_trips_and_maps_to_xmp_pick() {
+        for flag in [CullFlag::Unflagged, CullFlag::Picked, CullFlag::Rejected] {
+            let parsed = CullFlag::parse(flag.as_str()).unwrap();
+            assert_eq!(parsed, flag);
+            assert_eq!(CullFlag::from_xmp_pick(flag.to_xmp_pick()), flag);
+
+            let state = PhotoCullState {
+                path: "/photo.jpg".to_string(),
+                flag,
+            };
+            let json = serde_json::to_string(&state).unwrap();
+            let back: PhotoCullState = serde_json::from_str(&json).unwrap();
+            assert_eq!(back, state);
+        }
+
+        assert_eq!(CullFlag::Picked.to_xmp_pick(), 1);
+        assert_eq!(CullFlag::Unflagged.to_xmp_pick(), 0);
+        assert_eq!(CullFlag::Rejected.to_xmp_pick(), -1);
+        // A star rating must not become a pick.
+        assert_eq!(CullFlag::from_xmp_pick(5), CullFlag::Unflagged);
+        assert_eq!(CullFlag::parse("nope"), None);
     }
 }
