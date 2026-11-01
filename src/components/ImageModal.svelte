@@ -1,9 +1,10 @@
 <script lang="ts">
   import { Button } from '$lib/components/ui/button';
+  import { LruCache, VIEWER_PRELOAD_LIMIT } from '$lib/lruCache';
   import { cn } from '$lib/utils';
   import { convertFileSrc } from '@tauri-apps/api/core';
   import { fade, scale as scaleTransition } from 'svelte/transition';
-  import { favorites, photos } from '../stores/galleryStore';
+  import { currentFolder, favorites, photos } from '../stores/galleryStore';
   import Filename from './Filename.svelte';
   import X from '@lucide/svelte/icons/x';
   import Info from '@lucide/svelte/icons/info';
@@ -52,7 +53,16 @@
   let isSlideshowOpen = $state(false);
   let imageLoaded = $state(false);
   let imageError = $state(false);
-  const preloadedImages = new Map<string, HTMLImageElement>();
+  // Full-size originals. Capped so stepping through a shoot cannot keep
+  // every visited file alive, and cleared when the viewer closes or the
+  // open folder changes.
+  const preloadedImages = new LruCache<HTMLImageElement>(
+    VIEWER_PRELOAD_LIMIT,
+    (img) => {
+      img.src = '';
+    },
+  );
+  let preloadedFolder: string | null = null;
 
   let showInfo = $state(false);
   let imageWidth = $state(0);
@@ -430,6 +440,12 @@
 
   // Effects for reactivity
   $effect(() => {
+    const open = selectedImage != null;
+    const folder = $currentFolder;
+    if (!open || folder !== preloadedFolder) {
+      preloadedImages.clear();
+      preloadedFolder = open ? folder : null;
+    }
     if (selectedImage) {
       imageLoaded = false;
       imageError = false;
