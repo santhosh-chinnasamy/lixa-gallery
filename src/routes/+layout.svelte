@@ -5,6 +5,7 @@
   import AppSidebar from '../components/AppSidebar.svelte';
   import type { KeyboardActions } from '../types/events';
   import { initLogger } from '$lib/logger';
+  import ErrorToast from '../components/common/ErrorToast.svelte';
   import type { Snippet } from 'svelte';
 
   let { children }: { children?: Snippet } = $props();
@@ -47,5 +48,6 @@
         {@render children?.()}
       </div>
     </main>
+    <ErrorToast />
   </div>
 </Sidebar.Provider>

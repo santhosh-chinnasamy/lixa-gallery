@@ -2,10 +2,48 @@ use async_trait::async_trait;
 use gallery_core::fs::FileSystem;
 use gallery_core::models::{FileMetadata, GalleryError, Result};
 use std::{
+    io,
     path::{Path, PathBuf},
-    time::UNIX_EPOCH,
+    sync::atomic::{AtomicBool, Ordering},
+    time::{SystemTime, UNIX_EPOCH},
 };
 use tokio::fs;
+
+fn system_time_secs(time: SystemTime) -> u64 {
+    time.duration_since(UNIX_EPOCH)
+        .map(|duration| duration.as_secs())
+        .unwrap_or(0)
+}
+
+/// Modified time in seconds, or the Unix epoch when the filesystem has none.
+fn resolve_modified_secs(modified: io::Result<SystemTime>) -> u64 {
+    modified.map(system_time_secs).unwrap_or(0)
+}
+
+/// Birth time when the filesystem records one, otherwise `modified_secs`.
+fn resolve_created_secs(created: io::Result<SystemTime>, modified_secs: u64) -> u64 {
+    match created {
+        Ok(time) => system_time_secs(time),
+        Err(_) => modified_secs,
+    }
+}
+
+fn log_creation_time_fallback(path: &Path, error: &io::Error) {
+    static LOGGED: AtomicBool = AtomicBool::new(false);
+    if LOGGED.swap(true, Ordering::Relaxed) {
+        log::debug!(
+            "Creation time unavailable for {}: {}. Using modified time.",
+            path.display(),
+            error
+        );
+    } else {
+        log::warn!(
+            "Creation time unavailable for {}: {}. Using modified time. Further files are logged at debug level.",
+            path.display(),
+            error
+        );
+    }
+}
 
 pub struct LocalFileSystem;
 
@@ -15,19 +53,21 @@ impl FileSystem for LocalFileSystem {
         let metadata = fs::metadata(path).await?;
         let size = metadata.len();
 
-        let modified = metadata
-            .modified()
-            .map_err(|e| GalleryError::Io(e))?
-            .duration_since(UNIX_EPOCH)
-            .map(|d| d.as_secs())
-            .unwrap_or(0);
+        let modified_result = metadata.modified();
+        if let Err(error) = &modified_result {
+            log::warn!(
+                "Modification time unavailable for {}: {}. Using the Unix epoch.",
+                path.display(),
+                error
+            );
+        }
+        let modified = resolve_modified_secs(modified_result);
 
-        let created = metadata
-            .created()
-            .map_err(|e| GalleryError::Io(e))?
-            .duration_since(UNIX_EPOCH)
-            .map(|d| d.as_secs())
-            .unwrap_or(0);
+        let created_result = metadata.created();
+        if let Err(error) = &created_result {
+            log_creation_time_fallback(path, error);
+        }
+        let created = resolve_created_secs(created_result, modified);
 
         let name = path
             .file_name()
@@ -148,5 +188,56 @@ mod tests {
 
         assert_eq!(metadata.name, "meta.png");
         assert!(metadata.size == 0);
+    }
+
+    #[test]
+    fn created_secs_use_modified_then_epoch() {
+        let missing = || {
+            Err(io::Error::new(
+                io::ErrorKind::Unsupported,
+                "creation time is not available for the filesystem",
+            ))
+        };
+
+        assert_eq!(
+            resolve_created_secs(missing(), 1_700_000_000),
+            1_700_000_000
+        );
+        assert_eq!(resolve_modified_secs(missing()), 0);
+        assert_eq!(
+            resolve_created_secs(missing(), resolve_modified_secs(missing())),
+            0
+        );
+
+        let created = SystemTime::UNIX_EPOCH + std::time::Duration::from_secs(42);
+        assert_eq!(resolve_created_secs(Ok(created), 7), 42);
+    }
+
+    /// Filesystems without a birth time used to fail `created()` and drop the file.
+    #[tokio::test]
+    async fn creation_time_falls_back_to_modified_time() {
+        let path = Path::new("/proc/self/stat");
+        let Ok(std_meta) = std::fs::metadata(path) else {
+            return;
+        };
+        if std_meta.created().is_ok() {
+            return;
+        }
+
+        let modified = std_meta
+            .modified()
+            .ok()
+            .and_then(|time| time.duration_since(UNIX_EPOCH).ok())
+            .map(|duration| duration.as_secs())
+            .unwrap_or(0);
+
+        let metadata = LocalFileSystem
+            .get_file_metadata(path)
+            .await
+            .expect("a readable file must not be dropped when birth time is missing");
+
+        assert_eq!(metadata.name, "stat");
+        assert_eq!(metadata.modified, modified);
+        assert_eq!(metadata.created, modified);
     }
 }

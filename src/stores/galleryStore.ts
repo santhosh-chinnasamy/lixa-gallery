@@ -1,6 +1,9 @@
 import { invoke } from '@tauri-apps/api/core';
 import { derived, get, writable } from 'svelte/store';
+import { errorText, favouriteToggleError } from '$lib/errorText';
+import { reportError } from '$lib/logger';
 import type { FavouriteFolderGroup, PhotoMetadata } from '../types/photo';
+import { toasts } from './toastStore';
 
 export interface FolderNode {
   name: string;
@@ -148,6 +151,7 @@ type FavoriteStore = Set<string>;
 
 function createFavoritesStore() {
   const { subscribe, set, update } = writable<FavoriteStore>(new Set());
+  const pendingToggles = new Set<string>();
 
   return {
     subscribe,
@@ -157,7 +161,9 @@ function createFavoritesStore() {
         const paths = new Set(favs.map((f) => f.path));
         set(paths);
       } catch (error) {
-        console.error('Error loading favorites:', error);
+        const message = `Couldn't load favourites. ${errorText(error)}`;
+        reportError(message);
+        toasts.show(message);
       }
     },
     add: (path: string) =>
@@ -175,25 +181,55 @@ function createFavoritesStore() {
       return favoriteSet.has(path);
     },
     toggle: async (path: string) => {
-      const favoriteSet = get({ subscribe });
-      if (favoriteSet.has(path)) {
-        await invoke('remove_favourite', { path });
+      if (pendingToggles.has(path)) return;
+      pendingToggles.add(path);
+      const wasFavourite = get({ subscribe }).has(path);
+      if (wasFavourite) {
         favorites.remove(path);
       } else {
-        await invoke('add_favourite', { path });
         favorites.add(path);
+      }
+      try {
+        if (wasFavourite) {
+          await invoke('remove_favourite', { path });
+        } else {
+          await invoke('add_favourite', { path });
+        }
+      } catch (error) {
+        if (wasFavourite) {
+          favorites.add(path);
+        } else {
+          favorites.remove(path);
+        }
+        const message = favouriteToggleError(error);
+        reportError(message);
+        toasts.show(message);
+      } finally {
+        pendingToggles.delete(path);
       }
     },
     clear: async () => {
-      await invoke('clear_favourites');
-      set(new Set());
-      favouritePhotos.set([]);
-      favouriteFolderGroups.set([]);
+      try {
+        await invoke('clear_favourites');
+        set(new Set());
+        favouritePhotos.set([]);
+        favouriteFolderGroups.set([]);
+      } catch (error) {
+        const message = `Couldn't clear favourites. ${errorText(error)}`;
+        reportError(message);
+        toasts.show(message);
+      }
     },
     clearPrefix: async (prefix: string) => {
-      await invoke('clear_favourites_by_prefix', { prefix });
-      await favorites.initialize();
-      await refreshFavourites();
+      try {
+        await invoke('clear_favourites_by_prefix', { prefix });
+        await favorites.initialize();
+        await refreshFavourites();
+      } catch (error) {
+        const message = `Couldn't clear favourites. ${errorText(error)}`;
+        reportError(message);
+        toasts.show(message);
+      }
     },
   };
 }
@@ -237,7 +273,9 @@ export async function refreshFavourites() {
     });
     favouritePhotos.set(photosList);
   } catch (error) {
-    console.error('Error refreshing favourites:', error);
+    const message = `Couldn't refresh favourites. ${errorText(error)}`;
+    reportError(message);
+    toasts.show(message);
   } finally {
     isLoadingFavourites.set(false);
   }
@@ -255,7 +293,9 @@ export async function loadFolderTree(path: string) {
     const tree = await invoke<FolderNode>('get_folder_tree', { path });
     folderTree.set(tree);
   } catch (error) {
-    console.error('Error loading folder tree:', error);
+    const message = `Couldn't list subfolders in ${path}. ${errorText(error)}`;
+    reportError(message);
+    toasts.show(message);
   }
 }
 
