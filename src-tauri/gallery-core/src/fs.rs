@@ -24,9 +24,52 @@ pub trait FileSystem: Send + Sync {
 
     /// Move `from` onto `to`, failing if `to` already exists.
     ///
-    /// An existing destination is never replaced. Cross-device moves still fail;
-    /// the source stays in place.
+    /// An existing destination is never replaced. A cross-device move fails
+    /// with the operating-system error and leaves the source in place. The
+    /// export loop falls back to [`FileSystem::copy_exclusive`] when that
+    /// happens.
     async fn rename_exclusive(&self, from: &Path, to: &Path) -> Result<()>;
+
+    /// Byte length of `path`. This does not read timestamps: creation time is
+    /// missing on some external drives, and a cross-device move must still be
+    /// able to compare sizes.
+    async fn file_len(&self, path: &Path) -> Result<u64>;
+
+    /// Flush `path` to stable storage. Missing files are an error.
+    async fn sync_file(&self, path: &Path) -> Result<()>;
+
+    /// Delete `path`. A missing file is success, so a partial copy can be
+    /// cleaned up more than once.
+    async fn remove_file(&self, path: &Path) -> Result<()>;
+}
+
+/// Unix `EXDEV`. On Windows this number is a different error, so it is only
+/// treated as cross-device on Unix.
+pub const EXDEV: i32 = 18;
+
+/// Windows `ERROR_NOT_SAME_DEVICE`. On Unix this number is `EEXIST`, so it is
+/// only treated as cross-device on Windows.
+pub const ERROR_NOT_SAME_DEVICE: i32 = 17;
+
+/// `rename` across drives: `EXDEV` on Unix, `ERROR_NOT_SAME_DEVICE` on Windows.
+///
+/// `ErrorKind::CrossesDevices` is the portable signal. The raw codes are
+/// checked as well, and only the code that means "different device" on this
+/// platform, because the two numbers collide with unrelated errors on the
+/// other platform.
+pub fn is_cross_device(err: &std::io::Error) -> bool {
+    if err.kind() == std::io::ErrorKind::CrossesDevices {
+        return true;
+    }
+    err.raw_os_error().is_some_and(raw_os_error_is_cross_device)
+}
+
+pub fn raw_os_error_is_cross_device(code: i32) -> bool {
+    if cfg!(windows) {
+        code == ERROR_NOT_SAME_DEVICE
+    } else {
+        code == EXDEV
+    }
 }
 
 /// Identity used to decide that two file names would collide on a
@@ -93,6 +136,44 @@ mod tests {
             uniquified_file_name(OsStr::new("archive.tar.gz"), 1),
             OsStr::new("archive.tar (1).gz")
         );
+    }
+
+    #[test]
+    fn cross_device_errors_map_to_the_platform_code() {
+        let by_kind = std::io::Error::new(std::io::ErrorKind::CrossesDevices, "cross-device link");
+        assert!(is_cross_device(&by_kind));
+
+        let permission = std::io::Error::new(
+            std::io::ErrorKind::PermissionDenied,
+            "Permission denied (os error 13)",
+        );
+        assert!(!is_cross_device(&permission));
+
+        // Unix EXDEV is 18. Windows ERROR_NOT_SAME_DEVICE is 17.
+        // `from_raw_os_error` follows the host, so the other platform's number
+        // must not be classified as cross-device here.
+        assert!(is_cross_device(&std::io::Error::from_raw_os_error(
+            if cfg!(windows) {
+                ERROR_NOT_SAME_DEVICE
+            } else {
+                EXDEV
+            }
+        )));
+        assert!(!is_cross_device(&std::io::Error::from_raw_os_error(
+            if cfg!(windows) {
+                EXDEV
+            } else {
+                ERROR_NOT_SAME_DEVICE
+            }
+        )));
+
+        if cfg!(windows) {
+            assert!(raw_os_error_is_cross_device(ERROR_NOT_SAME_DEVICE));
+            assert!(!raw_os_error_is_cross_device(EXDEV));
+        } else {
+            assert!(raw_os_error_is_cross_device(EXDEV));
+            assert!(!raw_os_error_is_cross_device(ERROR_NOT_SAME_DEVICE));
+        }
     }
 
     #[test]

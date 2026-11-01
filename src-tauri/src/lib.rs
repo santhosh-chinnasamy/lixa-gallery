@@ -144,6 +144,8 @@ pub fn run() {
         .invoke_handler(tauri::generate_handler![
             commands::scan_folder,
             commands::export_favourites,
+            commands::begin_export,
+            commands::cancel_export,
             commands::add_favourite,
             commands::remove_favourite,
             commands::get_favourites,
@@ -202,6 +204,7 @@ pub fn run() {
                     gallery,
                     favourite,
                     thumbnail_path: thumbnail_path.to_string_lossy().to_string(),
+                    export_cancel: std::sync::Arc::new(std::sync::atomic::AtomicBool::new(false)),
                 });
             });
             Ok(())

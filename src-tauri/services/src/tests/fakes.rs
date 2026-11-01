@@ -114,6 +114,30 @@ impl FileSystem for FakeFileSystem {
         files.push((to.to_path_buf(), metadata));
         Ok(())
     }
+
+    async fn file_len(&self, path: &Path) -> Result<u64> {
+        let files = self.files.lock().unwrap();
+        files
+            .iter()
+            .find(|(existing, _)| existing == path)
+            .map(|(_, metadata)| metadata.size)
+            .ok_or_else(|| io_error(ErrorKind::NotFound, path))
+    }
+
+    async fn sync_file(&self, path: &Path) -> Result<()> {
+        let files = self.files.lock().unwrap();
+        if files.iter().any(|(existing, _)| existing == path) {
+            Ok(())
+        } else {
+            Err(io_error(ErrorKind::NotFound, path))
+        }
+    }
+
+    async fn remove_file(&self, path: &Path) -> Result<()> {
+        let mut files = self.files.lock().unwrap();
+        files.retain(|(existing, _)| existing != path);
+        Ok(())
+    }
 }
 
 pub(super) fn io_error(kind: ErrorKind, path: &Path) -> GalleryError {

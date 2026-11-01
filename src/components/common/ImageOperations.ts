@@ -10,7 +10,11 @@ import {
   loadingMode,
 } from '../../stores/galleryStore';
 import { get } from 'svelte/store';
-import type { ExportReport, PhotoMetadata } from '../../types/photo';
+import type {
+  ExportFailure,
+  ExportReport,
+  PhotoMetadata,
+} from '../../types/photo';
 
 export async function loadPath(folderPath: string, isRoot = true) {
   try {
@@ -63,13 +67,16 @@ export async function exportFavorites(
   mode: 'copy' | 'move' = 'copy',
   paths?: string[],
   preserveFolderStructure = false,
+  isCancelled: () => boolean = () => false,
 ): Promise<{ destination: string; report: ExportReport } | undefined> {
   try {
+    if (isCancelled()) return;
+
     const destination = await open({
       multiple: false,
       directory: true,
     });
-    if (!destination) return;
+    if (!destination || isCancelled()) return;
 
     const report = await invoke<ExportReport>('export_favourites', {
       destination,
@@ -85,13 +92,34 @@ export async function exportFavorites(
   }
 }
 
+export function describeExportError(error: unknown): string {
+  if (typeof error === 'string' && error.trim()) {
+    return error.trim();
+  }
+  if (error instanceof Error && error.message.trim()) {
+    return error.message.trim();
+  }
+  return 'The export could not be completed.';
+}
+
 export function formatExportSuccess(
   mode: 'copy' | 'move',
   destination: string,
   report: ExportReport,
 ): string {
-  const verb = mode === 'copy' ? 'copied' : 'moved';
-  let message = `Favourites successfully ${verb} to ${destination}`;
+  const transferred = report.copied + report.renamed;
+  const verbPast = mode === 'move' ? 'moved' : 'copied';
+  const verbGerund = mode === 'move' ? 'moving' : 'copying';
+
+  let message: string;
+  if (report.cancelled) {
+    message = `Cancelled after ${verbGerund} ${transferred} of ${report.total}`;
+  } else if (report.failed > 0) {
+    message = `Exported ${transferred} of ${report.total} to ${destination}`;
+  } else {
+    message = `Favourites successfully ${verbPast} to ${destination}`;
+  }
+
   const notes: string[] = [];
   if (report.renamed > 0) {
     const noun = report.renamed === 1 ? 'file was' : 'files were';
@@ -107,10 +135,24 @@ export function formatExportSuccess(
       `${report.skipped} ${noun} skipped because ${pronoun} already in the destination`,
     );
   }
+  if (report.failures.length > 0) {
+    notes.push(formatFailureNote(report.failures));
+  }
   if (notes.length > 0) {
     message += `. ${notes.join('. ')}.`;
   }
   return message;
+}
+
+function formatFailureNote(failures: ExportFailure[]): string {
+  const shown = failures.slice(0, 8);
+  const detail = shown
+    .map((failure) => `${failure.path}: ${failure.reason}`)
+    .join('; ');
+  const extra = failures.length - shown.length;
+  const more = extra > 0 ? `; and ${extra} more` : '';
+  const noun = failures.length === 1 ? 'file failed' : 'files failed';
+  return `${failures.length} ${noun} (${detail}${more})`;
 }
 
 export async function clearFavorites() {

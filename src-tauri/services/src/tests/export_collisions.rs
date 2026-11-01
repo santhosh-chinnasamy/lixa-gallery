@@ -4,6 +4,7 @@ use super::fakes::{
 };
 use crate::favourite_service::FavouriteService;
 use gallery_core::models::{ExportOptions, ExportReport};
+use std::sync::atomic::AtomicBool;
 use std::sync::{Arc, Mutex};
 
 fn service_for(fs: Arc<ExportFs>) -> (FavouriteService, Arc<FakeFavouriteRepository>) {
@@ -34,7 +35,7 @@ fn options(dest: &str, mode: &str, paths: &[&str], preserve: bool) -> ExportOpti
 
 async fn export(service: &FavouriteService, options: ExportOptions) -> ExportReport {
     service
-        .export_favourites(&FakeEventHub, options)
+        .export_favourites(&FakeEventHub, options, &AtomicBool::new(false))
         .await
         .unwrap()
 }
@@ -61,6 +62,8 @@ async fn copy_and_move_keep_both_same_named_files() {
                     copied: 1,
                     renamed: 1,
                     skipped: 0,
+                    total: 2,
+                    ..ExportReport::default()
                 },
                 "mode={mode} preserve={preserve}"
             );
@@ -113,6 +116,8 @@ async fn existing_destination_file_is_kept_for_copy_and_move() {
                 copied: 0,
                 renamed: 1,
                 skipped: 0,
+                total: 1,
+                ..ExportReport::default()
             }
         );
         assert_eq!(fs.read("/out/IMG_0001.JPG").unwrap(), b"keep-me");
@@ -152,6 +157,8 @@ async fn case_only_names_do_not_overwrite_on_a_case_insensitive_volume() {
             copied: 1,
             renamed: 1,
             skipped: 0,
+            total: 2,
+            ..ExportReport::default()
         }
     );
     assert_eq!(
@@ -206,6 +213,8 @@ async fn non_ascii_names_and_case_variants_are_both_kept() {
             copied: 2,
             renamed: 2,
             skipped: 0,
+            total: 4,
+            ..ExportReport::default()
         }
     );
     assert_eq!(fs.read("/out/写真.JPG").unwrap(), b"one");
@@ -260,6 +269,8 @@ async fn exporting_a_file_onto_itself_is_skipped() {
                 copied: 0,
                 renamed: 0,
                 skipped: 1,
+                total: 1,
+                ..ExportReport::default()
             }
         );
         assert_eq!(fs.names_under("/export"), vec!["IMG_0001.JPG".to_string()]);
@@ -297,6 +308,8 @@ async fn preserve_folder_structure_still_renames_inside_the_shared_parent() {
             copied: 2,
             renamed: 1,
             skipped: 0,
+            total: 3,
+            ..ExportReport::default()
         }
     );
     assert_eq!(fs.read("/out/100CANON/IMG_0001.JPG").unwrap(), b"a");

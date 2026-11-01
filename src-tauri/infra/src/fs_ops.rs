@@ -163,6 +163,24 @@ impl FileSystem for LocalFileSystem {
     async fn rename_exclusive(&self, from: &Path, to: &Path) -> Result<()> {
         rename_without_overwrite(from, to).await
     }
+
+    async fn file_len(&self, path: &Path) -> Result<u64> {
+        let metadata = fs::metadata(path).await.map_err(GalleryError::Io)?;
+        Ok(metadata.len())
+    }
+
+    async fn sync_file(&self, path: &Path) -> Result<()> {
+        let file = fs::File::open(path).await.map_err(GalleryError::Io)?;
+        file.sync_all().await.map_err(GalleryError::Io)
+    }
+
+    async fn remove_file(&self, path: &Path) -> Result<()> {
+        match fs::remove_file(path).await {
+            Ok(()) => Ok(()),
+            Err(err) if err.kind() == ErrorKind::NotFound => Ok(()),
+            Err(err) => Err(GalleryError::Io(err)),
+        }
+    }
 }
 
 /// Move `from` to `to` without replacing an existing file.
@@ -322,5 +340,41 @@ mod tests {
 
     fn is_already_exists(err: &GalleryError) -> bool {
         matches!(err, GalleryError::Io(err) if err.kind() == ErrorKind::AlreadyExists)
+    }
+
+    #[tokio::test]
+    async fn sync_file_flushes_and_remove_file_is_idempotent() {
+        let dir = tempdir().unwrap();
+        let path = dir.path().join("photo.jpg");
+        std::fs::write(&path, b"payload").unwrap();
+
+        let fs = LocalFileSystem;
+        fs.sync_file(&path).await.unwrap();
+        let meta = fs.get_file_metadata(&path).await.unwrap();
+        assert_eq!(meta.size, b"payload".len() as u64);
+
+        fs.remove_file(&path).await.unwrap();
+        assert!(!path.exists());
+        fs.remove_file(&path).await.unwrap();
+    }
+
+    #[tokio::test]
+    async fn copy_exclusive_reports_the_source_size_that_sync_can_see() {
+        let dir = tempdir().unwrap();
+        let source = dir.path().join("source.jpg");
+        let dest = dir.path().join("dest.jpg");
+        std::fs::write(&source, b"across-device-bytes").unwrap();
+
+        let fs = LocalFileSystem;
+        let copied = fs.copy_exclusive(&source, &dest).await.unwrap();
+        fs.sync_file(&dest).await.unwrap();
+        let src_len = fs.get_file_metadata(&source).await.unwrap().size;
+        let dest_len = fs.get_file_metadata(&dest).await.unwrap().size;
+        assert_eq!(copied, src_len);
+        assert_eq!(dest_len, src_len);
+        assert_eq!(
+            std::fs::read(&source).unwrap(),
+            std::fs::read(&dest).unwrap()
+        );
     }
 }

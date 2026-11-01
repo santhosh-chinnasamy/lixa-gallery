@@ -2,6 +2,7 @@ use super::fakes::*;
 use crate::favourite_service::FavouriteService;
 use gallery_core::models::{ExportOptions, ExportReport, FileMetadata, PhotoMetadata, Workspace};
 use std::path::PathBuf;
+use std::sync::atomic::AtomicBool;
 use std::sync::Arc;
 use std::sync::Mutex;
 
@@ -139,13 +140,18 @@ async fn test_export_favourites_selective() {
         preserve_folder_structure: true,
     };
 
-    let report = service.export_favourites(&events, opts).await.unwrap();
+    let report = service
+        .export_favourites(&events, opts, &AtomicBool::new(false))
+        .await
+        .unwrap();
     assert_eq!(
         report,
         ExportReport {
             copied: 1,
             renamed: 0,
             skipped: 0,
+            total: 1,
+            ..ExportReport::default()
         }
     );
     let files = fs.files.lock().unwrap();
