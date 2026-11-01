@@ -4,6 +4,11 @@
   import * as Tabs from '$lib/components/ui/tabs';
   import { openLogsFolder, getLogDirectory, info } from '$lib/logger';
   import { loadingMode, type LoadingMode } from '../../stores/galleryStore';
+  import {
+    themeIsDark,
+    themePreference,
+    type ThemePreference,
+  } from '../../stores/themeStore';
   import FolderOpenIcon from '@lucide/svelte/icons/folder-open';
   import CopyIcon from '@lucide/svelte/icons/copy';
   import CheckIcon from '@lucide/svelte/icons/check';
@@ -16,6 +21,9 @@
   import EyeIcon from '@lucide/svelte/icons/eye';
   import CompassIcon from '@lucide/svelte/icons/compass';
   import PlayIcon from '@lucide/svelte/icons/play';
+  import SunIcon from '@lucide/svelte/icons/sun';
+  import MoonIcon from '@lucide/svelte/icons/moon';
+  import MonitorIcon from '@lucide/svelte/icons/monitor';
 
   let logDirPath = $state<string>('');
   let isCopied = $state(false);
@@ -64,6 +72,32 @@
     loadingMode.set(mode);
     info(`[Settings] Scanning mode changed to: ${mode}`);
   }
+
+  const themeOptions: {
+    value: ThemePreference;
+    label: string;
+    description: string;
+    icon: typeof SunIcon;
+  }[] = [
+    {
+      value: 'light',
+      label: 'Light',
+      description: 'Bright surfaces for a lit room.',
+      icon: SunIcon,
+    },
+    {
+      value: 'dark',
+      label: 'Dark',
+      description: 'Neutral grey for judging photos.',
+      icon: MoonIcon,
+    },
+    {
+      value: 'system',
+      label: 'System',
+      description: 'Follow this computer, and change with it.',
+      icon: MonitorIcon,
+    },
+  ];
 </script>
 
 <div class="custom-scrollbar flex-1 overflow-y-auto p-6 lg:p-10">
@@ -94,6 +128,60 @@
 
       <!-- Tab 1: General & Diagnostics -->
       <Tabs.Content value="general" class="mt-6 space-y-8">
+        <Card.Root class="shadow-sm">
+          <Card.Header>
+            <div class="flex items-center gap-2">
+              <SunIcon class="h-5 w-5 text-primary" />
+              <Card.Title>Appearance</Card.Title>
+            </div>
+            <Card.Description>
+              The interface starts by following the operating system. A manual
+              choice is saved on this device.
+            </Card.Description>
+          </Card.Header>
+          <Card.Content class="space-y-4">
+            <div class="grid grid-cols-1 gap-3 sm:grid-cols-3">
+              {#each themeOptions as option (option.value)}
+                <button
+                  type="button"
+                  onclick={() => themePreference.set(option.value)}
+                  class={`flex flex-col items-start rounded-xl border p-4 text-left transition-colors ${
+                    $themePreference === option.value
+                      ? 'border-primary bg-primary/5 ring-2 ring-primary/20'
+                      : 'bg-card hover:bg-muted/50'
+                  }`}
+                  aria-pressed={$themePreference === option.value}
+                >
+                  <div class="flex w-full items-center justify-between gap-2">
+                    <span
+                      class="flex items-center gap-2 font-semibold text-foreground"
+                    >
+                      <option.icon class="h-4 w-4 text-muted-foreground" />
+                      {option.label}
+                    </span>
+                    {#if $themePreference === option.value}
+                      <span
+                        class="rounded-full bg-primary/20 px-2 py-0.5 text-xs font-medium text-primary"
+                        >Active</span
+                      >
+                    {/if}
+                  </div>
+                  <p class="mt-2 text-xs text-muted-foreground">
+                    {option.description}
+                  </p>
+                </button>
+              {/each}
+            </div>
+            {#if $themePreference === 'system'}
+              <p class="text-xs text-muted-foreground">
+                The system appearance is currently {$themeIsDark
+                  ? 'dark'
+                  : 'light'}.
+              </p>
+            {/if}
+          </Card.Content>
+        </Card.Root>
+
         <!-- Section 1: Diagnostics & Logs -->
         <Card.Root class="shadow-sm">
           <Card.Header>

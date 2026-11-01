@@ -3,6 +3,24 @@
   <head>
     <meta charset="UTF-8" />
     <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <script>
+      (function () {
+        try {
+          var stored = localStorage.getItem('theme');
+          var preference =
+            stored === 'light' || stored === 'dark' ? stored : 'system';
+          var systemDark = window.matchMedia(
+            '(prefers-color-scheme: dark)',
+          ).matches;
+          var isDark =
+            preference === 'dark' || (preference === 'system' && systemDark);
+          document.documentElement.classList.toggle('dark', isDark);
+          document.documentElement.style.colorScheme = isDark
+            ? 'dark'
+            : 'light';
+        } catch (e) {}
+      })();
+    </script>
     <link rel="icon" href="%sveltekit.assets%/favicon.ico" />
     <meta name="viewport" content="width=device-width, initial-scale=1" />
     <title>Lixa Gallery - Photo Management App</title>
