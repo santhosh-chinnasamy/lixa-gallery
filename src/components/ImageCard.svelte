@@ -1,7 +1,7 @@
 <script lang="ts">
   import * as Card from '$lib/components/ui/card';
   import { gridImageUrl, UNSUPPORTED_FORMAT_MESSAGE } from '$lib/imageSource';
-  import { favorites } from '../stores/galleryStore';
+  import { favorites, gridFit } from '../stores/galleryStore';
   import Filename from './Filename.svelte';
   import Heart from '@lucide/svelte/icons/heart';
   import type { PhotoMetadata } from '../types/photo';
@@ -20,6 +20,7 @@
 
   let isFavourite = $derived($favorites.has(photo.path));
   let fileName = $derived(photo.metadata.name);
+  let showWholeFrame = $derived($gridFit === 'fit');
 
   // Decoded WebP thumbnail, or the original HEIC on macOS. Null means this
   // platform cannot show the file, so the card does not request it.
@@ -68,7 +69,9 @@
   <Card.Content class="relative overflow-hidden rounded-lg p-0">
     <!-- Image container with consistent aspect ratio -->
     <div
-      class="aspect-[1/1] h-auto w-full overflow-hidden bg-gray-100 dark:bg-gray-800"
+      class={`aspect-[1/1] h-auto w-full overflow-hidden ${
+        showWholeFrame ? 'bg-neutral-300 dark:bg-neutral-800' : 'bg-muted'
+      }`}
     >
       {#if imageSrc === null}
         <div
@@ -108,9 +111,9 @@
           src={imageSrc}
           alt={fileName}
           loading={isVisible ? 'eager' : 'lazy'}
-          class={`h-full w-full object-cover transition-opacity duration-300 ${
-            imageLoaded ? 'opacity-100' : 'opacity-0'
-          }`}
+          class={`h-full w-full transition-opacity duration-300 ${
+            showWholeFrame ? 'object-contain' : 'object-cover'
+          } ${imageLoaded ? 'opacity-100' : 'opacity-0'}`}
           onload={handleImageLoad}
           onerror={handleImageError}
         />

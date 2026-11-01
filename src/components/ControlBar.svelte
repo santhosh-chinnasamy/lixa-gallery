@@ -15,6 +15,7 @@
     sortBy,
     sortOrder,
     gridSize,
+    gridFit,
     type SortOption,
   } from '../stores/galleryStore';
   import { loadPhotos } from './common/ImageOperations';
@@ -145,7 +146,46 @@
 
       <div class="hidden h-6 w-px shrink-0 bg-border md:block"></div>
 
-      <!-- Sizing Group -->
+      <!-- Framing + sizing. Fill crops to the square; Fit shows the whole frame. -->
+      <div class="flex shrink-0 items-center gap-2">
+        <Label
+          class="hidden shrink-0 text-xs font-medium text-muted-foreground sm:block"
+          >Frame</Label
+        >
+        <div
+          class="flex h-9 items-center rounded-md border bg-muted/40 p-0.5"
+          role="group"
+          aria-label="Thumbnail framing"
+        >
+          <button
+            type="button"
+            class={`h-full rounded px-2.5 text-xs font-medium transition-colors ${
+              $gridFit === 'fill'
+                ? 'shadow-xs bg-background text-foreground'
+                : 'text-muted-foreground hover:text-foreground'
+            }`}
+            aria-pressed={$gridFit === 'fill'}
+            onclick={() => gridFit.set('fill')}
+            title="Crop thumbnails to fill the square"
+          >
+            Fill
+          </button>
+          <button
+            type="button"
+            class={`h-full rounded px-2.5 text-xs font-medium transition-colors ${
+              $gridFit === 'fit'
+                ? 'shadow-xs bg-background text-foreground'
+                : 'text-muted-foreground hover:text-foreground'
+            }`}
+            aria-pressed={$gridFit === 'fit'}
+            onclick={() => gridFit.set('fit')}
+            title="Show the whole photo"
+          >
+            Fit
+          </button>
+        </div>
+      </div>
+
       <div class="flex min-w-[80px] max-w-[150px] flex-1 items-center gap-3">
         <Label
           class="hidden shrink-0 text-xs font-medium text-muted-foreground sm:block"
