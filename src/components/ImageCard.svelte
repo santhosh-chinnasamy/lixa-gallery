@@ -60,7 +60,7 @@
 </script>
 
 <Card.Root
-  class={`group relative cursor-pointer transition-all duration-200 ease-in-out hover:scale-[1.02] hover:shadow-lg focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-blue-500 focus-visible:ring-offset-2`}
+  class="group relative cursor-pointer transition-colors duration-150 hover:border-foreground/30 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-offset-2 focus-visible:ring-offset-background"
   {tabindex}
   onclick={handleClick}
   onkeypress={handleKeyPress}
@@ -108,7 +108,7 @@
           src={imageSrc}
           alt={fileName}
           loading={isVisible ? 'eager' : 'lazy'}
-          class={`h-full w-full object-cover transition-all duration-300 group-hover:scale-105 ${
+          class={`h-full w-full object-cover transition-opacity duration-300 ${
             imageLoaded ? 'opacity-100' : 'opacity-0'
           }`}
           onload={handleImageLoad}
