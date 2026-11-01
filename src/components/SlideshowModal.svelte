@@ -1,7 +1,12 @@
 <script lang="ts">
   import { Button } from '$lib/components/ui/button';
   import { cn } from '$lib/utils';
-  import { UNSUPPORTED_FORMAT_MESSAGE, viewerImageUrl } from '$lib/imageSource';
+  import { UNSUPPORTED_FORMAT_MESSAGE } from '$lib/imageSource';
+  import {
+    formatLabel,
+    immediateViewerSrc,
+    resolveViewerSrc,
+  } from '$lib/photoView';
   import { getCurrentWindow } from '@tauri-apps/api/window';
   import { untrack, onDestroy } from 'svelte';
   import { fade } from 'svelte/transition';
@@ -60,6 +65,7 @@
   let shuffleIndex = $state(0);
   let progress = $state(0); // 0 to 100%
   let isImageLoaded = $state(false);
+  let slideSrc = $state('');
 
   // Timing references (monotonic wall-clock)
   let rafId: number | null = null;
@@ -131,15 +137,46 @@
     }
 
     toPreload.forEach((photo) => {
-      if (!preloadedPaths.has(photo.path)) {
+      if (preloadedPaths.has(photo.path)) return;
+      const ready = immediateViewerSrc(photo);
+      if (ready) {
         preloadedPaths.add(photo.path);
-        const src = viewerImageUrl(photo);
-        if (!src) return;
         const img = new Image();
-        img.src = src;
+        img.src = ready;
+        return;
+      }
+      if (photo.is_raw) {
+        preloadedPaths.add(photo.path);
+        resolveViewerSrc(photo).then((src) => {
+          if (!src) return;
+          const img = new Image();
+          img.src = src;
+        });
       }
     });
   }
+
+  $effect(() => {
+    const photo = currentPhoto;
+    if (!open || !photo) {
+      slideSrc = '';
+      return;
+    }
+    let cancelled = false;
+    const ready = immediateViewerSrc(photo);
+    if (ready) {
+      slideSrc = ready;
+    } else {
+      slideSrc = '';
+      resolveViewerSrc(photo).then((src) => {
+        if (!cancelled && src) slideSrc = src;
+        else if (!cancelled) handleImageError();
+      });
+    }
+    return () => {
+      cancelled = true;
+    };
+  });
 
   // Animation frame ticker (monotonic wall-clock)
   function tickTimer() {
@@ -698,7 +735,6 @@
       <!-- Keyed Image Crossfade: completely eliminates WebKit texture reuse ghosting -->
       {#if currentPhoto}
         {#key currentPhoto.path}
-          {@const slideSrc = viewerImageUrl(currentPhoto)}
           {#if slideSrc}
             <img
               src={slideSrc}
@@ -727,42 +763,73 @@
       <!-- Detailed Info Overlay Card -->
       {#if showInfo && currentPhoto}
         <div
-          class="absolute bottom-24 left-6 z-20 max-w-sm rounded-xl border border-white/15 bg-black/75 p-4 text-white shadow-2xl backdrop-blur-xl"
+          class="absolute bottom-24 left-6 z-20 max-w-sm rounded-xl border border-border bg-background/95 p-4 text-foreground shadow-2xl backdrop-blur-xl"
           in:fade={{ duration: 150 }}
           out:fade={{ duration: 100 }}
         >
           <div
-            class="mb-2 flex items-center justify-between border-b border-white/10 pb-2"
+            class="mb-2 flex items-center justify-between border-b border-border pb-2"
           >
             <span
-              class="text-xs font-semibold uppercase tracking-wider text-white/60"
+              class="text-xs font-semibold uppercase tracking-wider text-muted-foreground"
             >
               Photo Info
             </span>
-            <span class="text-[11px] capitalize text-white/50">
-              {currentPhoto.metadata.name.split('.').pop() || 'Image'}
+            <span class="text-[11px] capitalize text-muted-foreground">
+              {formatLabel(currentPhoto)}
             </span>
           </div>
           <div class="space-y-1.5 text-xs">
-            <p class="truncate font-medium text-white/90">
+            <p class="truncate font-medium text-foreground">
               {currentPhoto.metadata.name}
             </p>
-            <div class="flex justify-between text-white/70">
+            <div class="flex justify-between text-muted-foreground">
               <span>Size:</span>
-              <span class="font-mono"
+              <span class="font-mono text-foreground"
                 >{formatBytes(currentPhoto.metadata.size)}</span
               >
             </div>
-            <div class="flex justify-between text-white/70">
+            {#if currentPhoto.exif?.camera}
+              <div class="flex justify-between gap-4 text-muted-foreground">
+                <span>Camera:</span>
+                <span class="truncate text-foreground"
+                  >{currentPhoto.exif.camera}</span
+                >
+              </div>
+            {/if}
+            {#if currentPhoto.exif?.shutter || currentPhoto.exif?.aperture || currentPhoto.exif?.iso}
+              <div class="flex justify-between gap-4 text-muted-foreground">
+                <span>Exposure:</span>
+                <span class="truncate text-foreground">
+                  {[
+                    currentPhoto.exif?.shutter,
+                    currentPhoto.exif?.aperture,
+                    currentPhoto.exif?.iso
+                      ? `ISO ${currentPhoto.exif.iso}`
+                      : '',
+                    currentPhoto.exif?.focal_length,
+                  ]
+                    .filter(Boolean)
+                    .join(' · ')}
+                </span>
+              </div>
+            {/if}
+            {#if currentPhoto.exif?.date}
+              <div class="flex justify-between gap-4 text-muted-foreground">
+                <span>Taken:</span>
+                <span class="text-foreground">{currentPhoto.exif.date}</span>
+              </div>
+            {/if}
+            <div class="flex justify-between text-muted-foreground">
               <span>Modified:</span>
-              <span>
+              <span class="text-foreground">
                 {new Intl.DateTimeFormat(undefined, {
                   dateStyle: 'medium',
                   timeStyle: 'short',
                 }).format(new Date(currentPhoto.metadata.modified * 1000))}
               </span>
             </div>
-            <div class="truncate pt-1 text-[11px] text-white/40">
+            <div class="truncate pt-1 text-[11px] text-muted-foreground/80">
               {currentPhoto.path}
             </div>
           </div>

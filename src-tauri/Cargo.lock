@@ -2458,6 +2458,7 @@ dependencies = [
  "gallery-core",
  "glob",
  "image",
+ "kamadak-exif",
  "log",
  "mime_guess",
  "rayon",
@@ -2618,6 +2619,15 @@ checksum = "a5a3cc660ba5d72bce0b3bb295bf20847ccbb40fd423f3f05b61273672e561fe"
 dependencies = [
  "serde",
  "serde_json",
+]
+
+[[package]]
+name = "kamadak-exif"
+version = "0.6.1"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "1130d80c7374efad55a117d715a3af9368f0fa7a2c54573afc15a188cd984837"
+dependencies = [
+ "mutate_once",
 ]
 
 [[package]]
@@ -2985,6 +2995,12 @@ dependencies = [
  "thiserror 2.0.16",
  "windows-sys 0.61.0",
 ]
+
+[[package]]
+name = "mutate_once"
+version = "0.1.2"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "13d2233c9842d08cfe13f9eac96e207ca6a2ea10b80259ebe8ad0268be27d2af"
 
 [[package]]
 name = "ndk"

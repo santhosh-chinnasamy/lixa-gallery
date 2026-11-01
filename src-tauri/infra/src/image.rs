@@ -1,8 +1,11 @@
+use crate::exif_info;
 use crate::fs_ops;
+use crate::raw_preview;
 use crate::thumbnail_cache::{self, ThumbnailIdentity};
 use async_trait::async_trait;
+use gallery_core::formats::is_raw_path;
 use gallery_core::image::ImageProcessor as ImageProcessorTrait;
-use gallery_core::models::{GalleryError, PhotoMetadata, Result};
+use gallery_core::models::{ExifInfo, GalleryError, PhotoMetadata, Result};
 use image::{GenericImageView, ImageDecoder};
 use std::path::{Path, PathBuf};
 use std::sync::Arc;
@@ -33,14 +36,44 @@ impl Default for RayonImageProcessor {
 #[async_trait]
 impl ImageProcessorTrait for RayonImageProcessor {
     async fn convert_image(&self, file_path: &Path, thumbnail_dir: &str) -> Result<PhotoMetadata> {
+        let metadata = fs_ops::get_file_metadata(file_path).await?;
+        let source_path = file_path.to_string_lossy().into_owned();
+        let is_raw = is_raw_path(file_path);
+
+        if is_raw {
+            let path = file_path.to_path_buf();
+            let thumb_dir = thumbnail_dir.to_string();
+            let pool = self.pool.clone();
+            let rendered = tokio::task::spawn_blocking(move || {
+                pool.install(|| raw_preview::render_raw(&path, &thumb_dir))
+            })
+            .await
+            .map_err(|err| GalleryError::Unknown(err.to_string()))??;
+
+            return Ok(PhotoMetadata {
+                metadata,
+                path: source_path,
+                thumbnail_path: rendered.thumbnail_path,
+                sidecar_path: None,
+                preview_path: rendered.preview_path,
+                exif: Some(rendered.exif),
+                is_raw: true,
+            });
+        }
+
         let ext = file_path
             .extension()
             .and_then(|s| s.to_str())
             .unwrap_or("")
             .to_lowercase();
 
-        let metadata = fs_ops::get_file_metadata(file_path).await?;
-        let source_path = file_path.to_string_lossy().into_owned();
+        let exif = {
+            let path = file_path.to_path_buf();
+            let pool = self.pool.clone();
+            tokio::task::spawn_blocking(move || pool.install(|| exif_info::from_path(&path)))
+                .await
+                .map_err(|err| GalleryError::Unknown(err.to_string()))?
+        };
 
         // Vector and web-native formats are served directly. They never occupy
         // a shared `{stem}.webp` slot in the thumbnail cache.
@@ -49,6 +82,10 @@ impl ImageProcessorTrait for RayonImageProcessor {
                 metadata,
                 path: source_path.clone(),
                 thumbnail_path: source_path,
+                sidecar_path: None,
+                preview_path: None,
+                exif: Some(exif),
+                is_raw: false,
             });
         }
 
@@ -63,6 +100,10 @@ impl ImageProcessorTrait for RayonImageProcessor {
                 metadata,
                 path: source_path,
                 thumbnail_path: output_path.to_string_lossy().into_owned(),
+                sidecar_path: None,
+                preview_path: None,
+                exif: Some(exif),
+                is_raw: false,
             });
         }
 
@@ -114,7 +155,20 @@ impl ImageProcessorTrait for RayonImageProcessor {
             metadata,
             path: source_path,
             thumbnail_path,
+            sidecar_path: None,
+            preview_path: None,
+            exif: Some(exif),
+            is_raw: false,
         })
+    }
+
+    async fn read_exif(&self, file_path: &Path) -> Result<Option<ExifInfo>> {
+        let path = file_path.to_path_buf();
+        let pool = self.pool.clone();
+        let info = tokio::task::spawn_blocking(move || pool.install(|| exif_info::from_path(&path)))
+            .await
+            .map_err(|err| GalleryError::Unknown(err.to_string()))?;
+        Ok(Some(info))
     }
 }
 
