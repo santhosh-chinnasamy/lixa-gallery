@@ -84,29 +84,35 @@ impl GalleryService {
         let mut metadata_stream = stream::iter(image_files)
             .map(|file_path| async move {
                 let path_str = file_path.to_string_lossy().to_string();
-                if let Ok(current_metadata) = fs_ref.get_file_metadata(&file_path).await {
-                    if let Some((thumb_path, db_mtime, db_size)) = db_lookup_ref.get(&path_str) {
-                        // `{stem}.webp` rows from the v1 cache are not unique
-                        // across folders, so only a current identity file counts.
-                        if current_metadata.modified as i64 == *db_mtime
-                            && current_metadata.size as i64 == *db_size
-                            && stored_thumbnail_is_current(thumb_path, *db_mtime, *db_size)
-                            && Path::new(thumb_path).exists()
+                match fs_ref.get_file_metadata(&file_path).await {
+                    Ok(current_metadata) => {
+                        if let Some((thumb_path, db_mtime, db_size)) = db_lookup_ref.get(&path_str)
                         {
-                            return MetaResult::Cached(PhotoMetadata {
-                                metadata: current_metadata,
-                                thumbnail_path: thumb_path.to_string(),
-                                path: path_str,
-                            });
+                            // `{stem}.webp` rows from the v1 cache are not unique
+                            // across folders, so only a current identity file counts.
+                            if current_metadata.modified as i64 == *db_mtime
+                                && current_metadata.size as i64 == *db_size
+                                && stored_thumbnail_is_current(thumb_path, *db_mtime, *db_size)
+                                && Path::new(thumb_path).exists()
+                            {
+                                return MetaResult::Cached(PhotoMetadata {
+                                    metadata: current_metadata,
+                                    thumbnail_path: thumb_path.to_string(),
+                                    path: path_str,
+                                });
+                            }
                         }
+                        MetaResult::NeedsProcessing(PhotoMetadata {
+                            metadata: current_metadata,
+                            thumbnail_path: String::new(), // Signal for lazy loading/processing
+                            path: path_str,
+                        })
                     }
-                    return MetaResult::NeedsProcessing(PhotoMetadata {
-                        metadata: current_metadata,
-                        thumbnail_path: String::new(), // Signal for lazy loading/processing
-                        path: path_str,
-                    });
+                    Err(error) => {
+                        log::warn!("Skipping file during scan: {path_str} ({error})");
+                        MetaResult::Failed
+                    }
                 }
-                MetaResult::Failed
             })
             .buffer_unordered(32); // Max 32 concurrent OS stat calls
 

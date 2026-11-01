@@ -12,6 +12,7 @@
     "opener:default",
     "dialog:default",
     "log:default",
-    "core:path:default"
+    "core:path:default",
+    "window-state:default"
   ]
 }

@@ -4,7 +4,8 @@
   import '../app.css';
   import AppSidebar from '../components/AppSidebar.svelte';
   import type { KeyboardActions } from '../types/events';
-  import { error as logError, initLogger } from '$lib/logger';
+  import { initLogger } from '$lib/logger';
+  import ErrorToast from '../components/common/ErrorToast.svelte';
   import type { Snippet } from 'svelte';
 
   let { children }: { children?: Snippet } = $props();
@@ -27,7 +28,10 @@
       const action = keyboardActions[event.key];
       if (action) action();
     } catch (error) {
-      logError(`Error executing keyboard action: [key: ${event.key}] ${error}`);
+      console.error(
+        `Error executing keyboard action: [key: ${event.key}]`,
+        error,
+      );
     }
   };
 </script>
@@ -44,5 +48,6 @@
         {@render children?.()}
       </div>
     </main>
+    <ErrorToast />
   </div>
 </Sidebar.Provider>
