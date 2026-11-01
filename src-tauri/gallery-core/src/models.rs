@@ -68,6 +68,34 @@ pub struct ExportOptions {
     pub preserve_folder_structure: bool,
 }
 
+#[derive(Debug, Clone, Copy, Serialize, Deserialize, PartialEq, Eq)]
+#[serde(rename_all = "lowercase")]
+pub enum ExportFileStatus {
+    Copied,
+    Moved,
+    Skipped,
+    Failed,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
+pub struct ExportFileResult {
+    pub source: String,
+    pub destination: Option<String>,
+    pub status: ExportFileStatus,
+    pub reason: Option<String>,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
+pub struct ExportResult {
+    pub destination: String,
+    pub mode: String,
+    pub copied: usize,
+    pub moved: usize,
+    pub skipped: usize,
+    pub failed: usize,
+    pub files: Vec<ExportFileResult>,
+}
+
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct Workspace {
     pub id: String,
@@ -99,6 +127,29 @@ mod tests {
 
         assert_eq!(deserialized.metadata.name, "test.jpg");
         assert_eq!(deserialized.path, "/home/user/test.jpg");
+    }
+
+    #[test]
+    fn test_export_result_serialization() {
+        let result = ExportResult {
+            destination: "/export".to_string(),
+            mode: "copy".to_string(),
+            copied: 0,
+            moved: 0,
+            skipped: 0,
+            failed: 1,
+            files: vec![ExportFileResult {
+                source: "/photos/a.jpg".to_string(),
+                destination: Some("/export/a.jpg".to_string()),
+                status: ExportFileStatus::Failed,
+                reason: Some("permission denied".to_string()),
+            }],
+        };
+
+        let json = serde_json::to_string(&result).unwrap();
+        assert!(json.contains("\"status\":\"failed\""));
+        let deserialized: ExportResult = serde_json::from_str(&json).unwrap();
+        assert_eq!(deserialized, result);
     }
 
     #[test]

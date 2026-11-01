@@ -32,3 +32,22 @@ export interface ExportOptions {
   paths?: string[];
   preserve_folder_structure?: boolean;
 }
+
+export type ExportFileStatus = 'copied' | 'moved' | 'skipped' | 'failed';
+
+export interface ExportFileResult {
+  source: string;
+  destination: string | null;
+  status: ExportFileStatus;
+  reason: string | null;
+}
+
+export interface ExportResult {
+  destination: string;
+  mode: string;
+  copied: number;
+  moved: number;
+  skipped: number;
+  failed: number;
+  files: ExportFileResult[];
+}

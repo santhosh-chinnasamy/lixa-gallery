@@ -10,7 +10,7 @@ import {
   loadingMode,
 } from '../../stores/galleryStore';
 import { get } from 'svelte/store';
-import type { PhotoMetadata } from '../../types/photo';
+import type { ExportResult, PhotoMetadata } from '../../types/photo';
 
 export async function loadPath(folderPath: string, isRoot = true) {
   try {
@@ -63,25 +63,38 @@ export async function exportFavorites(
   mode: 'copy' | 'move' = 'copy',
   paths?: string[],
   preserveFolderStructure = false,
-) {
-  try {
-    const destination = await open({
-      multiple: false,
-      directory: true,
-    });
-    if (!destination) return;
+): Promise<ExportResult | null> {
+  const destination = await open({
+    multiple: false,
+    directory: true,
+  });
+  if (!destination) return null;
 
-    await invoke('export_favourites', {
+  try {
+    return await invoke<ExportResult>('export_favourites', {
       destination,
       mode,
       paths: paths && paths.length > 0 ? paths : null,
       preserveFolderStructure,
     });
-
-    return destination;
   } catch (error) {
     console.error('Failed to export files:', error);
-    throw error;
+    const reason = error instanceof Error ? error.message : String(error);
+    const failedPaths = paths && paths.length > 0 ? paths : [''];
+    return {
+      destination,
+      mode,
+      copied: 0,
+      moved: 0,
+      skipped: 0,
+      failed: failedPaths.filter((path) => path.length > 0).length || 1,
+      files: failedPaths.map((source) => ({
+        source,
+        destination: null,
+        status: 'failed',
+        reason,
+      })),
+    };
   }
 }
 
