@@ -66,6 +66,30 @@ function createGridSizeStore() {
 
 export const gridSize = createGridSizeStore();
 
+export type GridFit = 'fill' | 'fit';
+
+function createGridFitStore() {
+  const STORAGE_KEY = 'grid_fit';
+  const stored =
+    typeof localStorage !== 'undefined'
+      ? localStorage.getItem(STORAGE_KEY)
+      : null;
+  const initialValue: GridFit = stored === 'fit' ? 'fit' : 'fill';
+  const { subscribe, set } = writable<GridFit>(initialValue);
+
+  return {
+    subscribe,
+    set: (fit: GridFit) => {
+      if (typeof localStorage !== 'undefined') {
+        localStorage.setItem(STORAGE_KEY, fit);
+      }
+      set(fit);
+    },
+  };
+}
+
+export const gridFit = createGridFitStore();
+
 function createExpandedFoldersStore() {
   const { subscribe, update, set } = writable<Set<string>>(new Set());
   return {

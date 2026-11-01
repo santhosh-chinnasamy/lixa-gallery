@@ -1,6 +1,6 @@
 <script lang="ts">
   import * as Card from '$lib/components/ui/card';
-  import { favorites } from '../stores/galleryStore';
+  import { favorites, gridFit } from '../stores/galleryStore';
   import Filename from './Filename.svelte';
   import Heart from '@lucide/svelte/icons/heart';
   import type { PhotoMetadata } from '../types/photo';
@@ -19,6 +19,7 @@
 
   let isFavourite = $derived($favorites.has(photo.path));
   let fileName = $derived(photo.metadata.name);
+  let showWholeFrame = $derived($gridFit === 'fit');
 
   // Determine the image source: ALWAYS use our custom protocol for thumbnails.
   // It handles both cached and on-the-fly generation efficiently in Rust.
@@ -69,7 +70,9 @@
   <Card.Content class="relative overflow-hidden rounded-lg p-0">
     <!-- Image container with consistent aspect ratio -->
     <div
-      class="aspect-[1/1] h-auto w-full overflow-hidden bg-gray-100 dark:bg-gray-800"
+      class={`aspect-[1/1] h-auto w-full overflow-hidden ${
+        showWholeFrame ? 'bg-neutral-300 dark:bg-neutral-800' : 'bg-muted'
+      }`}
     >
       <!-- Loading placeholder -->
       {#if !imageLoaded && !imageError}
@@ -97,9 +100,9 @@
         src={thumbnailSrc}
         alt={fileName}
         loading={isVisible ? 'eager' : 'lazy'}
-        class={`h-full w-full object-cover transition-opacity duration-300 ${
-          imageLoaded ? 'opacity-100' : 'opacity-0'
-        }`}
+        class={`h-full w-full transition-opacity duration-300 ${
+          showWholeFrame ? 'object-contain' : 'object-cover'
+        } ${imageLoaded ? 'opacity-100' : 'opacity-0'}`}
         onload={handleImageLoad}
         onerror={handleImageError}
       />
