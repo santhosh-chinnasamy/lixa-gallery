@@ -1,4 +1,5 @@
 use async_trait::async_trait;
+use gallery_core::formats::is_raw_extension;
 use gallery_core::fs::FileSystem;
 use gallery_core::models::{FileMetadata, GalleryError, Result};
 use std::{
@@ -55,21 +56,8 @@ impl FileSystem for LocalFileSystem {
                 continue;
             }
             if let Some(ext) = path.extension().and_then(|s| s.to_str()) {
-                if matches!(
-                    ext.to_lowercase().as_str(),
-                    "jpg"
-                        | "jpeg"
-                        | "png"
-                        | "webp"
-                        | "bmp"
-                        | "gif"
-                        | "tiff"
-                        | "tif"
-                        | "avif"
-                        | "heic"
-                        | "heif"
-                        | "svg"
-                ) {
+                let ext = ext.to_lowercase();
+                if is_browser_image(&ext) || is_raw_extension(&ext) {
                     images.push(path);
                 }
             }
@@ -111,6 +99,24 @@ impl FileSystem for LocalFileSystem {
     }
 }
 
+fn is_browser_image(ext: &str) -> bool {
+    matches!(
+        ext,
+        "jpg"
+            | "jpeg"
+            | "png"
+            | "webp"
+            | "bmp"
+            | "gif"
+            | "tiff"
+            | "tif"
+            | "avif"
+            | "heic"
+            | "heif"
+            | "svg"
+    )
+}
+
 pub async fn get_file_metadata<P: AsRef<Path>>(path: P) -> Result<FileMetadata> {
     LocalFileSystem.get_file_metadata(path.as_ref()).await
 }
@@ -131,10 +137,18 @@ mod tests {
         File::create(&other_path).unwrap();
 
         let fs = LocalFileSystem;
+        let raw_path = dir.path().join("shot.CR2");
+        File::create(&raw_path).unwrap();
+
         let images = fs.list_images_in_dir(dir.path()).await.unwrap();
 
-        assert_eq!(images.len(), 1);
-        assert_eq!(images[0].file_name().unwrap(), "test.jpg");
+        assert_eq!(images.len(), 2);
+        assert!(images
+            .iter()
+            .any(|path| path.file_name().unwrap() == "test.jpg"));
+        assert!(images
+            .iter()
+            .any(|path| path.file_name().unwrap() == "shot.CR2"));
     }
 
     #[tokio::test]

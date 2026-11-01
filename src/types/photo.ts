@@ -1,7 +1,26 @@
+export interface ExifInfo {
+  camera?: string;
+  lens?: string;
+  focal_length?: string;
+  aperture?: string;
+  shutter?: string;
+  iso?: number;
+  date?: string;
+  captured_at?: number;
+  captured_subsec?: number;
+  width?: number;
+  height?: number;
+  orientation?: string;
+}
+
 export interface PhotoMetadata {
   metadata: FileMetadata;
   thumbnail_path: string;
   path: string;
+  sidecar_path?: string;
+  preview_path?: string;
+  exif?: ExifInfo;
+  is_raw?: boolean;
 }
 
 export interface FileMetadata {

@@ -18,6 +18,7 @@ async fn test_favourite_flow() {
     });
     let fs = Arc::new(FakeFileSystem {
         files: Mutex::new(vec![]),
+        copied: Mutex::new(vec![]),
     });
 
     let service = FavouriteService::new(repo.clone(), photo_repo, workspace_repo, fs);
@@ -54,6 +55,10 @@ async fn test_get_favourite_photos_and_groups() {
             },
             thumbnail_path: "thumb1".to_string(),
             path: "/wedding/img1.jpg".to_string(),
+            sidecar_path: None,
+            preview_path: None,
+            exif: None,
+            is_raw: false,
         }]),
     });
     let workspace_repo = Arc::new(FakeWorkspaceRepository {
@@ -75,6 +80,7 @@ async fn test_get_favourite_photos_and_groups() {
                 size: 300,
             },
         )]),
+        copied: Mutex::new(vec![]),
     });
 
     let service = FavouriteService::new(repo.clone(), photo_repo, workspace_repo, fs);
@@ -122,9 +128,10 @@ async fn test_export_favourites_selective() {
     });
     let fs = Arc::new(FakeFileSystem {
         files: Mutex::new(vec![]),
+        copied: Mutex::new(vec![]),
     });
 
-    let service = FavouriteService::new(repo.clone(), photo_repo, workspace_repo, fs);
+    let service = FavouriteService::new(repo.clone(), photo_repo, workspace_repo, fs.clone());
 
     service.add_favourite("/a/1.jpg".to_string()).await.unwrap();
     service.add_favourite("/b/2.jpg".to_string()).await.unwrap();
@@ -140,4 +147,58 @@ async fn test_export_favourites_selective() {
     };
 
     service.export_favourites(&events, opts).await.unwrap();
+    assert_eq!(fs.copied.lock().unwrap().len(), 1);
+}
+
+#[tokio::test]
+async fn test_export_copies_the_raw_sibling_of_a_jpeg_pick() {
+    let repo = Arc::new(FakeFavouriteRepository {
+        favourites: Mutex::new(vec![]),
+    });
+    let photo_repo = Arc::new(FakePhotoRepository {
+        photos: Mutex::new(vec![]),
+    });
+    let workspace_repo = Arc::new(FakeWorkspaceRepository {
+        workspaces: Mutex::new(vec![]),
+    });
+    let fs = Arc::new(FakeFileSystem {
+        files: Mutex::new(vec![
+            (
+                PathBuf::from("/cards/IMG_0001.jpg"),
+                FileMetadata {
+                    name: "IMG_0001.jpg".to_string(),
+                    modified: 1,
+                    created: 1,
+                    size: 10,
+                },
+            ),
+            (
+                PathBuf::from("/cards/IMG_0001.CR2"),
+                FileMetadata {
+                    name: "IMG_0001.CR2".to_string(),
+                    modified: 1,
+                    created: 1,
+                    size: 20,
+                },
+            ),
+        ]),
+        copied: Mutex::new(vec![]),
+    });
+
+    let service = FavouriteService::new(repo, photo_repo, workspace_repo, fs.clone());
+    let opts = ExportOptions {
+        destination: "/export".to_string(),
+        mode: "copy".to_string(),
+        paths: Some(vec!["/cards/IMG_0001.jpg".to_string()]),
+        preserve_folder_structure: false,
+    };
+    service
+        .export_favourites(&FakeEventHub, opts)
+        .await
+        .unwrap();
+
+    let copied = fs.copied.lock().unwrap();
+    let sources: Vec<_> = copied.iter().map(|(from, _)| from.clone()).collect();
+    assert!(sources.contains(&PathBuf::from("/cards/IMG_0001.jpg")));
+    assert!(sources.contains(&PathBuf::from("/cards/IMG_0001.CR2")));
 }

@@ -1,9 +1,10 @@
 use async_recursion::async_recursion;
 use gallery_core::benchmark::BenchmarkLogger;
+use gallery_core::formats::{group_raw_jpeg_pairs, is_raw_path};
 use gallery_core::fs::FileSystem;
 use gallery_core::image::ImageProcessor;
-use gallery_core::models::{FolderNode, LoadingMode, PhotoMetadata, Result};
-use gallery_core::repos::PhotoRepository;
+use gallery_core::models::{ExifInfo, FolderNode, LoadingMode, PhotoMetadata, Result};
+use gallery_core::repos::{CachedPhotoRecord, PhotoRepository};
 use std::{
     collections::HashMap,
     path::{Path, PathBuf},
@@ -49,7 +50,8 @@ impl GalleryService {
 
         let folder_path = PathBuf::from(folder);
         let image_files = self.fs.list_images_in_dir(&folder_path).await?;
-        let file_count = image_files.len();
+        let groups = group_raw_jpeg_pairs(image_files);
+        let file_count = groups.len();
 
         let mut prefix = folder.to_string();
         if !prefix.ends_with(std::path::MAIN_SEPARATOR) {
@@ -57,68 +59,96 @@ impl GalleryService {
         }
 
         let cached_rows = self.photo_repo.get_cached_photos_for_path(&prefix).await?;
-        let db_lookup: HashMap<String, (String, i64, i64)> = cached_rows
+        let db_lookup: HashMap<String, CachedPhotoRecord> = cached_rows
             .into_iter()
-            .map(|record| {
-                (
-                    record.path,
-                    (record.thumbnail_path, record.mtime, record.size),
-                )
-            })
+            .map(|record| (record.path.clone(), record))
             .collect();
 
-        // 1. Concurrently read file metadata
         let fs_ref = &self.fs;
         let db_lookup_ref = &db_lookup;
+        let processor = &self.image_processor;
+        let lazy = mode == LoadingMode::Lazy;
+
+        enum MetaResult {
+            Cached { photo: PhotoMetadata, persist: bool },
+            NeedsProcessing(PhotoMetadata),
+        }
 
         let mut needs_processing = Vec::new();
         let mut all_photos = Vec::new();
+        let mut pending_writes = Vec::new();
 
-        enum MetaResult {
-            Cached(PhotoMetadata),
-            NeedsProcessing(PhotoMetadata),
-            Failed,
-        }
-
-        let mut metadata_stream = stream::iter(image_files)
-            .map(|file_path| async move {
+        let mut metadata_stream = stream::iter(groups)
+            .map(|group| async move {
+                let file_path = group.primary;
+                let sidecar = group
+                    .sidecar
+                    .map(|path| path.to_string_lossy().into_owned());
                 let path_str = file_path.to_string_lossy().to_string();
-                if let Ok(current_metadata) = fs_ref.get_file_metadata(&file_path).await {
-                    if let Some((thumb_path, db_mtime, db_size)) = db_lookup_ref.get(&path_str) {
-                        if current_metadata.modified as i64 == *db_mtime
-                            && current_metadata.size as i64 == *db_size
-                            && Path::new(thumb_path).exists()
-                        {
-                            return MetaResult::Cached(PhotoMetadata {
-                                metadata: current_metadata,
-                                thumbnail_path: thumb_path.to_string(),
-                                path: path_str,
-                            });
+                let Ok(current_metadata) = fs_ref.get_file_metadata(&file_path).await else {
+                    return None;
+                };
+                let is_raw = is_raw_path(&file_path);
+
+                if let Some(record) = db_lookup_ref.get(&path_str) {
+                    let thumb_ready = record.thumbnail_path.is_empty()
+                        || Path::new(&record.thumbnail_path).exists();
+                    if current_metadata.modified as i64 == record.mtime
+                        && current_metadata.size as i64 == record.size
+                        && thumb_ready
+                    {
+                        let mut photo = PhotoMetadata {
+                            metadata: current_metadata,
+                            thumbnail_path: record.thumbnail_path.clone(),
+                            path: path_str,
+                            sidecar_path: sidecar.clone(),
+                            preview_path: record.preview_path.clone(),
+                            exif: record.exif.clone(),
+                            is_raw,
+                        };
+                        let mut persist = record.sidecar_path != sidecar;
+                        if record.exif.is_none() {
+                            photo.exif = processor.read_exif(&file_path).await.ok().flatten();
+                            persist = true;
                         }
+                        return Some(MetaResult::Cached { photo, persist });
                     }
-                    return MetaResult::NeedsProcessing(PhotoMetadata {
-                        metadata: current_metadata,
-                        thumbnail_path: String::new(), // Signal for lazy loading/processing
-                        path: path_str,
-                    });
                 }
-                MetaResult::Failed
+
+                let mut photo = PhotoMetadata {
+                    metadata: current_metadata,
+                    thumbnail_path: String::new(),
+                    path: path_str,
+                    sidecar_path: sidecar,
+                    preview_path: None,
+                    exif: None,
+                    is_raw,
+                };
+                if lazy {
+                    photo.exif = processor.read_exif(&file_path).await.ok().flatten();
+                }
+                Some(MetaResult::NeedsProcessing(photo))
             })
-            .buffer_unordered(32); // Max 32 concurrent OS stat calls
+            .buffer_unordered(32);
 
         while let Some(result) = metadata_stream.next().await {
             match result {
-                MetaResult::Cached(photo) => all_photos.push(photo),
-                MetaResult::NeedsProcessing(photo) => {
-                    needs_processing.push(photo);
+                Some(MetaResult::Cached { photo, persist }) => {
+                    if persist {
+                        pending_writes.push(photo.clone());
+                    }
+                    all_photos.push(photo);
                 }
-                MetaResult::Failed => {}
+                Some(MetaResult::NeedsProcessing(photo)) => needs_processing.push(photo),
+                None => {}
             }
         }
 
-        let final_result;
+        if !pending_writes.is_empty() {
+            self.photo_repo.batch_insert_photos(&pending_writes).await?;
+        }
 
-        if mode == LoadingMode::Lazy {
+        let photos = if mode == LoadingMode::Lazy {
             let total_found = all_photos.len() + needs_processing.len();
             log::info!(
                 "Lazy mode: Returning {} photos immediately. {} need background processing.",
@@ -130,7 +160,6 @@ impl GalleryService {
             let background_photos = needs_processing.clone();
             final_photos.extend(needs_processing);
 
-            // Spawn background indexer
             if !background_photos.is_empty() {
                 let photo_repo = self.photo_repo.clone();
                 let processor = self.image_processor.clone();
@@ -148,18 +177,23 @@ impl GalleryService {
                             .convert_image(Path::new(&photo.path), &t_path)
                             .await
                         {
-                            Ok(processed_photo) => {
+                            Ok(mut processed_photo) => {
+                                processed_photo.sidecar_path = photo.sidecar_path;
+                                processed_photo.is_raw = photo.is_raw;
+                                if processed_photo.exif.is_none() {
+                                    processed_photo.exif = photo.exif;
+                                }
                                 chunk.push(processed_photo);
                                 if chunk.len() >= 10 {
                                     let _ = photo_repo.batch_insert_photos(&chunk).await;
                                     chunk.clear();
                                 }
                             }
-                            Err(e) => {
+                            Err(err) => {
                                 log::debug!(
                                     "Background processing skipped for {}: {}",
                                     photo.path,
-                                    e
+                                    err
                                 );
                             }
                         }
@@ -172,21 +206,29 @@ impl GalleryService {
                 });
             }
 
-            final_result = Ok(final_photos);
+            final_photos
         } else {
-            // 2. Concurrently process new thumbnails (Sync Mode)
             if !needs_processing.is_empty() {
                 let processor = self.image_processor.clone();
                 let thumb_path_str = thumbnail_path.to_string();
-
-                // Increase concurrency since we now have a global semaphore to protect CPU
                 let max_concurrent_tasks = 8;
 
                 let mut processing_stream = stream::iter(needs_processing)
                     .map(|photo| {
                         let p = processor.clone();
                         let t = thumb_path_str.clone();
-                        async move { p.convert_image(Path::new(&photo.path), &t).await }
+                        async move {
+                            let sidecar = photo.sidecar_path.clone();
+                            let is_raw = photo.is_raw;
+                            match p.convert_image(Path::new(&photo.path), &t).await {
+                                Ok(mut processed) => {
+                                    processed.sidecar_path = sidecar;
+                                    processed.is_raw = is_raw;
+                                    Ok(processed)
+                                }
+                                Err(err) => Err(err),
+                            }
+                        }
                     })
                     .buffer_unordered(max_concurrent_tasks);
 
@@ -195,7 +237,6 @@ impl GalleryService {
                     processed_photos.push(photo);
                 }
 
-                // 3. Chunk database insertions
                 if !processed_photos.is_empty() {
                     for chunk in processed_photos.chunks(100) {
                         self.photo_repo.batch_insert_photos(chunk).await?;
@@ -203,34 +244,31 @@ impl GalleryService {
                     all_photos.extend(processed_photos);
                 }
             }
-            final_result = Ok(all_photos);
-        }
+            all_photos
+        };
 
         let elapsed = start_time.elapsed();
         let duration_ms = elapsed.as_millis() as u64;
-
-        if let Ok(_) = final_result {
-            let entry = BenchmarkEntry {
-                timestamp: chrono::Utc::now(),
-                approach_name: "rayon_fixed_pool".to_string(),
-                operation: "full_folder_scan".to_string(),
-                file_count,
-                duration_ms,
-                avg_ms_per_image: if file_count > 0 {
-                    duration_ms as f64 / file_count as f64
-                } else {
-                    0.0
-                },
-                cpu_cores_detected: std::thread::available_parallelism()
-                    .map(|n| n.get())
-                    .unwrap_or(1),
-                mode: format!("{:?}", mode),
-            };
-            let _ = self.benchmark_logger.log(entry).await;
-        }
+        let entry = BenchmarkEntry {
+            timestamp: chrono::Utc::now(),
+            approach_name: "rayon_fixed_pool".to_string(),
+            operation: "full_folder_scan".to_string(),
+            file_count,
+            duration_ms,
+            avg_ms_per_image: if file_count > 0 {
+                duration_ms as f64 / file_count as f64
+            } else {
+                0.0
+            },
+            cpu_cores_detected: std::thread::available_parallelism()
+                .map(|n| n.get())
+                .unwrap_or(1),
+            mode: format!("{:?}", mode),
+        };
+        let _ = self.benchmark_logger.log(entry).await;
 
         log::info!("Scan folder ({:?}) took: {:?}", mode, elapsed);
-        final_result
+        Ok(photos)
     }
 
     pub async fn get_or_create_thumbnail(
@@ -238,14 +276,54 @@ impl GalleryService {
         original_path: &Path,
         thumb_dir: &str,
     ) -> Result<String> {
-        let metadata = self
+        let metadata = self.materialize(original_path, thumb_dir).await?;
+        Ok(metadata.thumbnail_path)
+    }
+
+    /// Build the viewer JPEG for a RAW file and remember it. JPEG paths come back unchanged.
+    pub async fn ensure_raw_preview(
+        &self,
+        original_path: &Path,
+        thumb_dir: &str,
+    ) -> Result<Option<String>> {
+        if !is_raw_path(original_path) {
+            return Ok(Some(original_path.to_string_lossy().into_owned()));
+        }
+        let metadata = self.materialize(original_path, thumb_dir).await?;
+        Ok(metadata.preview_path)
+    }
+
+    async fn materialize(&self, original_path: &Path, thumb_dir: &str) -> Result<PhotoMetadata> {
+        let mut metadata = self
             .image_processor
             .convert_image(original_path, thumb_dir)
             .await?;
+        if let Ok(existing) = self
+            .photo_repo
+            .get_photos_by_paths(&[metadata.path.clone()])
+            .await
+        {
+            if let Some(row) = existing.into_iter().next() {
+                if metadata.sidecar_path.is_none() {
+                    metadata.sidecar_path = row.sidecar_path;
+                }
+                let incoming_empty = metadata
+                    .exif
+                    .as_ref()
+                    .map(ExifInfo::is_empty)
+                    .unwrap_or(true);
+                if incoming_empty && row.exif.is_some() {
+                    metadata.exif = row.exif;
+                }
+                if metadata.preview_path.is_none() {
+                    metadata.preview_path = row.preview_path;
+                }
+            }
+        }
         self.photo_repo
             .batch_insert_photos(&[metadata.clone()])
             .await?;
-        Ok(metadata.thumbnail_path)
+        Ok(metadata)
     }
 
     #[async_recursion]

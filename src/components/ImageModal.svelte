@@ -1,8 +1,12 @@
 <script lang="ts">
   import { Button } from '$lib/components/ui/button';
   import { cn } from '$lib/utils';
-  import { convertFileSrc } from '@tauri-apps/api/core';
   import { fade, scale as scaleTransition } from 'svelte/transition';
+  import {
+    formatLabel,
+    immediateViewerSrc,
+    resolveViewerSrc,
+  } from '$lib/photoView';
   import { favorites, photos } from '../stores/galleryStore';
   import Filename from './Filename.svelte';
   import X from '@lucide/svelte/icons/x';
@@ -57,6 +61,7 @@
   let showInfo = $state(false);
   let imageWidth = $state(0);
   let imageHeight = $state(0);
+  let viewerSrc = $state('');
 
   let showUI = $state(true);
   let uiTimeoutRef: ReturnType<typeof setTimeout>;
@@ -217,9 +222,19 @@
     indicesToPreload.forEach((index) => {
       const photo = photoSource[index];
       if (photo && !preloadedImages.has(photo.path)) {
-        const img = new Image();
-        img.src = convertFileSrc(photo.path);
-        preloadedImages.set(photo.path, img);
+        const ready = immediateViewerSrc(photo);
+        if (ready) {
+          const img = new Image();
+          img.src = ready;
+          preloadedImages.set(photo.path, img);
+        } else if (photo.is_raw) {
+          resolveViewerSrc(photo).then((src) => {
+            if (!src || preloadedImages.has(photo.path)) return;
+            const img = new Image();
+            img.src = src;
+            preloadedImages.set(photo.path, img);
+          });
+        }
       }
     });
   }
@@ -441,6 +456,29 @@
   });
 
   $effect(() => {
+    const photo = selectedImage;
+    if (!photo) {
+      viewerSrc = '';
+      return;
+    }
+    let cancelled = false;
+    const ready = immediateViewerSrc(photo);
+    if (ready) {
+      viewerSrc = ready;
+    } else {
+      viewerSrc = '';
+      resolveViewerSrc(photo).then((src) => {
+        if (cancelled) return;
+        if (src) viewerSrc = src;
+        else imageError = true;
+      });
+    }
+    return () => {
+      cancelled = true;
+    };
+  });
+
+  $effect(() => {
     // Automatically runs when zoomScale, containerWidth, or containerHeight changes
     if (zoomScale || containerWidth || containerHeight) {
       clampOffsets();
@@ -542,30 +580,32 @@
 
         <!-- svelte-ignore a11y_no_noninteractive_element_interactions -->
         <!-- svelte-ignore a11y_click_events_have_key_events -->
-        <!-- Main image -->
-        <img
-          bind:this={imageEl}
-          src={convertFileSrc(selectedImage.path)}
-          alt={fileName}
-          draggable="false"
-          class={`relative z-10 max-h-full max-w-full rounded-lg object-contain shadow-2xl transition-opacity duration-300 ${
-            imageLoaded ? 'opacity-100' : 'opacity-0'
-          } ${zoomScale > 1.0 ? 'cursor-grab' : 'cursor-default'} ${isDragging || isTouchDragging ? 'cursor-grabbing' : ''}`}
-          style="filter: drop-shadow(0 25px 25px rgb(0 0 0 / 0.5)) {filterStyle
-            ? ' ' + filterStyle
-            : ''}; transform: translate({offsetX}px, {offsetY}px) scale({zoomScale}); transition: {isDragging ||
-          isTouchDragging
-            ? 'none'
-            : 'transform 0.15s ease-out, filter 0.2s ease-in-out'}; transform-origin: center center;"
-          onload={handleImageLoad}
-          onerror={handleImageError}
-          onmousedown={handleMouseDown}
-          ondblclick={handleDoubleClick}
-        />
+        <!-- Main image. RAW files use the extracted preview JPEG. -->
+        {#if viewerSrc}
+          <img
+            bind:this={imageEl}
+            src={viewerSrc}
+            alt={fileName}
+            draggable="false"
+            class={`relative z-10 max-h-full max-w-full rounded-lg object-contain shadow-2xl transition-opacity duration-300 ${
+              imageLoaded ? 'opacity-100' : 'opacity-0'
+            } ${zoomScale > 1.0 ? 'cursor-grab' : 'cursor-default'} ${isDragging || isTouchDragging ? 'cursor-grabbing' : ''}`}
+            style="filter: drop-shadow(0 25px 25px rgb(0 0 0 / 0.5)) {filterStyle
+              ? ' ' + filterStyle
+              : ''}; transform: translate({offsetX}px, {offsetY}px) scale({zoomScale}); transition: {isDragging ||
+            isTouchDragging
+              ? 'none'
+              : 'transform 0.15s ease-out, filter 0.2s ease-in-out'}; transform-origin: center center;"
+            onload={handleImageLoad}
+            onerror={handleImageError}
+            onmousedown={handleMouseDown}
+            ondblclick={handleDoubleClick}
+          />
+        {/if}
 
         <!-- Info Panel Overlay -->
         <div
-          class={`absolute bottom-0 right-0 top-0 z-30 w-72 transform bg-black/60 p-6 text-sm text-white shadow-2xl backdrop-blur-xl transition-transform duration-300 ease-in-out ${
+          class={`absolute bottom-0 right-0 top-0 z-30 w-72 transform overflow-y-auto bg-black/60 p-6 text-sm text-white shadow-2xl backdrop-blur-xl transition-transform duration-300 ease-in-out ${
             showInfo ? 'translate-x-0' : 'translate-x-full'
           }`}
         >
@@ -611,7 +651,7 @@
                   Format
                 </p>
                 <p class="mt-1 capitalize">
-                  {fileName?.split('.').pop() || 'Unknown'}
+                  {formatLabel(selectedImage)}
                 </p>
               </div>
             </div>
@@ -623,13 +663,104 @@
                 Resolution
               </p>
               <p class="mt-1">
-                {#if imageLoaded && imageWidth > 0}
+                {#if selectedImage.exif?.width && selectedImage.exif?.height}
+                  {selectedImage.exif.width} × {selectedImage.exif.height}
+                {:else if imageLoaded && imageWidth > 0}
                   {imageWidth} × {imageHeight}
                 {:else}
                   Loading...
                 {/if}
               </p>
             </div>
+
+            {#if selectedImage.exif?.camera}
+              <div>
+                <p
+                  class="text-xs font-medium uppercase tracking-wider text-white/50"
+                >
+                  Camera
+                </p>
+                <p class="mt-1">{selectedImage.exif.camera}</p>
+              </div>
+            {/if}
+
+            {#if selectedImage.exif?.lens}
+              <div>
+                <p
+                  class="text-xs font-medium uppercase tracking-wider text-white/50"
+                >
+                  Lens
+                </p>
+                <p class="mt-1">{selectedImage.exif.lens}</p>
+              </div>
+            {/if}
+
+            {#if selectedImage.exif?.focal_length || selectedImage.exif?.aperture || selectedImage.exif?.shutter || selectedImage.exif?.iso}
+              <div class="grid grid-cols-2 gap-4">
+                {#if selectedImage.exif?.focal_length}
+                  <div>
+                    <p
+                      class="text-xs font-medium uppercase tracking-wider text-white/50"
+                    >
+                      Focal Length
+                    </p>
+                    <p class="mt-1">{selectedImage.exif.focal_length}</p>
+                  </div>
+                {/if}
+                {#if selectedImage.exif?.aperture}
+                  <div>
+                    <p
+                      class="text-xs font-medium uppercase tracking-wider text-white/50"
+                    >
+                      Aperture
+                    </p>
+                    <p class="mt-1">{selectedImage.exif.aperture}</p>
+                  </div>
+                {/if}
+                {#if selectedImage.exif?.shutter}
+                  <div>
+                    <p
+                      class="text-xs font-medium uppercase tracking-wider text-white/50"
+                    >
+                      Shutter
+                    </p>
+                    <p class="mt-1">{selectedImage.exif.shutter}</p>
+                  </div>
+                {/if}
+                {#if selectedImage.exif?.iso}
+                  <div>
+                    <p
+                      class="text-xs font-medium uppercase tracking-wider text-white/50"
+                    >
+                      ISO
+                    </p>
+                    <p class="mt-1">{selectedImage.exif.iso}</p>
+                  </div>
+                {/if}
+              </div>
+            {/if}
+
+            {#if selectedImage.exif?.date}
+              <div>
+                <p
+                  class="text-xs font-medium uppercase tracking-wider text-white/50"
+                >
+                  Date Taken
+                </p>
+                <p class="mt-1">{selectedImage.exif.date}</p>
+              </div>
+            {/if}
+
+            {#if selectedImage.exif?.orientation}
+              <div>
+                <p
+                  class="text-xs font-medium uppercase tracking-wider text-white/50"
+                >
+                  Orientation
+                </p>
+                <p class="mt-1">{selectedImage.exif.orientation}</p>
+              </div>
+            {/if}
 
             <div>
               <p

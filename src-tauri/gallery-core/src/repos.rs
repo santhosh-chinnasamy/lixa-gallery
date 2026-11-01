@@ -6,6 +6,10 @@ pub struct CachedPhotoRecord {
     pub thumbnail_path: String,
     pub mtime: i64,
     pub size: i64,
+    /// `None` until EXIF has been read. `Some` empty means the file had no tags.
+    pub exif: Option<crate::models::ExifInfo>,
+    pub preview_path: Option<String>,
+    pub sidecar_path: Option<String>,
 }
 
 #[async_trait]

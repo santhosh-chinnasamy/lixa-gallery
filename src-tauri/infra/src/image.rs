@@ -1,7 +1,10 @@
+use crate::exif_info;
 use crate::fs_ops;
+use crate::raw_preview;
 use async_trait::async_trait;
+use gallery_core::formats::{extension, is_raw_path};
 use gallery_core::image::ImageProcessor as ImageProcessorTrait;
-use gallery_core::models::{GalleryError, PhotoMetadata, Result};
+use gallery_core::models::{ExifInfo, GalleryError, PhotoMetadata, Result};
 use std::path::{Path, PathBuf};
 use std::sync::Arc;
 
@@ -22,78 +25,101 @@ impl RayonImageProcessor {
     }
 }
 
+struct Rendered {
+    thumbnail_path: String,
+    preview_path: Option<String>,
+    exif: ExifInfo,
+}
+
 #[async_trait]
 impl ImageProcessorTrait for RayonImageProcessor {
     async fn convert_image(&self, file_path: &Path, thumbnail_dir: &str) -> Result<PhotoMetadata> {
         let path = file_path.to_path_buf();
         let thumb_dir = thumbnail_dir.to_string();
-
-        let ext = path
-            .extension()
-            .and_then(|s| s.to_str())
-            .unwrap_or("")
-            .to_lowercase();
-
-        // Handle vector/web-native formats that don't need raster thumbnails
-        if ext == "svg" || ext == "webp" || ext == "gif" {
-            let metadata = fs_ops::get_file_metadata(file_path).await?;
-            return Ok(PhotoMetadata {
-                metadata,
-                path: file_path.to_string_lossy().into_owned(),
-                thumbnail_path: file_path.to_string_lossy().into_owned(),
-            });
-        }
-
-        // We wrap the blocking rayon call in tokio::task::spawn_blocking to keep the async executor free
         let pool = self.pool.clone();
-        let output_path_result = tokio::task::spawn_blocking(move || {
-            pool.install(|| {
-                let img = match image::open(&path) {
-                    Ok(img) => img,
-                    Err(e) => {
-                        log::warn!(
-                            "Failed to open image {}: {}. Falling back to original.",
-                            path.display(),
-                            e
-                        );
-                        return Ok::<Option<PathBuf>, GalleryError>(None);
-                    }
-                };
 
-                let max_size = 512;
-                let thumbnail = img.thumbnail(max_size, max_size);
-
-                let file_stem = path.file_stem().and_then(|s| s.to_str()).ok_or_else(|| {
-                    GalleryError::InvalidPath(format!(
-                        "Could not get file stem for {}",
-                        path.display()
-                    ))
-                })?;
-
-                let output_filename = format!("{}.webp", file_stem);
-                let output_path = PathBuf::from(thumb_dir).join(&output_filename);
-
-                thumbnail
-                    .save(&output_path)
-                    .map_err(|e| GalleryError::Image(e.to_string()))?;
-
-                Ok::<Option<PathBuf>, GalleryError>(Some(output_path))
-            })
-        })
-        .await
-        .map_err(|e| GalleryError::Unknown(e.to_string()))?;
-
-        let thumbnail_path = match output_path_result {
-            Ok(Some(p)) => p.to_string_lossy().into_owned(),
-            _ => file_path.to_string_lossy().into_owned(), // Fallback to original
-        };
+        let rendered =
+            tokio::task::spawn_blocking(move || pool.install(|| render_photo(&path, &thumb_dir)))
+                .await
+                .map_err(|err| GalleryError::Unknown(err.to_string()))??;
 
         let metadata = fs_ops::get_file_metadata(file_path).await?;
-
         Ok(PhotoMetadata {
             metadata,
             path: file_path.to_string_lossy().into_owned(),
-            thumbnail_path,
+            thumbnail_path: rendered.thumbnail_path,
+            sidecar_path: None,
+            preview_path: rendered.preview_path,
+            exif: Some(rendered.exif),
+            is_raw: is_raw_path(file_path),
         })
     }
+
+    async fn read_exif(&self, file_path: &Path) -> Result<Option<ExifInfo>> {
+        let path = file_path.to_path_buf();
+        let info = tokio::task::spawn_blocking(move || exif_info::from_path(&path))
+            .await
+            .map_err(|err| GalleryError::Unknown(err.to_string()))?;
+        Ok(Some(info))
+    }
+}
+
+fn render_photo(path: &Path, thumb_dir: &str) -> Result<Rendered> {
+    // RAW is handled on its own so the JPEG/TIFF path below stays the flat
+    // `{stem}.webp` write. Orientation for ordinary files is owned elsewhere.
+    if is_raw_path(path) {
+        let raw = raw_preview::render_raw(path, thumb_dir)?;
+        return Ok(Rendered {
+            thumbnail_path: raw.thumbnail_path,
+            preview_path: raw.preview_path,
+            exif: raw.exif,
+        });
+    }
+
+    let exif = exif_info::from_path(path);
+    let ext = extension(path);
+    if matches!(ext.as_str(), "svg" | "webp" | "gif") {
+        return Ok(Rendered {
+            thumbnail_path: path.to_string_lossy().into_owned(),
+            preview_path: None,
+            exif,
+        });
+    }
+
+    let thumbnail_path = match write_raster_thumbnail(path, thumb_dir) {
+        Ok(Some(output)) => output.to_string_lossy().into_owned(),
+        _ => path.to_string_lossy().into_owned(),
+    };
+    Ok(Rendered {
+        thumbnail_path,
+        preview_path: None,
+        exif,
+    })
+}
+
+fn write_raster_thumbnail(path: &Path, thumb_dir: &str) -> Result<Option<PathBuf>> {
+    let img = match image::open(path) {
+        Ok(img) => img,
+        Err(err) => {
+            log::warn!(
+                "Failed to open image {}: {}. Falling back to original.",
+                path.display(),
+                err
+            );
+            return Ok(None);
+        }
+    };
+
+    let thumbnail = img.thumbnail(512, 512);
+    let stem = path
+        .file_stem()
+        .and_then(|stem| stem.to_str())
+        .ok_or_else(|| {
+            GalleryError::InvalidPath(format!("Could not get file stem for {}", path.display()))
+        })?;
+    let output = PathBuf::from(thumb_dir).join(format!("{stem}.webp"));
+    thumbnail
+        .save(&output)
+        .map_err(|err| GalleryError::Image(err.to_string()))?;
+    Ok(Some(output))
 }

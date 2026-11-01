@@ -1,7 +1,7 @@
 <script lang="ts">
   import { Button } from '$lib/components/ui/button';
   import { cn } from '$lib/utils';
-  import { convertFileSrc } from '@tauri-apps/api/core';
+  import { immediateViewerSrc, resolveViewerSrc } from '$lib/photoView';
   import { getCurrentWindow } from '@tauri-apps/api/window';
   import { untrack, onDestroy } from 'svelte';
   import { fade } from 'svelte/transition';
@@ -50,6 +50,7 @@
   let shuffleIndex = $state(0);
   let progress = $state(0); // 0 to 100%
   let isImageLoaded = $state(false);
+  let slideSrc = $state('');
 
   // Timing references (monotonic wall-clock)
   let rafId: number | null = null;
@@ -118,13 +119,48 @@
     }
 
     toPreload.forEach((path) => {
-      if (!preloadedPaths.has(path)) {
+      if (preloadedPaths.has(path)) return;
+      const photo = photos.find((item) => item.path === path);
+      if (!photo) return;
+      const ready = immediateViewerSrc(photo);
+      if (ready) {
         preloadedPaths.add(path);
         const img = new Image();
-        img.src = convertFileSrc(path);
+        img.src = ready;
+        return;
+      }
+      if (photo.is_raw) {
+        preloadedPaths.add(path);
+        resolveViewerSrc(photo).then((src) => {
+          if (!src) return;
+          const img = new Image();
+          img.src = src;
+        });
       }
     });
   }
+
+  $effect(() => {
+    const photo = currentPhoto;
+    if (!open || !photo) {
+      slideSrc = '';
+      return;
+    }
+    let cancelled = false;
+    const ready = immediateViewerSrc(photo);
+    if (ready) {
+      slideSrc = ready;
+    } else {
+      slideSrc = '';
+      resolveViewerSrc(photo).then((src) => {
+        if (!cancelled && src) slideSrc = src;
+        else if (!cancelled) handleImageError();
+      });
+    }
+    return () => {
+      cancelled = true;
+    };
+  });
 
   // Animation frame ticker (monotonic wall-clock)
   function tickTimer() {
@@ -650,16 +686,18 @@
       <!-- Keyed Image Crossfade: completely eliminates WebKit texture reuse ghosting -->
       {#if currentPhoto}
         {#key currentPhoto.path}
-          <img
-            src={convertFileSrc(currentPhoto.path)}
-            alt={currentPhoto.metadata.name}
-            onload={handleImageLoad}
-            onerror={handleImageError}
-            in:fade={{ duration: 400 }}
-            out:fade={{ duration: 400 }}
-            class="absolute inset-0 m-auto max-h-full max-w-full select-none object-contain"
-            draggable="false"
-          />
+          {#if slideSrc}
+            <img
+              src={slideSrc}
+              alt={currentPhoto.metadata.name}
+              onload={handleImageLoad}
+              onerror={handleImageError}
+              in:fade={{ duration: 400 }}
+              out:fade={{ duration: 400 }}
+              class="absolute inset-0 m-auto max-h-full max-w-full select-none object-contain"
+              draggable="false"
+            />
+          {/if}
         {/key}
       {/if}
 
@@ -692,6 +730,35 @@
                 >{formatBytes(currentPhoto.metadata.size)}</span
               >
             </div>
+            {#if currentPhoto.exif?.camera}
+              <div class="flex justify-between gap-4 text-white/70">
+                <span>Camera:</span>
+                <span class="truncate">{currentPhoto.exif.camera}</span>
+              </div>
+            {/if}
+            {#if currentPhoto.exif?.shutter || currentPhoto.exif?.aperture || currentPhoto.exif?.iso}
+              <div class="flex justify-between gap-4 text-white/70">
+                <span>Exposure:</span>
+                <span class="truncate">
+                  {[
+                    currentPhoto.exif?.shutter,
+                    currentPhoto.exif?.aperture,
+                    currentPhoto.exif?.iso
+                      ? `ISO ${currentPhoto.exif.iso}`
+                      : '',
+                    currentPhoto.exif?.focal_length,
+                  ]
+                    .filter(Boolean)
+                    .join(' · ')}
+                </span>
+              </div>
+            {/if}
+            {#if currentPhoto.exif?.date}
+              <div class="flex justify-between gap-4 text-white/70">
+                <span>Taken:</span>
+                <span>{currentPhoto.exif.date}</span>
+              </div>
+            {/if}
             <div class="flex justify-between text-white/70">
               <span>Modified:</span>
               <span>

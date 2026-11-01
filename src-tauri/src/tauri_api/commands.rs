@@ -20,6 +20,18 @@ pub async fn scan_folder(
 }
 
 #[tauri::command]
+pub async fn ensure_raw_preview(
+    state: State<'_, AppState>,
+    path: String,
+) -> Result<Option<String>, String> {
+    state
+        .gallery
+        .ensure_raw_preview(std::path::Path::new(&path), &state.thumbnail_path)
+        .await
+        .map_err(|err| err.to_string())
+}
+
+#[tauri::command]
 pub async fn export_favourites(
     app: AppHandle,
     state: State<'_, AppState>,

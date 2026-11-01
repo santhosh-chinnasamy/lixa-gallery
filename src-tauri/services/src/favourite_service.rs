@@ -1,4 +1,5 @@
 use gallery_core::events::EventHub;
+use gallery_core::formats::group_raw_jpeg_pairs;
 use gallery_core::fs::FileSystem;
 use gallery_core::models::{
     ExportOptions, Favourite, FavouriteFolderGroup, FileMetadata, GalleryError, PhotoMetadata,
@@ -53,54 +54,85 @@ impl FavouriteService {
         let mode = options.mode.as_str();
 
         for file_path in file_paths {
-            let file = PathBuf::from(&file_path);
-            let name = file
-                .file_name()
-                .ok_or_else(|| GalleryError::InvalidPath(file_path.clone()))?;
+            let targets = self.export_targets(&file_path).await;
+            for file in targets {
+                let name = file.file_name().ok_or_else(|| {
+                    GalleryError::InvalidPath(file.to_string_lossy().into_owned())
+                })?;
 
-            let destination_dir = if options.preserve_folder_structure {
-                let folder_name = file
-                    .parent()
-                    .and_then(|p| p.file_name())
-                    .and_then(|s| s.to_str())
-                    .unwrap_or("photos");
-                let sub_dir = PathBuf::from(&options.destination).join(folder_name);
-                self.fs.create_dir_all(&sub_dir).await?;
-                sub_dir
-            } else {
-                let dest = PathBuf::from(&options.destination);
-                self.fs.create_dir_all(&dest).await?;
-                dest
-            };
+                let destination_dir = if options.preserve_folder_structure {
+                    let folder_name = file
+                        .parent()
+                        .and_then(|p| p.file_name())
+                        .and_then(|s| s.to_str())
+                        .unwrap_or("photos");
+                    let sub_dir = PathBuf::from(&options.destination).join(folder_name);
+                    self.fs.create_dir_all(&sub_dir).await?;
+                    sub_dir
+                } else {
+                    let dest = PathBuf::from(&options.destination);
+                    self.fs.create_dir_all(&dest).await?;
+                    dest
+                };
 
-            let destination_path = destination_dir.join(name);
+                let destination_path = destination_dir.join(name);
 
-            let canonical_src = self.fs.canonicalize(&file).await?;
-            let canonical_dst = self
-                .fs
-                .canonicalize(&destination_path)
-                .await
-                .unwrap_or_else(|_| destination_path.clone());
+                let canonical_src = self.fs.canonicalize(&file).await?;
+                let canonical_dst = self
+                    .fs
+                    .canonicalize(&destination_path)
+                    .await
+                    .unwrap_or_else(|_| destination_path.clone());
 
-            if canonical_src == canonical_dst {
-                continue;
+                if canonical_src == canonical_dst {
+                    continue;
+                }
+
+                if mode == "move" {
+                    self.fs.rename(&file, &destination_path).await?;
+                } else {
+                    self.fs.copy(&file, &destination_path).await?;
+                }
+
+                counter += 1;
+                events
+                    .emit_progress("export-progress", counter)
+                    .map_err(|e| GalleryError::Unknown(e.to_string()))?;
             }
 
             if mode == "move" {
-                self.fs.rename(&file, &destination_path).await?;
-                // Remove from DB since the file was physically moved
                 self.remove_favourite(file_path).await?;
-            } else {
-                self.fs.copy(&file, &destination_path).await?;
             }
-
-            counter += 1;
-            events
-                .emit_progress("export-progress", counter)
-                .map_err(|e| GalleryError::Unknown(e.to_string()))?;
         }
 
         Ok(())
+    }
+
+    /// The picked file plus its RAW or JPEG sibling, when the directory has one.
+    async fn export_targets(&self, path: &str) -> Vec<PathBuf> {
+        let primary = PathBuf::from(path);
+        let mut targets = vec![primary.clone()];
+        let Some(parent) = primary.parent() else {
+            return targets;
+        };
+        let Ok(files) = self.fs.list_images_in_dir(parent).await else {
+            return targets;
+        };
+        let Some(group) = group_raw_jpeg_pairs(files)
+            .into_iter()
+            .find(|group| group.primary == primary || group.sidecar.as_ref() == Some(&primary))
+        else {
+            return targets;
+        };
+        if group.primary != primary {
+            targets.push(group.primary);
+        }
+        if let Some(sidecar) = group.sidecar {
+            if sidecar != primary {
+                targets.push(sidecar);
+            }
+        }
+        targets
     }
 
     pub async fn get_favourite_photos(
@@ -157,7 +189,11 @@ impl FavouriteService {
                 results.push(PhotoMetadata {
                     metadata,
                     thumbnail_path: String::new(),
-                    path: path_str,
+                    path: path_str.clone(),
+                    sidecar_path: None,
+                    preview_path: None,
+                    exif: None,
+                    is_raw: gallery_core::formats::is_raw_path(Path::new(&path_str)),
                 });
             }
         }
