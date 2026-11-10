@@ -1,4 +1,3 @@
-use async_recursion::async_recursion;
 use gallery_core::benchmark::BenchmarkLogger;
 use gallery_core::fs::FileSystem;
 use gallery_core::image::ImageProcessor;
@@ -246,7 +245,8 @@ impl GalleryService {
         Ok(metadata.thumbnail_path)
     }
 
-    #[async_recursion]
+    /// One directory level. The sidebar asks again when a node is expanded,
+    /// so opening a folder does not walk the rest of the tree.
     pub async fn get_folder_tree(&self, root: &str) -> Result<FolderNode> {
         let root_path = Path::new(root);
         let name = root_path
@@ -255,18 +255,36 @@ impl GalleryService {
             .unwrap_or(root)
             .to_string();
 
-        let mut children = Vec::new();
         let subfolders = self.fs.list_subfolders(root_path).await?;
+        let mut children = Vec::with_capacity(subfolders.len());
         for folder in subfolders {
             let path_str = folder.to_string_lossy().to_string();
-            let child = self.get_folder_tree(&path_str).await?;
-            children.push(child);
+            let child_name = folder
+                .file_name()
+                .and_then(|s| s.to_str())
+                .map(str::to_owned)
+                .unwrap_or_else(|| path_str.clone());
+            // An unreadable child still shows up; it just has no expand arrow.
+            let has_children = self
+                .fs
+                .list_subfolders(&folder)
+                .await
+                .map(|nested| !nested.is_empty())
+                .unwrap_or(false);
+            children.push(FolderNode {
+                name: child_name,
+                path: path_str,
+                children: Vec::new(),
+                has_children,
+            });
         }
 
+        let has_children = !children.is_empty();
         Ok(FolderNode {
             name,
             path: root.to_string(),
             children,
+            has_children,
         })
     }
 }

@@ -7,6 +7,8 @@ export interface FolderNode {
   name: string;
   path: string;
   children: FolderNode[];
+  /** Subfolders exist. `children` is empty until that level is loaded. */
+  has_children: boolean;
 }
 
 export const photos = writable<PhotoMetadata[]>([]);
@@ -257,6 +259,49 @@ export async function loadFolderTree(path: string) {
     folderTree.set(tree);
   } catch (error) {
     logError(`Error loading folder tree: ${error}`);
+  }
+}
+
+function findFolder(node: FolderNode, path: string): FolderNode | null {
+  if (node.path === path) return node;
+  for (const child of node.children) {
+    const found = findFolder(child, path);
+    if (found) return found;
+  }
+  return null;
+}
+
+function attachFolderChildren(
+  node: FolderNode,
+  path: string,
+  children: FolderNode[],
+): FolderNode {
+  if (node.path === path) {
+    return { ...node, children, has_children: children.length > 0 };
+  }
+  let changed = false;
+  const nextChildren = node.children.map((child) => {
+    const next = attachFolderChildren(child, path, children);
+    if (next !== child) changed = true;
+    return next;
+  });
+  if (!changed) return node;
+  return { ...node, children: nextChildren };
+}
+
+/** Loads the next level of the sidebar tree the first time a node is expanded. */
+export async function ensureFolderChildren(path: string) {
+  const tree = get(folderTree);
+  const node = tree ? findFolder(tree, path) : null;
+  if (!node || !node.has_children || node.children.length > 0) return;
+
+  try {
+    const loaded = await invoke<FolderNode>('get_folder_tree', { path });
+    folderTree.update((current) =>
+      current ? attachFolderChildren(current, path, loaded.children) : current,
+    );
+  } catch (error) {
+    console.error('Error loading folder children:', error);
   }
 }
 
