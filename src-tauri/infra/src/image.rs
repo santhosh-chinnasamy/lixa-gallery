@@ -16,8 +16,9 @@ pub struct RayonImageProcessor {
 
 impl RayonImageProcessor {
     pub fn new() -> Self {
+        let threads = gallery_core::work::recommended_pool_size();
         let pool = rayon::ThreadPoolBuilder::new()
-            .num_threads(4)
+            .num_threads(threads)
             .thread_name(|i| format!("rayon-img-{i}"))
             .build()
             .expect("Failed to create Rayon thread pool");

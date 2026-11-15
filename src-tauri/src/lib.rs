@@ -216,6 +216,10 @@ pub fn run() {
                 let image_processor = std::sync::Arc::new(infra::image::RayonImageProcessor::new());
                 let benchmark_logger =
                     std::sync::Arc::new(infra::benchmark::JsonlBenchmarkLogger::new(app_data_dir));
+                let events: std::sync::Arc<dyn gallery_core::events::EventHub> =
+                    std::sync::Arc::new(crate::tauri_api::events::TauriEventHub::new(
+                        app_handle.clone(),
+                    ));
 
                 let gallery = services::gallery_service::GalleryService::new(
                     photo_repo.clone(),
@@ -223,6 +227,7 @@ pub fn run() {
                     fs.clone(),
                     benchmark_logger,
                     tokio::runtime::Handle::current(),
+                    events,
                 );
                 let favourite = services::favourite_service::FavouriteService::new(
                     marks.clone(),

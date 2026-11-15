@@ -400,6 +400,41 @@ export function clearPhotos() {
   expandedFolders.clear();
 }
 
+/**
+ * Merge backend materialize/EXIF results into the open folder list.
+ * Ignores rows that are not already in `photos` (stale folder work).
+ */
+export function mergePhotoUpdates(updates: PhotoMetadata[]) {
+  if (updates.length === 0) return;
+  const folder = get(currentFolder);
+  photos.update((list) => {
+    if (list.length === 0) return list;
+    const byPath = new Map(list.map((photo) => [photo.path, photo]));
+    let changed = false;
+    for (const update of updates) {
+      if (!byPath.has(update.path)) continue;
+      if (folder && !update.path.startsWith(folder)) continue;
+      byPath.set(update.path, { ...byPath.get(update.path)!, ...update });
+      changed = true;
+    }
+    if (!changed) return list;
+    return list.map((photo) => byPath.get(photo.path) ?? photo);
+  });
+
+  favouritePhotos.update((list) => {
+    if (list.length === 0) return list;
+    const byPath = new Map(list.map((photo) => [photo.path, photo]));
+    let changed = false;
+    for (const update of updates) {
+      if (!byPath.has(update.path)) continue;
+      byPath.set(update.path, { ...byPath.get(update.path)!, ...update });
+      changed = true;
+    }
+    if (!changed) return list;
+    return list.map((photo) => byPath.get(photo.path) ?? photo);
+  });
+}
+
 export async function loadFolderTree(path: string) {
   try {
     const tree = await invoke<FolderNode>('get_folder_tree', { path });

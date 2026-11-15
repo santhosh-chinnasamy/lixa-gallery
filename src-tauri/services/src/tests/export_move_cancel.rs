@@ -51,11 +51,25 @@ impl EventHub for CancelAfter {
         }
         Ok(())
     }
+
+    fn emit_photos_updated(
+        &self,
+        _photos: &[gallery_core::models::PhotoMetadata],
+    ) -> anyhow::Result<()> {
+        Ok(())
+    }
 }
 
 struct Quiet;
 impl EventHub for Quiet {
     fn emit_progress(&self, _event: &str, _progress: u32) -> anyhow::Result<()> {
+        Ok(())
+    }
+
+    fn emit_photos_updated(
+        &self,
+        _photos: &[gallery_core::models::PhotoMetadata],
+    ) -> anyhow::Result<()> {
         Ok(())
     }
 }

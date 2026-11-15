@@ -229,6 +229,29 @@ impl EventHub for FakeEventHub {
     fn emit_progress(&self, _event: &str, _progress: u32) -> anyhow::Result<()> {
         Ok(())
     }
+
+    fn emit_photos_updated(
+        &self,
+        _photos: &[gallery_core::models::PhotoMetadata],
+    ) -> anyhow::Result<()> {
+        Ok(())
+    }
+}
+
+/// Records photo-updated batches for tests.
+pub struct RecordingEventHub {
+    pub photos: Mutex<Vec<PhotoMetadata>>,
+}
+
+impl EventHub for RecordingEventHub {
+    fn emit_progress(&self, _event: &str, _progress: u32) -> anyhow::Result<()> {
+        Ok(())
+    }
+
+    fn emit_photos_updated(&self, photos: &[PhotoMetadata]) -> anyhow::Result<()> {
+        self.photos.lock().unwrap().extend_from_slice(photos);
+        Ok(())
+    }
 }
 
 pub struct FakeFavouriteRepository {
