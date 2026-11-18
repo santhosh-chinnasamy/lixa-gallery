@@ -9,9 +9,10 @@
   import { initLogger } from '$lib/logger';
   import ErrorToast from '../components/common/ErrorToast.svelte';
   import { initTheme } from '../stores/themeStore';
-  import { mergePhotoUpdates } from '../stores/galleryStore';
-  import type { PhotosUpdatedEvent } from '../types/photo';
+  import { folderGeneration, mergePhotoUpdates } from '../stores/galleryStore';
+  import type { PhotoMetadata, PhotosUpdatedEvent } from '../types/photo';
   import type { Snippet } from 'svelte';
+  import { get } from 'svelte/store';
 
   let { children }: { children?: Snippet } = $props();
 
@@ -23,10 +24,18 @@
   $effect(() => {
     let unlisten: UnlistenFn | null = null;
     let cancelled = false;
-    listen<PhotosUpdatedEvent>('photos-updated', (event) => {
+    listen<PhotosUpdatedEvent | PhotoMetadata[]>('photos-updated', (event) => {
       const payload = event.payload;
+      // Tolerate a bare array from an older backend build.
+      if (Array.isArray(payload)) {
+        mergePhotoUpdates(get(folderGeneration), payload);
+        return;
+      }
       if (!payload?.photos?.length) return;
-      mergePhotoUpdates(payload.generation, payload.photos);
+      mergePhotoUpdates(
+        Number(payload.generation) || get(folderGeneration),
+        payload.photos,
+      );
     }).then((stop) => {
       if (cancelled) stop();
       else unlisten = stop;

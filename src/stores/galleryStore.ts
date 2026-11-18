@@ -412,8 +412,10 @@ export function mergePhotoUpdates(
   generation: number,
   updates: PhotoMetadata[],
 ) {
-  if (updates.length === 0) return;
-  if (generation !== get(folderGeneration)) return;
+  if (!Array.isArray(updates) || updates.length === 0) return;
+  const liveGeneration = get(folderGeneration);
+  // Drop patches from a different folder session. generation 0 means "use live".
+  if (generation !== 0 && generation !== liveGeneration) return;
 
   photos.update((list) => {
     if (list.length === 0) return list;

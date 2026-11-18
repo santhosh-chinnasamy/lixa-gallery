@@ -10,7 +10,7 @@
   import Play from '@lucide/svelte/icons/play';
   import { invoke } from '@tauri-apps/api/core';
   import { listen, type UnlistenFn } from '@tauri-apps/api/event';
-  import { onDestroy } from 'svelte';
+  import { onDestroy, onMount } from 'svelte';
   import Gallery from '../../components/Gallery.svelte';
   import ImageCard from '../../components/ImageCard.svelte';
   import ImageModal from '../../components/ImageModal.svelte';
@@ -87,9 +87,9 @@
   // Specific folder targeted for quick export (null = use modal's general scope)
   let exportTargetFolder = $state<string | null>(null);
 
-  // Auto-refresh when entering page
-  $effect(() => {
-    refreshFavourites();
+  // Load once on enter. An $effect here can re-fire if refresh touches tracked state.
+  onMount(() => {
+    void refreshFavourites();
   });
 
   $effect(() => {

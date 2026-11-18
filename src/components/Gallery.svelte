@@ -8,7 +8,7 @@
   import { dateSortKey } from '$lib/photoView';
   import { createVirtualizer } from '@tanstack/svelte-virtual';
   import { immediateSubfolders } from '$lib/folderEmptyState';
-  import { tick } from 'svelte';
+  import { tick, untrack } from 'svelte';
   import { get } from 'svelte/store';
   import {
     searchQuery,
@@ -32,6 +32,8 @@
   } from '$lib/shortcuts';
 
   let { photos = [] }: { photos: PhotoMetadata[] } = $props();
+  // Guard against a bad scan payload so the grid never receives a non-array.
+  const photoList = $derived(Array.isArray(photos) ? photos : []);
 
   let selectedImage = $state<PhotoMetadata | null>(null);
   let isSlideshowOpen = $state(false);
@@ -41,7 +43,8 @@
   let focusCard = $state(false);
 
   const pickedCount = $derived(
-    photos.filter((photo) => $cullFlags.get(photo.path) === 'picked').length,
+    photoList.filter((photo) => $cullFlags.get(photo.path) === 'picked')
+      .length,
   );
 
   // Calculate dynamic columns based on container width and grid size
@@ -54,7 +57,7 @@
   let subfolders = $derived(immediateSubfolders($folderTree, $currentFolder));
 
   let processedPhotos = $derived.by(() => {
-    let result = [...photos];
+    let result = [...photoList];
 
     if ($cullFilter !== 'all') {
       result = result.filter((photo) => {
@@ -187,44 +190,45 @@
     estimateSize: () => 100,
   });
 
-  // Keep it reactive
+  // Keep options in sync without subscribing to the virtualizer store.
+  // `$virtualizer.setOptions` notifies the store (onChange → writable.set),
+  // which would re-run this effect forever and freeze the UI.
   $effect(() => {
-    // When the photo list changes (e.g navigating to a new folder), reset the scroll
-    // to prevent the virtualizer from rendering items out of bounds or caching old heights.
     const count = processedPhotos.length;
+    const el = galleryContainer;
+    const size = $gridSize;
+    const lanes = columns;
 
-    $virtualizer.setOptions({
-      count,
-      getScrollElement: () => galleryContainer,
-      estimateSize: () => $gridSize + 48,
-      overscan: 10,
-      lanes: columns,
-      onChange: () => {
-        // Optional reactive sync hook
-      },
+    untrack(() => {
+      const api = get(virtualizer);
+      api.setOptions({
+        count,
+        getScrollElement: () => el,
+        estimateSize: () => size + 48,
+        overscan: 10,
+        lanes,
+      });
+      if (el && count > 0) {
+        queueMicrotask(() => api.measure());
+      }
     });
-
-    if (galleryContainer && count > 0) {
-      // Small tick to ensure the new virtualizer bounds are respected
-      setTimeout(() => {
-        $virtualizer.measure();
-      }, 0);
-    }
   });
 
   // Explicitly watch for photo array changes to force scroll to top
-  let listKey = $derived(photos.map((photo) => photo.path).join('\n'));
+  let listKey = $derived(photoList.map((photo) => photo.path).join('\n'));
   let seenListKey = '';
 
   $effect(() => {
     if (listKey === seenListKey) return;
     seenListKey = listKey;
     activeIndex = 0;
-    if (photos && galleryContainer) {
-      galleryContainer.scrollTo({ top: 0 });
-      setTimeout(() => {
-        $virtualizer.measure();
-      }, 10);
+    const el = galleryContainer;
+    if (el) {
+      el.scrollTo({ top: 0 });
+      untrack(() => {
+        const api = get(virtualizer);
+        queueMicrotask(() => api.measure());
+      });
     }
   });
 
@@ -244,11 +248,12 @@
       return;
     }
     const index = activeIndex;
-    const rendered = $virtualizer
+    const api = untrack(() => get(virtualizer));
+    const rendered = api
       .getVirtualItems()
       .some((item) => item.index === index);
     if (!rendered) {
-      $virtualizer.scrollToIndex(index, { align: 'auto' });
+      api.scrollToIndex(index, { align: 'auto' });
       return;
     }
     tick().then(() => {
@@ -283,7 +288,7 @@
   <ControlBar
     onStartSlideshow={() => (isSlideshowOpen = true)}
     canStartSlideshow={processedPhotos.length > 0}
-    photoCount={photos.length}
+    photoCount={photoList.length}
     {pickedCount}
   />
   <main
@@ -293,7 +298,7 @@
     <div class="h-full p-6 lg:p-10">
       {#if processedPhotos.length === 0}
         <div class="flex h-full min-h-[400px] items-center justify-center">
-          {#if photos.length === 0 && subfolders.length > 0}
+          {#if photoList.length === 0 && subfolders.length > 0}
             <div
               class="animate-in fade-in slide-in-from-bottom-4 w-full max-w-lg duration-700"
             >
@@ -338,7 +343,7 @@
             >
               <div class="mb-2 text-lg font-medium">No results found</div>
               <p class="text-sm">
-                {#if photos.length === 0}
+                {#if photoList.length === 0}
                   This directory doesn't appear to contain any supported files.
                 {:else}
                   No files match your current search and filter criteria.
