@@ -16,6 +16,46 @@ fn webp_response(status: u16, body: Vec<u8>) -> tauri::http::Response<Vec<u8>> {
     response.body(body).expect("webp response")
 }
 
+/// Tail after the custom-protocol origin. Linux/macOS use `scheme://localhost/`;
+/// Windows/Android use `http(s)://scheme.localhost/`.
+fn thumbnail_uri_tail(uri: &str) -> Option<&str> {
+    const PREFIXES: &[&str] = &[
+        "lixa-thumbnail://localhost/",
+        "http://lixa-thumbnail.localhost/",
+        "https://lixa-thumbnail.localhost/",
+    ];
+    for prefix in PREFIXES {
+        if let Some(rest) = uri.strip_prefix(prefix) {
+            return Some(rest);
+        }
+    }
+    None
+}
+
+/// Percent-decode the protocol path and restore a leading `/` on Unix when
+/// WebKit already decoded `%2F` and dropped it from the URI path form.
+fn decode_source_path(encoded: &str) -> String {
+    let mut path = percent_decode_str(encoded).decode_utf8_lossy().into_owned();
+    #[cfg(unix)]
+    {
+        if !path.is_empty() && !path.starts_with('/') {
+            path.insert(0, '/');
+        }
+    }
+    path
+}
+
+fn is_webp_bytes(data: &[u8]) -> bool {
+    data.len() >= 12 && data.starts_with(b"RIFF") && &data[8..12] == b"WEBP"
+}
+
+/// Read `path` only when the bytes are a WebP. Avoids labeling JPEG fallbacks
+/// as `image/webp`.
+fn read_webp_file(path: &std::path::Path) -> Option<Vec<u8>> {
+    let data = std::fs::read(path).ok()?;
+    is_webp_bytes(&data).then_some(data)
+}
+
 #[cfg_attr(mobile, tauri::mobile_entry_point)]
 pub fn run() {
     // Initialize in-memory Flight Recorder logger (capped at 2 MB RAM)
@@ -58,8 +98,7 @@ pub fn run() {
                 let app_handle = ctx.app_handle().clone();
                 tauri::async_runtime::spawn(async move {
                     let uri = request.uri().to_string();
-                    let prefix = "lixa-thumbnail://localhost/";
-                    if !uri.starts_with(prefix) {
+                    let Some(tail) = thumbnail_uri_tail(&uri) else {
                         responder.respond(
                             tauri::http::Response::builder()
                                 .status(400)
@@ -67,14 +106,11 @@ pub fn run() {
                                 .unwrap(),
                         );
                         return;
-                    }
+                    };
 
-                    let request =
-                        infra::thumbnail_cache::parse_thumbnail_request(&uri[prefix.len()..]);
-                    let path_str = percent_decode_str(request.path)
-                        .decode_utf8_lossy()
-                        .into_owned();
-                    let original_path = std::path::PathBuf::from(&path_str);
+                    let request = infra::thumbnail_cache::parse_thumbnail_request(tail);
+                    let original_path =
+                        std::path::PathBuf::from(decode_source_path(request.path));
 
                     let state = app_handle.state::<AppState>();
                     let thumb_dir = state.thumbnail_path.clone();
@@ -117,11 +153,9 @@ pub fn run() {
                         identity,
                     );
 
-                    if thumb_full_path.is_file() {
-                        if let Ok(data) = std::fs::read(&thumb_full_path) {
-                            responder.respond(webp_response(200, data));
-                            return;
-                        }
+                    if let Some(data) = read_webp_file(&thumb_full_path) {
+                        responder.respond(webp_response(200, data));
+                        return;
                     }
 
                     // Not found or failed to read, generate on the fly
@@ -131,10 +165,10 @@ pub fn run() {
                         .await
                     {
                         Ok(generated_path) => {
-                            if let Ok(data) = std::fs::read(&generated_path) {
-                                responder.respond(webp_response(200, data));
-                            } else {
-                                responder.respond(webp_response(500, Vec::new()));
+                            match read_webp_file(std::path::Path::new(&generated_path)) {
+                                Some(data) => responder.respond(webp_response(200, data)),
+                                // Never mislabel a JPEG/original as image/webp.
+                                None => responder.respond(webp_response(404, Vec::new())),
                             }
                         }
                         Err(_) => {
@@ -248,4 +282,51 @@ pub fn run() {
         })
         .run(tauri::generate_context!())
         .expect("error while running tauri application");
+}
+
+#[cfg(test)]
+mod protocol_tests {
+    use super::{decode_source_path, is_webp_bytes, thumbnail_uri_tail};
+
+    #[test]
+    fn uri_tail_strips_custom_and_http_origins() {
+        assert_eq!(
+            thumbnail_uri_tail(
+                "lixa-thumbnail://localhost/thumb?path=%2Fhome%2Fa.jpg&v=1_2"
+            ),
+            Some("thumb?path=%2Fhome%2Fa.jpg&v=1_2")
+        );
+        assert_eq!(
+            thumbnail_uri_tail(
+                "http://lixa-thumbnail.localhost/thumb?path=%2Ftmp%2Fb.jpg&v=1_2"
+            ),
+            Some("thumb?path=%2Ftmp%2Fb.jpg&v=1_2")
+        );
+        assert_eq!(thumbnail_uri_tail("https://evil.example/x"), None);
+    }
+
+    #[test]
+    fn decode_restores_unix_root_for_legacy_webkit_tail() {
+        let decoded = decode_source_path("home/santhosh/Pictures/a.JPG");
+        assert_eq!(decoded, "/home/santhosh/Pictures/a.JPG");
+    }
+
+    #[test]
+    fn decode_path_query_value_keeps_absolute_path() {
+        let decoded = decode_source_path(
+            "%2Fhome%2Fsanthosh%2FPictures%2Fmarriage%2F100MSDCF%2FDSC04630.JPG",
+        );
+        assert_eq!(
+            decoded,
+            "/home/santhosh/Pictures/marriage/100MSDCF/DSC04630.JPG"
+        );
+    }
+
+    #[test]
+    fn webp_magic_rejects_jpeg() {
+        assert!(!is_webp_bytes(&[0xff, 0xd8, 0xff, 0xe0]));
+        let mut webp = b"RIFF....WEBP".to_vec();
+        webp[4..8].copy_from_slice(&[0, 0, 0, 0]);
+        assert!(is_webp_bytes(&webp));
+    }
 }

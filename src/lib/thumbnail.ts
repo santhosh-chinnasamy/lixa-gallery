@@ -2,15 +2,17 @@ import type { PhotoMetadata } from '../types/photo';
 
 /**
  * Thumbnail URL for the `lixa-thumbnail` protocol.
- * `v` changes when the file is replaced in place so the webview does not
- * keep showing the previous response.
+ *
+ * The filesystem path is a query parameter. Putting an absolute path in the
+ * URI path segment lets WebKit decode `%2F` and turn `/home/...` into
+ * `home/...`, which then 404s. `path=` keeps the bytes intact.
  */
 export function thumbnailUrl(
   photo: Pick<PhotoMetadata, 'path' | 'metadata'>,
 ): string {
-  const encodedPath = encodeURIComponent(photo.path);
+  const path = encodeURIComponent(photo.path);
   const version = `${photo.metadata.modified}_${photo.metadata.size}`;
-  return `lixa-thumbnail://localhost/${encodedPath}?v=${version}`;
+  return `lixa-thumbnail://localhost/thumb?path=${path}&v=${version}`;
 }
 
 /**
@@ -20,7 +22,7 @@ export function thumbnailUrl(
 export function previewUrl(
   photo: Pick<PhotoMetadata, 'path' | 'metadata'>,
 ): string {
-  const encodedPath = encodeURIComponent(photo.path);
+  const path = encodeURIComponent(photo.path);
   const version = `${photo.metadata.modified}_${photo.metadata.size}`;
-  return `lixa-thumbnail://localhost/${encodedPath}?v=${version}&kind=preview`;
+  return `lixa-thumbnail://localhost/thumb?path=${path}&v=${version}&kind=preview`;
 }

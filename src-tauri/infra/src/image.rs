@@ -704,4 +704,27 @@ mod tests {
         assert_eq!(preview, again);
         assert_eq!(webp_files(&cache).len(), 1);
     }
+
+
+    #[tokio::test]
+    async fn camera_jpeg_writes_a_decodable_webp_thumb() {
+        let source =
+            Path::new("/home/santhosh/Pictures/marriage/100MSDCF/DSC04630.JPG");
+        if !source.is_file() {
+            return;
+        }
+        let root = tempfile::tempdir().unwrap();
+        let cache = root.path().join("cache");
+        let processor = RayonImageProcessor::new();
+        let meta = processor
+            .convert_image(source, cache.to_str().unwrap())
+            .await
+            .expect("convert_image");
+        assert_ne!(meta.thumbnail_path, meta.path);
+        let bytes = std::fs::read(&meta.thumbnail_path).unwrap();
+        assert_eq!(&bytes[0..4], b"RIFF");
+        assert_eq!(&bytes[8..12], b"WEBP");
+        let decoded = image::load_from_memory(&bytes).unwrap();
+        assert!(decoded.width() <= 512 && decoded.height() <= 512);
+    }
 }

@@ -37,6 +37,13 @@
   let imageLoaded = $state(false);
   let imageError = $state(false);
 
+  // Reset when the URL changes so a prior 404 does not stick on the card.
+  $effect(() => {
+    void imageSrc;
+    imageLoaded = false;
+    imageError = false;
+  });
+
   const handleClick = () => handleImageClick(photo);
 
   const onBadgeClick = (event?: Event) => {
