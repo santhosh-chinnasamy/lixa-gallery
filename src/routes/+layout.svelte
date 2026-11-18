@@ -18,21 +18,32 @@
 
   let { children }: { children?: Snippet } = $props();
 
+  // WebKit: `nav.from?.url.pathname` throws when `from` exists but `url` is
+  // null (`?.` only guards one hop). That unhandled rejection aborts SvelteKit
+  // client start, so every <a> becomes a full reload and Favourites feels stuck.
   beforeNavigate((nav) => {
-    probe('nav.before', {
-      from: nav.from?.url.pathname ?? null,
-      to: nav.to?.url.pathname ?? null,
-      type: nav.type,
-      willLoad: nav.willLoad,
-    });
+    try {
+      probe('nav.before', {
+        from: nav.from?.url?.pathname ?? null,
+        to: nav.to?.url?.pathname ?? null,
+        type: nav.type,
+        willLoad: nav.willLoad,
+      });
+    } catch (error) {
+      console.warn('[probe] nav.before failed', error);
+    }
   });
 
   afterNavigate((nav) => {
-    probe('nav.after', {
-      from: nav.from?.url.pathname ?? null,
-      to: nav.to?.url.pathname ?? null,
-      type: nav.type,
-    });
+    try {
+      probe('nav.after', {
+        from: nav.from?.url?.pathname ?? null,
+        to: nav.to?.url?.pathname ?? null,
+        type: nav.type,
+      });
+    } catch (error) {
+      console.warn('[probe] nav.after failed', error);
+    }
   });
 
   $effect(() => {

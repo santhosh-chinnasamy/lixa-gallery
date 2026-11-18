@@ -2807,6 +2807,7 @@ name = "lixa-gallery"
 version = "0.7.1"
 dependencies = [
  "anyhow",
+ "base64 0.22.1",
  "chrono",
  "dirs 6.0.0",
  "futures",

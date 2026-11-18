@@ -198,7 +198,9 @@ pub fn run() {
             commands::get_workspaces,
             commands::get_folder_tree,
             commands::open_logs_dir,
-            commands::get_log_dir
+            commands::get_log_dir,
+            commands::get_thumbnail_bytes,
+            commands::read_image_bytes
         ])
         .setup(|app| {
             let app_handle = app.handle().clone();

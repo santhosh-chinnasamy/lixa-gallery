@@ -29,6 +29,7 @@
     resolveViewerSrc,
   } from '$lib/photoView';
   import { probe, probeWarn } from '$lib/debugProbe';
+  import { webviewSafeImageSrc } from '$lib/protocolImage';
   import Filename from './Filename.svelte';
   import X from '@lucide/svelte/icons/x';
   import Info from '@lucide/svelte/icons/info';
@@ -77,12 +78,12 @@
       : 'unflagged',
   );
   const fileName = $derived(selectedImage?.metadata.name);
-  const blurSrc = $derived(selectedImage ? gridImageUrl(selectedImage) : null);
 
   // Modal and Image states
   let isSlideshowOpen = $state(false);
   let imageLoaded = $state(false);
   let imageError = $state(false);
+  let blurSrc = $state<string | null>(null);
   // Full-size originals. Capped so stepping through a shoot cannot keep
   // every visited file alive, and cleared when the viewer closes or the
   // open folder changes.
@@ -511,6 +512,7 @@
     const photo = selectedImage;
     if (!photo) {
       viewerSrc = '';
+      blurSrc = null;
       probe('modal.close');
       return;
     }
@@ -519,25 +521,68 @@
       path: photo.path.slice(0, 80),
     });
     let cancelled = false;
-    const ready = immediateViewerSrc(photo);
-    if (ready) {
-      viewerSrc = ready;
-      probe('modal.viewerSrc', { form: ready.slice(0, 64) });
+    let revokeViewer = () => {};
+    let revokeBlur = () => {};
+
+    const thumb = gridImageUrl(photo);
+    if (thumb) {
+      void webviewSafeImageSrc(thumb).then((safe) => {
+        if (cancelled) {
+          safe.revoke();
+          return;
+        }
+        revokeBlur = safe.revoke;
+        blurSrc = safe.src;
+      });
     } else {
-      viewerSrc = '';
-      resolveViewerSrc(photo).then((src) => {
-        if (cancelled) return;
-        if (src) {
-          viewerSrc = src;
-          probe('modal.viewerSrc', { form: src.slice(0, 64), async: true });
-        } else {
+      blurSrc = null;
+    }
+
+    const applyViewer = async (raw: string | null) => {
+      if (!raw) {
+        if (!cancelled) {
+          viewerSrc = '';
           imageError = true;
           probeWarn('modal.viewerSrc.fail', { name: photo.metadata.name });
         }
+        return;
+      }
+      try {
+        const safe = await webviewSafeImageSrc(raw);
+        if (cancelled) {
+          safe.revoke();
+          return;
+        }
+        revokeViewer = safe.revoke;
+        viewerSrc = safe.src;
+        probe('modal.viewerSrc', {
+          form: safe.src.slice(0, 64),
+          via: safe.src.startsWith('blob:') ? 'invoke-blob' : 'url',
+        });
+      } catch (error) {
+        if (cancelled) return;
+        imageError = true;
+        probeWarn('modal.viewerSrc.fail', {
+          name: photo.metadata.name,
+          err: error instanceof Error ? error.message : String(error),
+        });
+      }
+    };
+
+    const ready = immediateViewerSrc(photo);
+    if (ready) {
+      void applyViewer(ready);
+    } else {
+      viewerSrc = '';
+      void resolveViewerSrc(photo).then((src) => {
+        if (cancelled) return;
+        void applyViewer(src);
       });
     }
     return () => {
       cancelled = true;
+      revokeViewer();
+      revokeBlur();
     };
   });
 

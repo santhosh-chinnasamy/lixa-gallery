@@ -237,3 +237,44 @@ pub fn get_log_dir(app_handle: AppHandle) -> Result<String, String> {
     let log_dir = app_handle.path().app_log_dir().map_err(|e| e.to_string())?;
     Ok(log_dir.to_string_lossy().to_string())
 }
+
+/// Thumbnail / preview bytes as base64. Used when WebKit blocks custom-protocol
+/// `<img>` / `fetch` from the Vite `http://localhost` origin (tauri#16201).
+#[tauri::command]
+pub async fn get_thumbnail_bytes(
+    state: State<'_, AppState>,
+    path: String,
+    preview: Option<bool>,
+) -> Result<String, String> {
+    use base64::{engine::general_purpose::STANDARD, Engine};
+    use std::path::PathBuf;
+
+    let original_path = PathBuf::from(&path);
+    let thumb_dir = &state.thumbnail_path;
+
+    let file_path = if preview.unwrap_or(false) {
+        state
+            .gallery
+            .get_or_create_preview(&original_path, thumb_dir)
+            .await
+            .map_err(|err| err.to_string())?
+    } else {
+        state
+            .gallery
+            .get_or_create_thumbnail(&original_path, thumb_dir)
+            .await
+            .map_err(|err| err.to_string())?
+    };
+
+    let data = std::fs::read(&file_path).map_err(|err| err.to_string())?;
+    Ok(STANDARD.encode(data))
+}
+
+/// Original / preview file bytes as base64 for the Vite http origin, where
+/// `asset://` and `http://asset.localhost` `<img>` loads are blocked.
+#[tauri::command]
+pub async fn read_image_bytes(path: String) -> Result<String, String> {
+    use base64::{engine::general_purpose::STANDARD, Engine};
+    let data = std::fs::read(&path).map_err(|err| err.to_string())?;
+    Ok(STANDARD.encode(data))
+}

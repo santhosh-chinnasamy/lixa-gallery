@@ -64,7 +64,7 @@
         displaySrc = safe.src;
         probe('thumb.ready', {
           name: fileName,
-          bridged: safe.src.startsWith('blob:'),
+          via: safe.src.startsWith('blob:') ? 'invoke-blob' : 'url',
           form: safe.src.slice(0, 48),
         });
       } catch (error) {
