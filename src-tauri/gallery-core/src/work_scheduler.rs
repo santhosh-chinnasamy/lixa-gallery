@@ -97,6 +97,11 @@ impl ImageWorkScheduler {
         self.inner.max_workers
     }
 
+    /// How many worker tasks have been spawned (for tests / diagnostics).
+    pub async fn workers_started(&self) -> usize {
+        self.inner.state.lock().await.workers_started
+    }
+
     /// Bump the generation so queued work from a previous folder is dropped.
     /// In-flight jobs keep running (and stay coalesce targets) but release their
     /// admission slots so the new folder is not wedged behind durable stale work.
@@ -703,19 +708,30 @@ mod tests {
         );
     }
 
-    /// After a generation bump, durable in-flight background work still occupies
-    /// workers. New-folder Interactive work must still start without waiting for
-    /// those stale jobs to finish — otherwise the grid/protocol looks wedged.
+    /// Hard-bound admission: with max_workers=1 a stale in-flight job may finish
+    /// before new Interactive starts, and concurrent bodies never exceed the cap.
     #[tokio::test]
-    async fn interactive_not_starved_by_durable_stale_inflight() {
+    async fn generation_bump_keeps_hard_worker_bound() {
         let sched = ImageWorkScheduler::with_limits(1, 1);
         let old_gen = sched.begin_generation().await;
         let (release_tx, release_rx) = oneshot::channel::<()>();
         let gate = Arc::new(Mutex::new(Some(release_rx)));
+        let concurrent = Arc::new(AtomicUsize::new(0));
+        let peak = Arc::new(AtomicUsize::new(0));
+
+        let track = |concurrent: Arc<AtomicUsize>, peak: Arc<AtomicUsize>| {
+            let now = concurrent.fetch_add(1, AtomicOrdering::SeqCst) + 1;
+            peak.fetch_max(now, AtomicOrdering::SeqCst);
+            move || {
+                concurrent.fetch_sub(1, AtomicOrdering::SeqCst);
+            }
+        };
 
         let stale = tokio::spawn({
             let sched = sched.clone();
             let gate = gate.clone();
+            let concurrent = concurrent.clone();
+            let peak = peak.clone();
             async move {
                 sched
                     .run(
@@ -724,7 +740,10 @@ mod tests {
                         old_gen,
                         move || {
                             let gate = gate;
+                            let concurrent = concurrent;
+                            let peak = peak;
                             async move {
+                                let _leave = track(concurrent, peak);
                                 if let Some(rx) = gate.lock().await.take() {
                                     let _ = rx.await;
                                 }
@@ -739,10 +758,10 @@ mod tests {
         tokio::time::sleep(Duration::from_millis(30)).await;
         let new_gen = sched.begin_generation().await;
 
-        let started = Arc::new(AtomicUsize::new(0));
-        let started_flag = started.clone();
         let interactive = tokio::spawn({
             let sched = sched.clone();
+            let concurrent = concurrent.clone();
+            let peak = peak.clone();
             async move {
                 sched
                     .run(
@@ -750,9 +769,10 @@ mod tests {
                         WorkKey::materialize("/new.jpg", 1, 1),
                         new_gen,
                         move || {
-                            let started_flag = started_flag;
+                            let concurrent = concurrent;
+                            let peak = peak;
                             async move {
-                                started_flag.fetch_add(1, AtomicOrdering::SeqCst);
+                                let _leave = track(concurrent, peak);
                                 Ok(photo("/new.jpg"))
                             }
                         },
@@ -761,16 +781,192 @@ mod tests {
             }
         });
 
-        // Interactive must make progress while the stale job is still held.
-        tokio::time::sleep(Duration::from_millis(100)).await;
+        // Stale may still hold the only slot; Interactive is allowed to wait.
+        tokio::time::sleep(Duration::from_millis(50)).await;
         assert!(
-            started.load(AtomicOrdering::SeqCst) >= 1,
-            "interactive work for the new folder is starved behind durable stale in-flight work"
+            peak.load(AtomicOrdering::SeqCst) <= 1,
+            "concurrent bodies exceeded max_workers=1"
         );
 
         let _ = release_tx.send(());
         let _ = stale.await.unwrap();
         assert!(interactive.await.unwrap().is_ok());
+        assert!(
+            peak.load(AtomicOrdering::SeqCst) <= 1,
+            "peak concurrent bodies exceeded max_workers=1: {}",
+            peak.load(AtomicOrdering::SeqCst)
+        );
+        assert!(
+            sched.workers_started().await <= 1,
+            "workers_started exceeded max_workers"
+        );
+    }
+
+    /// Rapid folder switches must not oversubscribe decode past max_workers while
+    /// durable in-flight jobs are still blocked in their bodies.
+    #[tokio::test]
+    async fn rapid_generation_bumps_peak_concurrent_bodies_bounded() {
+        let max_workers = 2;
+        let sched = ImageWorkScheduler::with_limits(max_workers, 1);
+        let gen = sched.begin_generation().await;
+        let concurrent = Arc::new(AtomicUsize::new(0));
+        let peak = Arc::new(AtomicUsize::new(0));
+        let mut release_txs = Vec::new();
+        let mut stale_handles = Vec::new();
+
+        for i in 0..max_workers {
+            let (release_tx, release_rx) = oneshot::channel::<()>();
+            let gate = Arc::new(Mutex::new(Some(release_rx)));
+            release_txs.push(release_tx);
+            let path = format!("/stale-{i}.jpg");
+            let sched = sched.clone();
+            let concurrent = concurrent.clone();
+            let peak = peak.clone();
+            stale_handles.push(tokio::spawn(async move {
+                sched
+                    .run(
+                        // Interactive so we fill the whole pool (background alone
+                        // is capped by max_background).
+                        WorkPriority::Interactive,
+                        WorkKey::materialize(path.clone(), 1, 1),
+                        gen,
+                        move || {
+                            let gate = gate;
+                            let concurrent = concurrent;
+                            let peak = peak;
+                            async move {
+                                let now = concurrent.fetch_add(1, AtomicOrdering::SeqCst) + 1;
+                                peak.fetch_max(now, AtomicOrdering::SeqCst);
+                                if let Some(rx) = gate.lock().await.take() {
+                                    let _ = rx.await;
+                                }
+                                concurrent.fetch_sub(1, AtomicOrdering::SeqCst);
+                                Ok(photo(&path))
+                            }
+                        },
+                    )
+                    .await
+            }));
+        }
+
+        let fill_deadline = Instant::now() + Duration::from_millis(500);
+        while concurrent.load(AtomicOrdering::SeqCst) < max_workers {
+            assert!(
+                Instant::now() < fill_deadline,
+                "timed out waiting for {max_workers} in-flight bodies, have {}",
+                concurrent.load(AtomicOrdering::SeqCst)
+            );
+            tokio::time::sleep(Duration::from_millis(5)).await;
+        }
+
+        let mut interactive_handles = Vec::new();
+        for bump in 0..8 {
+            let new_gen = sched.begin_generation().await;
+            let path = format!("/new-{bump}.jpg");
+            let sched = sched.clone();
+            let concurrent = concurrent.clone();
+            let peak = peak.clone();
+            interactive_handles.push(tokio::spawn(async move {
+                sched
+                    .run(
+                        WorkPriority::Interactive,
+                        WorkKey::materialize(path.clone(), 1, 1),
+                        new_gen,
+                        move || {
+                            let concurrent = concurrent;
+                            let peak = peak;
+                            async move {
+                                let now = concurrent.fetch_add(1, AtomicOrdering::SeqCst) + 1;
+                                peak.fetch_max(now, AtomicOrdering::SeqCst);
+                                tokio::time::sleep(Duration::from_millis(5)).await;
+                                concurrent.fetch_sub(1, AtomicOrdering::SeqCst);
+                                Ok(photo(&path))
+                            }
+                        },
+                    )
+                    .await
+            }));
+            tokio::time::sleep(Duration::from_millis(5)).await;
+        }
+
+        tokio::time::sleep(Duration::from_millis(30)).await;
+        let observed_peak = peak.load(AtomicOrdering::SeqCst);
+        assert!(
+            observed_peak <= max_workers,
+            "peak concurrent job bodies {observed_peak} exceeded max_workers={max_workers}"
+        );
+
+        for tx in release_txs {
+            let _ = tx.send(());
+        }
+        for handle in stale_handles {
+            let _ = handle.await.unwrap();
+        }
+        for handle in interactive_handles {
+            let _ = handle.await.unwrap();
+        }
+        assert!(
+            peak.load(AtomicOrdering::SeqCst) <= max_workers,
+            "final peak {} exceeded max_workers={max_workers}",
+            peak.load(AtomicOrdering::SeqCst)
+        );
+    }
+
+    /// Detaching slots and spawning overflow workers on each bump was the hang:
+    /// workers_started climbed past the cap while stale decode still ran.
+    #[tokio::test]
+    async fn generation_bumps_do_not_spawn_past_max_workers() {
+        let max_workers = 3;
+        let sched = ImageWorkScheduler::with_limits(max_workers, 1);
+        let gen = sched.begin_generation().await;
+        let mut release_txs = Vec::new();
+        let mut handles = Vec::new();
+
+        for i in 0..max_workers {
+            let (release_tx, release_rx) = oneshot::channel::<()>();
+            let gate = Arc::new(Mutex::new(Some(release_rx)));
+            release_txs.push(release_tx);
+            let path = format!("/hold-{i}.jpg");
+            let sched = sched.clone();
+            handles.push(tokio::spawn(async move {
+                sched
+                    .run(
+                        WorkPriority::Interactive,
+                        WorkKey::materialize(path.clone(), 1, 1),
+                        gen,
+                        move || {
+                            let gate = gate;
+                            async move {
+                                if let Some(rx) = gate.lock().await.take() {
+                                    let _ = rx.await;
+                                }
+                                Ok(photo(&path))
+                            }
+                        },
+                    )
+                    .await
+            }));
+        }
+
+        tokio::time::sleep(Duration::from_millis(40)).await;
+        assert_eq!(sched.workers_started().await, max_workers);
+
+        for _ in 0..10 {
+            let _ = sched.begin_generation().await;
+        }
+
+        let started = sched.workers_started().await;
+        assert!(
+            started <= max_workers,
+            "workers_started={started} exceeded max_workers={max_workers} after generation bumps"
+        );
+
+        for tx in release_txs {
+            let _ = tx.send(());
+        }
+        for handle in handles {
+            let _ = handle.await.unwrap();
+        }
     }
 }
 
