@@ -6,6 +6,10 @@ import type { PhotoMetadata } from '../types/photo';
  * The filesystem path is a query parameter. Putting an absolute path in the
  * URI path segment lets WebKit decode `%2F` and turn `/home/...` into
  * `home/...`, which then 404s. `path=` keeps the bytes intact.
+ *
+ * Under Vite (`http://localhost:1420`), WebKitGTK 2.54.0/2.54.1 refuses
+ * custom-scheme `<img>` loads. ImageCard paints via fetch→blob
+ * (`protocolImage.ts`); see tauri-apps/tauri#16201.
  */
 export function thumbnailUrl(
   photo: Pick<PhotoMetadata, 'path' | 'metadata'>,

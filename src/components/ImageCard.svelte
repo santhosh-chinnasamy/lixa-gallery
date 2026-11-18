@@ -1,6 +1,8 @@
 <script lang="ts">
   import * as Card from '$lib/components/ui/card';
   import { gridImageUrl, UNSUPPORTED_FORMAT_MESSAGE } from '$lib/imageSource';
+  import { probe, probeWarn } from '$lib/debugProbe';
+  import { webviewSafeImageSrc } from '$lib/protocolImage';
   import { cullFlags, gridFit } from '../stores/galleryStore';
   import Filename from './Filename.svelte';
   import Heart from '@lucide/svelte/icons/heart';
@@ -34,14 +36,50 @@
   // platform cannot show the file, so the card does not request it.
   let imageSrc = $derived(gridImageUrl(photo));
 
+  let displaySrc = $state<string | null>(null);
   let imageLoaded = $state(false);
   let imageError = $state(false);
 
-  // Reset when the URL changes so a prior 404 does not stick on the card.
+  // Bridge custom-protocol URLs through blob: under http:// Vite origins
+  // (WebKitGTK 2.54.1 blocks lixa-thumbnail:// on <img>).
   $effect(() => {
-    void imageSrc;
+    const src = imageSrc;
     imageLoaded = false;
     imageError = false;
+    displaySrc = null;
+
+    if (!src) return;
+
+    let cancelled = false;
+    let revoke = () => {};
+
+    void (async () => {
+      try {
+        const safe = await webviewSafeImageSrc(src);
+        if (cancelled) {
+          safe.revoke();
+          return;
+        }
+        revoke = safe.revoke;
+        displaySrc = safe.src;
+        probe('thumb.ready', {
+          name: fileName,
+          bridged: safe.src.startsWith('blob:'),
+        });
+      } catch (error) {
+        if (cancelled) return;
+        imageError = true;
+        probeWarn('thumb.fail', {
+          name: fileName,
+          err: error instanceof Error ? error.message : String(error),
+        });
+      }
+    })();
+
+    return () => {
+      cancelled = true;
+      revoke();
+    };
   });
 
   const handleClick = () => handleImageClick(photo);
@@ -59,6 +97,10 @@
   function handleImageError() {
     imageError = true;
     imageLoaded = false;
+    probeWarn('thumb.img.onerror', {
+      name: fileName,
+      src: displaySrc?.slice(0, 80) ?? null,
+    });
   }
 </script>
 
@@ -114,16 +156,18 @@
         {/if}
 
         <!-- Actual image -->
-        <img
-          src={imageSrc}
-          alt={fileName}
-          loading={isVisible ? 'eager' : 'lazy'}
-          class={`h-full w-full transition-opacity duration-300 ${
-            showWholeFrame ? 'object-contain' : 'object-cover'
-          } ${imageLoaded ? 'opacity-100' : 'opacity-0'}`}
-          onload={handleImageLoad}
-          onerror={handleImageError}
-        />
+        {#if displaySrc}
+          <img
+            src={displaySrc}
+            alt={fileName}
+            loading={isVisible ? 'eager' : 'lazy'}
+            class={`h-full w-full transition-opacity duration-300 ${
+              showWholeFrame ? 'object-contain' : 'object-cover'
+            } ${imageLoaded ? 'opacity-100' : 'opacity-0'}`}
+            onload={handleImageLoad}
+            onerror={handleImageError}
+          />
+        {/if}
         {#if isRejected}
           <div
             class="pointer-events-none absolute inset-0 bg-background/55"

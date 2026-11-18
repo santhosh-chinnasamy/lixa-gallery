@@ -1,5 +1,6 @@
 <script lang="ts">
   import * as Sidebar from '$lib/components/ui/sidebar';
+  import { beforeNavigate, afterNavigate } from '$app/navigation';
   import { listen, type UnlistenFn } from '@tauri-apps/api/event';
   import { getCurrentWindow } from '@tauri-apps/api/window';
   import '../app.css';
@@ -7,6 +8,7 @@
   import ShortcutOverlay from '../components/ShortcutOverlay.svelte';
   import type { KeyboardActions } from '../types/events';
   import { initLogger } from '$lib/logger';
+  import { probe } from '$lib/debugProbe';
   import ErrorToast from '../components/common/ErrorToast.svelte';
   import { initTheme } from '../stores/themeStore';
   import { folderGeneration, mergePhotoUpdates } from '../stores/galleryStore';
@@ -16,8 +18,29 @@
 
   let { children }: { children?: Snippet } = $props();
 
+  beforeNavigate((nav) => {
+    probe('nav.before', {
+      from: nav.from?.url.pathname ?? null,
+      to: nav.to?.url.pathname ?? null,
+      type: nav.type,
+      willLoad: nav.willLoad,
+    });
+  });
+
+  afterNavigate((nav) => {
+    probe('nav.after', {
+      from: nav.from?.url.pathname ?? null,
+      to: nav.to?.url.pathname ?? null,
+      type: nav.type,
+    });
+  });
+
   $effect(() => {
     initLogger();
+    probe('layout.mount', {
+      origin: typeof location !== 'undefined' ? location.origin : null,
+      href: typeof location !== 'undefined' ? location.href : null,
+    });
     return initTheme();
   });
 

@@ -34,6 +34,8 @@
   } from '../../stores/galleryStore';
   import type { ExportReport } from '../../types/photo';
   import { setShortcutLayer } from '$lib/shortcuts';
+  import { probe, startProbeSession } from '$lib/debugProbe';
+  import { get } from 'svelte/store';
 
   let exportStatus = $state('');
   let isExporting = $state(false);
@@ -83,12 +85,33 @@
 
   // Load once on enter. An $effect here can re-fire if refresh touches tracked state.
   onMount(() => {
-    void refreshFavourites();
+    const stopProbe = startProbeSession('favourites');
+    probe('favourites.mount', {
+      favorites: get(favorites).size,
+      scope: get(favouriteScope),
+      folder: get(currentFolder),
+    });
+    void refreshFavourites().then(() => {
+      probe('favourites.refreshed', {
+        favorites: get(favorites).size,
+        photos: get(favouritePhotos).length,
+        groups: get(favouriteFolderGroups).length,
+        scope: get(favouriteScope),
+      });
+    });
+    return () => {
+      probe('favourites.unmount');
+      stopProbe();
+    };
   });
 
   $effect(() => {
     setShortcutLayer('favourites', true);
-    return () => setShortcutLayer('favourites', false);
+    probe('favourites.shortcutLayer', { active: true });
+    return () => {
+      setShortcutLayer('favourites', false);
+      probe('favourites.shortcutLayer', { active: false });
+    };
   });
 
   // Automatically adjust scope if no folder is open
