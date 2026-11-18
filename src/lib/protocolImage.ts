@@ -14,12 +14,12 @@ const CUSTOM_LOCALHOST = /^(lixa-thumbnail|asset):\/\/localhost\//i;
 const THUMB_HOST = /lixa-thumbnail/i;
 const ASSET_HOST = /(^asset:)|(^https?:\/\/asset\.localhost)/i;
 
-/** Compressed thumb blob budget kept after all holders release. */
-const THUMB_BUDGET_BYTES = 96 * 1024 * 1024;
+/** Idle thumbs kept warm after release (compressed bytes). Keep tiny. */
+const THUMB_BUDGET_BYTES = 16 * 1024 * 1024;
 /** Full-res blobs retained with zero holders (viewer neighbour warm set). */
-const FULL_IDLE_CAP = 3;
+const FULL_IDLE_CAP = 2;
 /** Max concurrent get_thumbnail_bytes / read_image_bytes invokes. */
-const INVOKE_CONCURRENCY = 6;
+const INVOKE_CONCURRENCY = 3;
 
 type ImageKind = 'thumb' | 'full';
 
@@ -206,13 +206,10 @@ function hold(key: string, entry: CacheEntry): SafeImageSrc {
       released = true;
       entry.refs = Math.max(0, entry.refs - 1);
       if (entry.refs === 0) {
-        // Full-res: free immediately when unused (GiB-class). Thumbs may warm
-        // until the byte budget forces eviction.
-        if (entry.kind === 'full') {
-          destroyEntry(key, entry);
-        } else {
-          evictIdle();
-        }
+        // Free immediately. WebKit was retaining decoded frames for warm
+        // idle thumbs and climbing past 10+ GiB with a blank Favourites UI.
+        destroyEntry(key, entry);
+        evictIdle();
       }
     },
   };

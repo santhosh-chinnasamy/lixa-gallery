@@ -417,29 +417,31 @@
           class="relative w-full"
           style="height: {$virtualizer.getTotalSize()}px;"
         >
-          {#each $virtualizer.getVirtualItems() as virtualItem (processedPhotos[virtualItem.index]?.path ?? virtualItem.index)}
-            {@const photo = processedPhotos[virtualItem.index]}
-            {@const columnWidth = columns > 0 ? containerWidth / columns : 0}
-            <div
-              style="position: absolute; top: 0; left: 0; transform: translateY({virtualItem.start}px) translateX({virtualItem.lane *
-                columnWidth}px); width: {columnWidth}px; height: {virtualItem.size}px; padding: 8px; display: flex; justify-content: center;"
-            >
+          {#if containerWidth > 48}
+            {#each $virtualizer.getVirtualItems() as virtualItem (processedPhotos[virtualItem.index]?.path ?? virtualItem.index)}
+              {@const photo = processedPhotos[virtualItem.index]}
+              {@const columnWidth = columns > 0 ? containerWidth / columns : 0}
               <div
-                style="width: 100%; max-width: calc(var(--grid-item-size) * 1.5);"
+                style="position: absolute; top: 0; left: 0; transform: translateY({virtualItem.start}px) translateX({virtualItem.lane *
+                  columnWidth}px); width: {columnWidth}px; height: {virtualItem.size}px; padding: 8px; display: flex; justify-content: center;"
               >
-                {#if photo}
-                  <ImageCard
-                    {photo}
-                    tabindex={virtualItem.index === activeIndex ? 0 : -1}
-                    isActive={virtualItem.index === activeIndex}
-                    galleryIndex={virtualItem.index}
-                    {handleImageClick}
-                    isVisible={true}
-                  />
-                {/if}
+                <div
+                  style="width: 100%; max-width: calc(var(--grid-item-size) * 1.5);"
+                >
+                  {#if photo}
+                    <ImageCard
+                      {photo}
+                      tabindex={virtualItem.index === activeIndex ? 0 : -1}
+                      isActive={virtualItem.index === activeIndex}
+                      galleryIndex={virtualItem.index}
+                      {handleImageClick}
+                      isVisible={true}
+                    />
+                  {/if}
+                </div>
               </div>
-            </div>
-          {/each}
+            {/each}
+          {/if}
         </div>
       {/if}
     </div>

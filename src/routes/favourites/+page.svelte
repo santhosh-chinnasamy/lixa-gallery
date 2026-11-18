@@ -4,8 +4,6 @@
   import HeartIcon from '@lucide/svelte/icons/heart';
   import FolderIcon from '@lucide/svelte/icons/folder';
   import LayersIcon from '@lucide/svelte/icons/layers';
-  import ChevronDownIcon from '@lucide/svelte/icons/chevron-down';
-  import ChevronRightIcon from '@lucide/svelte/icons/chevron-right';
   import DownloadIcon from '@lucide/svelte/icons/download';
   import Play from '@lucide/svelte/icons/play';
   import { invoke } from '@tauri-apps/api/core';
@@ -77,9 +75,6 @@
   let showExportModal = $state(false);
   let isSlideshowOpen = $state(false);
 
-  // Collapsed state for folder accordions in All Folders view
-  let collapsedFolders = $state<Set<string>>(new Set());
-
   // Specific folder targeted for quick export (null = use modal's general scope)
   let exportTargetFolder = $state<string | null>(null);
 
@@ -137,21 +132,6 @@
       showExportModal = true;
     },
   };
-
-  function toggleFolderCollapse(folderPath: string) {
-    const next = new Set(collapsedFolders);
-    if (next.has(folderPath)) {
-      next.delete(folderPath);
-    } else {
-      next.add(folderPath);
-    }
-    collapsedFolders = next;
-  }
-
-  function handleQuickExportFolder(folderPath: string) {
-    exportTargetFolder = folderPath;
-    showExportModal = true;
-  }
 
   async function handleClearCurrentFolder() {
     if ($currentFolder) {
@@ -413,81 +393,29 @@
           </div>
         {/if}
       {:else}
-        <!-- View 2: All Folders (Grouped Accordions) -->
-        <div class="custom-scrollbar h-full min-h-0 overflow-y-auto p-4 lg:p-6">
-          <div class="space-y-6">
-            {#each $favouriteFolderGroups as group (group.folder_path)}
-              {@const isCollapsed = collapsedFolders.has(group.folder_path)}
-              <div
-                class="shadow-xs backdrop-blur-xs rounded-xl border bg-card/60 transition-all"
-              >
-                <!-- Folder Section Header -->
-                <div
-                  class="flex items-center justify-between border-b bg-muted/30 px-4 py-3"
-                >
-                  <button
-                    type="button"
-                    class="flex min-w-0 items-center gap-2.5 text-left transition-opacity hover:opacity-80"
-                    onclick={() => toggleFolderCollapse(group.folder_path)}
-                  >
-                    {#if isCollapsed}
-                      <ChevronRightIcon
-                        size={16}
-                        class="shrink-0 text-muted-foreground"
-                      />
-                    {:else}
-                      <ChevronDownIcon
-                        size={16}
-                        class="shrink-0 text-muted-foreground"
-                      />
-                    {/if}
-                    <FolderIcon size={18} class="shrink-0 text-primary" />
-                    <div class="min-w-0">
-                      <div class="flex items-center gap-2">
-                        <span
-                          class="truncate text-sm font-semibold text-foreground"
-                        >
-                          {group.folder_name}
-                        </span>
-                        <span
-                          class="rounded-full bg-primary/10 px-2 py-0.5 text-[10px] font-bold text-primary"
-                        >
-                          {group.count}
-                        </span>
-                      </div>
-                      <p class="truncate text-[11px] text-muted-foreground">
-                        {group.folder_path}
-                      </p>
-                    </div>
-                  </button>
-
-                  <div class="flex items-center gap-2">
-                    <Button
-                      variant="ghost"
-                      size="sm"
-                      class="h-7 gap-1 text-xs text-muted-foreground hover:text-foreground"
-                      onclick={() => handleQuickExportFolder(group.folder_path)}
-                    >
-                      <DownloadIcon size={12} />
-                      <span class="hidden sm:inline">Export Folder</span>
-                    </Button>
-                  </div>
-                </div>
-
-                <!-- Photos Grid in this Folder -->
-                {#if !isCollapsed}
-                  <div class="h-[min(70vh,52rem)] min-h-0">
-                    <Gallery
-                      photos={group.photos}
-                      embedded
-                      source="favourites"
-                    />
-                  </div>
-                {/if}
-              </div>
-            {/each}
+        <!-- All Folders: one virtualized grid. Nested accordion + scrollport
+             painted blank under WebKit while blob thumbs still loaded. -->
+        {#if $isLoadingFavourites}
+          <div
+            class="flex h-full items-center justify-center text-sm text-muted-foreground"
+          >
+            Loading favourites…
           </div>
-        </div>
+        {:else if $favouritePhotos.length === 0}
+          <div
+            class="flex h-full flex-col items-center justify-center p-6 text-center text-muted-foreground"
+          >
+            <p class="text-sm">No favourite photos to show yet.</p>
+          </div>
+        {:else}
+          <div class="h-full min-h-0">
+            <Gallery
+              photos={$favouritePhotos}
+              embedded
+              source="favourites"
+            />
+          </div>
+        {/if}
       {/if}
     </div>
   {/if}

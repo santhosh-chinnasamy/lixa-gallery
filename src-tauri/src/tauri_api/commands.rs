@@ -240,6 +240,9 @@ pub fn get_log_dir(app_handle: AppHandle) -> Result<String, String> {
 
 /// Thumbnail / preview bytes as base64. Used when WebKit blocks custom-protocol
 /// `<img>` / `fetch` from the Vite `http://localhost` origin (tauri#16201).
+///
+/// Only returns real WebP thumb/preview bytes (capped). Never base64-encodes a
+/// full-size original — that froze the webview and pushed WebKit past 10+ GiB.
 #[tauri::command]
 pub async fn get_thumbnail_bytes(
     state: State<'_, AppState>,
@@ -247,12 +250,51 @@ pub async fn get_thumbnail_bytes(
     preview: Option<bool>,
 ) -> Result<String, String> {
     use base64::{engine::general_purpose::STANDARD, Engine};
-    use std::path::PathBuf;
+    use std::path::{Path, PathBuf};
+
+    const MAX_BYTES: usize = 1_500_000;
+
+    fn is_webp(data: &[u8]) -> bool {
+        data.len() >= 12 && data.starts_with(b"RIFF") && &data[8..12] == b"WEBP"
+    }
+
+    fn read_capped_webp(path: &Path) -> Result<Vec<u8>, String> {
+        let data = std::fs::read(path).map_err(|err| err.to_string())?;
+        if !is_webp(&data) {
+            return Err(format!("not a webp thumbnail: {}", path.display()));
+        }
+        if data.len() > MAX_BYTES {
+            return Err(format!(
+                "thumbnail too large ({} bytes): {}",
+                data.len(),
+                path.display()
+            ));
+        }
+        Ok(data)
+    }
 
     let original_path = PathBuf::from(&path);
     let thumb_dir = &state.thumbnail_path;
+    let want_preview = preview.unwrap_or(false);
 
-    let file_path = if preview.unwrap_or(false) {
+    if !want_preview {
+        // Disk hit first — same path as the URI protocol. Avoids Interactive
+        // materialize + photos-updated storms when the WebP already exists.
+        if let Ok(identity) =
+            infra::thumbnail_cache::ThumbnailIdentity::read(&original_path)
+        {
+            let thumb_path = infra::thumbnail_cache::thumbnail_disk_path(
+                Path::new(thumb_dir),
+                &original_path,
+                identity,
+            );
+            if let Ok(data) = read_capped_webp(&thumb_path) {
+                return Ok(STANDARD.encode(data));
+            }
+        }
+    }
+
+    let file_path = if want_preview {
         state
             .gallery
             .get_or_create_preview(&original_path, thumb_dir)
@@ -266,7 +308,7 @@ pub async fn get_thumbnail_bytes(
             .map_err(|err| err.to_string())?
     };
 
-    let data = std::fs::read(&file_path).map_err(|err| err.to_string())?;
+    let data = read_capped_webp(Path::new(&file_path))?;
     Ok(STANDARD.encode(data))
 }
 
