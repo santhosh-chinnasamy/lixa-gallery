@@ -232,6 +232,7 @@ impl EventHub for FakeEventHub {
 
     fn emit_photos_updated(
         &self,
+        _generation: u64,
         _photos: &[gallery_core::models::PhotoMetadata],
     ) -> anyhow::Result<()> {
         Ok(())
@@ -248,7 +249,11 @@ impl EventHub for RecordingEventHub {
         Ok(())
     }
 
-    fn emit_photos_updated(&self, photos: &[PhotoMetadata]) -> anyhow::Result<()> {
+    fn emit_photos_updated(
+        &self,
+        _generation: u64,
+        photos: &[PhotoMetadata],
+    ) -> anyhow::Result<()> {
         self.photos.lock().unwrap().extend_from_slice(photos);
         Ok(())
     }

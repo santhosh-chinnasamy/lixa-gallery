@@ -1,5 +1,5 @@
 use gallery_core::events::EventHub;
-use gallery_core::models::PhotoMetadata;
+use gallery_core::models::{PhotoMetadata, PhotosUpdatedEvent};
 use tauri::{AppHandle, Emitter};
 
 pub struct TauriEventHub {
@@ -18,11 +18,21 @@ impl EventHub for TauriEventHub {
         Ok(())
     }
 
-    fn emit_photos_updated(&self, photos: &[PhotoMetadata]) -> anyhow::Result<()> {
+    fn emit_photos_updated(
+        &self,
+        generation: u64,
+        photos: &[PhotoMetadata],
+    ) -> anyhow::Result<()> {
         if photos.is_empty() {
             return Ok(());
         }
-        self.app.emit("photos-updated", photos.to_vec())?;
+        self.app.emit(
+            "photos-updated",
+            PhotosUpdatedEvent {
+                generation,
+                photos: photos.to_vec(),
+            },
+        )?;
         Ok(())
     }
 }

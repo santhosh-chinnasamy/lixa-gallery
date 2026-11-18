@@ -2,7 +2,12 @@
 //!
 //! Interactive jobs always run before background. Same [`WorkKey`] coalesces
 //! onto one execution; a later Interactive submit upgrades a queued Background
-//! job. [`begin_generation`] cancels stale folder work.
+//! job.
+//!
+//! [`begin_generation`] cancels **queued** work from a previous folder. Work
+//! that is already running always finishes (disk/DB are durable). On success,
+//! every waiter receives `Ok` so in-flight protocol requests can still serve
+//! bytes. Callers gate UI emits with [`ImageWorkScheduler::is_current`].
 
 use crate::models::{GalleryError, PhotoMetadata, Result};
 use crate::work::{
@@ -13,6 +18,7 @@ use std::future::Future;
 use std::pin::Pin;
 use std::sync::atomic::{AtomicU64, Ordering};
 use std::sync::Arc;
+use std::time::{Duration, Instant};
 use tokio::sync::{Mutex, Notify, oneshot};
 
 type JobFuture = Pin<Box<dyn Future<Output = Result<PhotoMetadata>> + Send>>;
@@ -21,7 +27,6 @@ type Reply = oneshot::Sender<std::result::Result<PhotoMetadata, String>>;
 struct Job {
     key: WorkKey,
     priority: WorkPriority,
-    generation: u64,
     work: JobFuture,
 }
 
@@ -87,15 +92,17 @@ impl ImageWorkScheduler {
         self.inner.max_workers
     }
 
-    /// Bump the generation so in-flight/queued work from a previous folder
-    /// resolves as cancelled and does not emit to the UI. Queued jobs are
-    /// drained before this returns; in-flight jobs cancel when they finish.
+    /// Bump the generation so queued work from a previous folder is dropped.
+    /// In-flight jobs keep running and deliver their result to waiters; callers
+    /// gate UI emits with [`Self::is_current`].
     pub async fn begin_generation(&self) -> u64 {
         let mut state = self.inner.state.lock().await;
         let next = self.inner.generation.fetch_add(1, Ordering::SeqCst) + 1;
         let mut cancelled_keys: Vec<WorkKey> =
             state.interactive.drain(..).map(|job| job.key).collect();
         cancelled_keys.extend(state.background.drain(..).map(|job| job.key));
+        // Queued only — in-flight keys were already popped and stay in `active`
+        // until the worker finishes, so later submits can still coalesce.
         for key in cancelled_keys {
             state.active.remove(&key);
             if let Some(waiters) = state.waiters.remove(&key) {
@@ -117,11 +124,41 @@ impl ImageWorkScheduler {
         self.current_generation() == generation
     }
 
+    /// True while interactive work is queued or running (background alone is idle).
+    pub async fn has_interactive_work(&self) -> bool {
+        let state = self.inner.state.lock().await;
+        interactive_busy(&state)
+    }
+
+    /// Wait until interactive work has been quiet for `quiet_for`, or `max_wait` elapses.
+    /// Used so full-folder background indexing yields to on-screen protocol work.
+    pub async fn wait_until_interactive_idle(&self, quiet_for: Duration, max_wait: Duration) {
+        let deadline = Instant::now() + max_wait;
+        let mut quiet_since: Option<Instant> = None;
+        loop {
+            if Instant::now() >= deadline {
+                return;
+            }
+            if self.has_interactive_work().await {
+                quiet_since = None;
+            } else {
+                let since = *quiet_since.get_or_insert_with(Instant::now);
+                if since.elapsed() >= quiet_for {
+                    return;
+                }
+            }
+            tokio::time::sleep(Duration::from_millis(25)).await;
+        }
+    }
+
     /// Run `work` at `priority`, coalescing on `key`.
     ///
     /// If another caller already submitted the same key, `work` is not polled
-    /// and this future waits for that result. Returns [`GalleryError::Unknown`]
-    /// with `"cancelled"` when the generation is stale.
+    /// and this future waits for that result. Successful decodes fan out `Ok`
+    /// to every waiter (including ones that attached under an older generation)
+    /// so URI-protocol callers are not stuck with a cached 404. Returns
+    /// cancelled when this submit's generation is already stale before enqueue,
+    /// or when a queued job is drained by [`Self::begin_generation`].
     pub async fn run<F, Fut>(
         &self,
         priority: WorkPriority,
@@ -162,7 +199,6 @@ impl ImageWorkScheduler {
                 let job = Job {
                     key,
                     priority,
-                    generation,
                     work: Box::pin(work()),
                 };
                 match priority {
@@ -191,6 +227,10 @@ impl ImageWorkScheduler {
             });
         }
     }
+}
+
+fn interactive_busy(state: &State) -> bool {
+    !state.interactive.is_empty() || state.running > state.running_background
 }
 
 fn cancelled() -> GalleryError {
@@ -233,21 +273,12 @@ async fn worker_loop(inner: Arc<Inner>) {
 
         let is_background = job.priority == WorkPriority::Background;
         let key = job.key.clone();
-        let generation = job.generation;
 
-        let outcome = if inner.generation.load(Ordering::SeqCst) != generation {
-            Err("cancelled".to_string())
-        } else {
-            match job.work.await {
-                Ok(photo) => {
-                    if inner.generation.load(Ordering::SeqCst) != generation {
-                        Err("cancelled".to_string())
-                    } else {
-                        Ok(photo)
-                    }
-                }
-                Err(err) => Err(err.to_string()),
-            }
+        // Always run once dequeued. Folder switches must not discard durable
+        // decode work; callers gate UI emits via is_current.
+        let outcome = match job.work.await {
+            Ok(photo) => Ok(photo),
+            Err(err) => Err(err.to_string()),
         };
 
         {
@@ -297,7 +328,6 @@ mod tests {
         let gen = sched.begin_generation().await;
         let order = Arc::new(std::sync::Mutex::new(Vec::new()));
 
-        // Hold the single worker with a gate.
         let (release_tx, release_rx) = oneshot::channel::<()>();
         let release_rx = Arc::new(Mutex::new(Some(release_rx)));
 
@@ -453,7 +483,6 @@ mod tests {
         let (release_tx, release_rx) = oneshot::channel::<()>();
         let release_rx = Arc::new(Mutex::new(Some(release_rx)));
 
-        // Occupy the worker.
         let gate = release_rx.clone();
         let block = tokio::spawn({
             let sched = sched.clone();
@@ -528,6 +557,121 @@ mod tests {
         assert_eq!(bg.await.unwrap().unwrap().path, "/up");
         assert_eq!(int.await.unwrap().unwrap().path, "/up");
         assert_eq!(runs.load(AtomicOrdering::SeqCst), 1);
+    }
+
+    #[tokio::test]
+    async fn in_flight_survives_generation_bump_and_serves_new_waiter() {
+        let sched = ImageWorkScheduler::with_limits(1, 1);
+        let old_gen = sched.begin_generation().await;
+        let (release_tx, release_rx) = oneshot::channel::<()>();
+        let gate = Arc::new(Mutex::new(Some(release_rx)));
+        let runs = Arc::new(AtomicUsize::new(0));
+
+        let old = tokio::spawn({
+            let sched = sched.clone();
+            let gate = gate.clone();
+            let runs = runs.clone();
+            async move {
+                sched
+                    .run(
+                        WorkPriority::Background,
+                        WorkKey::materialize("/a.jpg", 1, 1),
+                        old_gen,
+                        move || {
+                            let gate = gate;
+                            let runs = runs;
+                            async move {
+                                runs.fetch_add(1, AtomicOrdering::SeqCst);
+                                if let Some(rx) = gate.lock().await.take() {
+                                    let _ = rx.await;
+                                }
+                                Ok(photo("/a.jpg"))
+                            }
+                        },
+                    )
+                    .await
+            }
+        });
+
+        tokio::time::sleep(Duration::from_millis(30)).await;
+        let new_gen = sched.begin_generation().await;
+        assert_ne!(old_gen, new_gen);
+
+        let new_handle = tokio::spawn({
+            let sched = sched.clone();
+            async move {
+                sched
+                    .run(
+                        WorkPriority::Interactive,
+                        WorkKey::materialize("/a.jpg", 1, 1),
+                        new_gen,
+                        move || async move {
+                            panic!("coalesced waiter must not run a second closure");
+                        },
+                    )
+                    .await
+            }
+        });
+
+        tokio::time::sleep(Duration::from_millis(20)).await;
+        let _ = release_tx.send(());
+
+        let old_result = old.await.unwrap();
+        let new_result = new_handle.await.unwrap();
+        assert!(
+            old_result.is_ok(),
+            "in-flight starter must still receive Ok so protocol can serve bytes, got {old_result:?}"
+        );
+        assert!(
+            new_result.is_ok(),
+            "new session waiter should receive Ok, got {new_result:?}"
+        );
+        assert_eq!(runs.load(AtomicOrdering::SeqCst), 1);
+        assert!(sched.is_current(new_gen));
+        assert!(!sched.is_current(old_gen));
+    }
+
+    /// Protocol-shaped regression: a folder switch must not turn an in-flight
+    /// successful decode into a cancelled error for the waiter that started it.
+    #[tokio::test]
+    async fn successful_in_flight_decode_is_not_cancelled_after_generation_bump() {
+        let sched = ImageWorkScheduler::with_limits(1, 1);
+        let old_gen = sched.begin_generation().await;
+        let (release_tx, release_rx) = oneshot::channel::<()>();
+        let gate = Arc::new(Mutex::new(Some(release_rx)));
+
+        let started = tokio::spawn({
+            let sched = sched.clone();
+            let gate = gate.clone();
+            async move {
+                sched
+                    .run(
+                        WorkPriority::Interactive,
+                        WorkKey::materialize("/thumb.jpg", 1, 1),
+                        old_gen,
+                        move || {
+                            let gate = gate;
+                            async move {
+                                if let Some(rx) = gate.lock().await.take() {
+                                    let _ = rx.await;
+                                }
+                                Ok(photo("/thumb.jpg"))
+                            }
+                        },
+                    )
+                    .await
+            }
+        });
+
+        tokio::time::sleep(Duration::from_millis(20)).await;
+        let _new_gen = sched.begin_generation().await;
+        let _ = release_tx.send(());
+
+        let result = started.await.unwrap();
+        assert!(
+            result.is_ok(),
+            "protocol waiter would 404 if this were Cancelled: {result:?}"
+        );
     }
 }
 

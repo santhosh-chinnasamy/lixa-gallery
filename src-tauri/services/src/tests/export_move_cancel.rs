@@ -54,6 +54,7 @@ impl EventHub for CancelAfter {
 
     fn emit_photos_updated(
         &self,
+        _generation: u64,
         _photos: &[gallery_core::models::PhotoMetadata],
     ) -> anyhow::Result<()> {
         Ok(())
@@ -68,6 +69,7 @@ impl EventHub for Quiet {
 
     fn emit_photos_updated(
         &self,
+        _generation: u64,
         _photos: &[gallery_core::models::PhotoMetadata],
     ) -> anyhow::Result<()> {
         Ok(())

@@ -114,7 +114,7 @@ impl ImageProcessorTrait for RayonImageProcessor {
         let pool = self.pool.clone();
         let output_path_result = tokio::task::spawn_blocking(move || {
             pool.install(|| {
-                let img = match open_oriented(&path) {
+                let thumbnail = match open_oriented_thumbnail(&path, THUMB_MAX_EDGE) {
                     Ok(img) => img,
                     Err(e) => {
                         log::warn!(
@@ -126,7 +126,6 @@ impl ImageProcessorTrait for RayonImageProcessor {
                     }
                 };
 
-                let thumbnail = img.thumbnail(512, 512);
                 write_webp_atomic(&thumbnail, &output_path)?;
                 if let Err(err) = thumbnail_cache::remove_other_identity_files(&output_path) {
                     log::warn!(
@@ -176,6 +175,9 @@ impl ImageProcessorTrait for RayonImageProcessor {
 /// Longest edge of a viewer preview. Smaller frames are not enlarged.
 const PREVIEW_MAX_EDGE: u32 = 2048;
 
+/// Longest edge written for grid thumbnails.
+const THUMB_MAX_EDGE: u32 = 512;
+
 /// Decode `source` and write a WebP the webview can paint.
 ///
 /// Used for formats the platform webview cannot render, such as TIFF on
@@ -221,6 +223,87 @@ fn open_oriented(path: &Path) -> std::result::Result<image::DynamicImage, String
     let mut image = image::DynamicImage::from_decoder(decoder).map_err(|err| err.to_string())?;
     image.apply_orientation(orientation);
     Ok(image)
+}
+
+/// Decode only as much as needed for a grid thumb, then rotate the small bitmap.
+fn open_oriented_thumbnail(
+    path: &Path,
+    max_edge: u32,
+) -> std::result::Result<image::DynamicImage, String> {
+    let ext = path
+        .extension()
+        .and_then(|s| s.to_str())
+        .unwrap_or("")
+        .to_ascii_lowercase();
+    if matches!(ext.as_str(), "jpg" | "jpeg" | "jpe") {
+        if let Ok(thumb) = open_jpeg_thumbnail(path, max_edge) {
+            return Ok(thumb);
+        }
+    }
+
+    let reader = image::ImageReader::open(path).map_err(|err| err.to_string())?;
+    let mut decoder = reader
+        .with_guessed_format()
+        .map_err(|err| err.to_string())?
+        .into_decoder()
+        .map_err(|err| err.to_string())?;
+    let orientation = decoder.orientation().map_err(|err| err.to_string())?;
+    let image = image::DynamicImage::from_decoder(decoder).map_err(|err| err.to_string())?;
+    let mut thumb = image.thumbnail(max_edge, max_edge);
+    thumb.apply_orientation(orientation);
+    Ok(thumb)
+}
+
+/// JPEG DCT scale during decode, then EXIF orientation on the small frame.
+fn open_jpeg_thumbnail(
+    path: &Path,
+    max_edge: u32,
+) -> std::result::Result<image::DynamicImage, String> {
+    use std::io::BufReader;
+
+    let file = std::fs::File::open(path).map_err(|err| err.to_string())?;
+    let mut decoder = jpeg_decoder::Decoder::new(BufReader::new(file));
+    decoder.read_info().map_err(|err| err.to_string())?;
+    let info = decoder.info().ok_or_else(|| "jpeg missing header info".to_string())?;
+    let target = max_edge.min(u32::from(u16::MAX)) as u16;
+    let (out_w, out_h) = decoder
+        .scale(target, target)
+        .map_err(|err| err.to_string())?;
+    let pixels = decoder.decode().map_err(|err| err.to_string())?;
+    let width = u32::from(out_w);
+    let height = u32::from(out_h);
+
+    let rgb = match info.pixel_format {
+        jpeg_decoder::PixelFormat::L8 => {
+            let gray = image::GrayImage::from_raw(width, height, pixels)
+                .ok_or_else(|| "jpeg gray buffer size mismatch".to_string())?;
+            image::DynamicImage::ImageLuma8(gray).to_rgb8()
+        }
+        jpeg_decoder::PixelFormat::RGB24 => image::RgbImage::from_raw(width, height, pixels)
+            .ok_or_else(|| "jpeg rgb buffer size mismatch".to_string())?,
+        jpeg_decoder::PixelFormat::CMYK32 => {
+            return Err("cmyk jpeg thumb path unsupported".to_string());
+        }
+        other => {
+            return Err(format!("unsupported jpeg pixel format: {other:?}"));
+        }
+    };
+
+    let mut thumb = image::DynamicImage::ImageRgb8(rgb).thumbnail(max_edge, max_edge);
+    if let Ok(orientation) = jpeg_orientation(path) {
+        thumb.apply_orientation(orientation);
+    }
+    Ok(thumb)
+}
+
+fn jpeg_orientation(path: &Path) -> std::result::Result<image::metadata::Orientation, String> {
+    let reader = image::ImageReader::open(path).map_err(|err| err.to_string())?;
+    let mut decoder = reader
+        .with_guessed_format()
+        .map_err(|err| err.to_string())?
+        .into_decoder()
+        .map_err(|err| err.to_string())?;
+    decoder.orientation().map_err(|err| err.to_string())
 }
 
 fn fit_within(image: image::DynamicImage, max_edge: u32) -> image::DynamicImage {

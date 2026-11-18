@@ -2,7 +2,7 @@ use crate::tauri_api::events::TauriEventHub;
 use crate::tauri_api::state::AppState;
 use gallery_core::models::{
     CullFlag, ExportOptions, ExportReport, Favourite, FavouriteFolderGroup, FolderNode,
-    LoadingMode, PhotoCullState, PhotoMetadata, Workspace,
+    FolderScanResult, LoadingMode, PhotoCullState, PhotoMetadata, Workspace,
 };
 use std::sync::atomic::Ordering;
 use std::sync::Arc;
@@ -13,7 +13,7 @@ pub async fn scan_folder(
     state: State<'_, AppState>,
     path: &str,
     mode: LoadingMode,
-) -> Result<Vec<PhotoMetadata>, String> {
+) -> Result<FolderScanResult, String> {
     state
         .gallery
         .scan_folder(path, &state.thumbnail_path, mode)

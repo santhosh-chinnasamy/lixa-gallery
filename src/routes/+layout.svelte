@@ -10,7 +10,7 @@
   import ErrorToast from '../components/common/ErrorToast.svelte';
   import { initTheme } from '../stores/themeStore';
   import { mergePhotoUpdates } from '../stores/galleryStore';
-  import type { PhotoMetadata } from '../types/photo';
+  import type { PhotosUpdatedEvent } from '../types/photo';
   import type { Snippet } from 'svelte';
 
   let { children }: { children?: Snippet } = $props();
@@ -23,8 +23,10 @@
   $effect(() => {
     let unlisten: UnlistenFn | null = null;
     let cancelled = false;
-    listen<PhotoMetadata[]>('photos-updated', (event) => {
-      mergePhotoUpdates(event.payload ?? []);
+    listen<PhotosUpdatedEvent>('photos-updated', (event) => {
+      const payload = event.payload;
+      if (!payload?.photos?.length) return;
+      mergePhotoUpdates(payload.generation, payload.photos);
     }).then((stop) => {
       if (cancelled) stop();
       else unlisten = stop;

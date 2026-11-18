@@ -7,6 +7,7 @@ import {
   isLoading,
   favorites,
   currentFolder,
+  folderGeneration,
   recentFolders,
   loadFolderTree,
   loadingMode,
@@ -16,6 +17,7 @@ import { get } from 'svelte/store';
 import type {
   ExportFailure,
   ExportReport,
+  FolderScanResult,
   PhotoMetadata,
 } from '../../types/photo';
 
@@ -23,11 +25,12 @@ export async function loadPath(folderPath: string, isRoot = true) {
   try {
     isLoading.set(true);
     const mode = get(loadingMode);
-    const loadedPhotos: PhotoMetadata[] = await invoke('scan_folder', {
+    const result: FolderScanResult = await invoke('scan_folder', {
       path: folderPath,
       mode: mode,
     });
-    photos.set(loadedPhotos);
+    folderGeneration.set(result.generation);
+    photos.set(result.photos);
     currentFolder.set(folderPath);
     toasts.dismissAll();
     if (isRoot) {

@@ -73,12 +73,13 @@ pub fn recommended_pool_size() -> usize {
     let cores = std::thread::available_parallelism()
         .map(|n| n.get())
         .unwrap_or(4);
-    (cores / 2).clamp(1, 4)
+    // Visible-first + cheaper decode leave headroom for a slightly larger pool.
+    (cores / 2).clamp(2, 6)
 }
 
 /// Background slots leave room for interactive work on small pools.
 pub fn recommended_background_slots(pool_size: usize) -> usize {
-    pool_size.saturating_sub(1).clamp(1, 2)
+    pool_size.saturating_sub(1).clamp(1, 3)
 }
 
 #[cfg(test)]
@@ -93,8 +94,8 @@ mod tests {
     #[test]
     fn pool_size_is_capped_and_non_zero() {
         let n = recommended_pool_size();
-        assert!((1..=4).contains(&n));
-        assert!((1..=2).contains(&recommended_background_slots(n)));
+        assert!((2..=6).contains(&n));
+        assert!((1..=3).contains(&recommended_background_slots(n)));
     }
 
     #[test]

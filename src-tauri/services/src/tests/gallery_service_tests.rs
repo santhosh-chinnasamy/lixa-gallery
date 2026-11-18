@@ -39,8 +39,9 @@ async fn test_scan_folder_finds_new_images() {
         .await
         .unwrap();
 
-    assert_eq!(results.len(), 1);
-    assert_eq!(results[0].metadata.name, "img1.jpg");
+    assert_eq!(results.photos.len(), 1);
+    assert_eq!(results.photos[0].metadata.name, "img1.jpg");
+    assert!(results.generation >= 1);
 
     // Check if it was cached in repo
     let cached = repo.photos.lock().unwrap();
@@ -98,14 +99,16 @@ async fn test_scan_folder_groups_a_raw_jpeg_pair() {
         .await
         .unwrap();
 
-    assert_eq!(results.len(), 2);
+    assert_eq!(results.photos.len(), 2);
     let pair = results
+        .photos
         .iter()
         .find(|photo| photo.metadata.name == "IMG_0001.jpg")
         .unwrap();
     assert_eq!(pair.sidecar_path.as_deref(), Some("/pics/IMG_0001.CR2"));
     assert!(!pair.is_raw);
     let raw = results
+        .photos
         .iter()
         .find(|photo| photo.metadata.name == "solo.NEF")
         .unwrap();
@@ -292,7 +295,7 @@ async fn lazy_scan_returns_without_waiting_on_exif_or_convert() {
         .unwrap();
     let elapsed = started.elapsed();
 
-    assert_eq!(results.len(), 2);
+    assert_eq!(results.photos.len(), 2);
     // Two 50ms EXIF/convert waits would push this well over 40ms if awaited.
     assert!(
         elapsed < std::time::Duration::from_millis(40),
@@ -301,8 +304,8 @@ async fn lazy_scan_returns_without_waiting_on_exif_or_convert() {
     assert_eq!(*processor.exif_calls.lock().unwrap(), 0);
     assert_eq!(*processor.convert_calls.lock().unwrap(), 0);
 
-    // Background work should still run and emit updates.
-    tokio::time::sleep(std::time::Duration::from_millis(200)).await;
+    // Background work waits for interactive idle, then converts and emits.
+    tokio::time::sleep(std::time::Duration::from_millis(800)).await;
     assert!(*processor.convert_calls.lock().unwrap() >= 1);
     assert!(!events.photos.lock().unwrap().is_empty());
 }

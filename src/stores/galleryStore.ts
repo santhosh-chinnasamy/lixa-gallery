@@ -22,6 +22,8 @@ export interface FolderNode {
 export const photos = writable<PhotoMetadata[]>([]);
 export const isLoading = writable(false);
 export const currentFolder = writable<string | null>(null);
+/** Folder session from the last successful `scan_folder`. */
+export const folderGeneration = writable(0);
 export const folderTree = writable<FolderNode | null>(null);
 
 export type SortOption = 'name' | 'date' | 'size';
@@ -396,25 +398,31 @@ export async function refreshFavourites() {
 export function clearPhotos() {
   photos.set([]);
   currentFolder.set(null);
+  folderGeneration.set(0);
   folderTree.set(null);
   expandedFolders.clear();
 }
 
 /**
  * Merge backend materialize/EXIF results into the open folder list.
- * Ignores rows that are not already in `photos` (stale folder work).
+ * Drops patches from a different folder session; patches by path only.
+ * Preserves list order so thumb-only patches do not reshuffle the grid.
  */
-export function mergePhotoUpdates(updates: PhotoMetadata[]) {
+export function mergePhotoUpdates(
+  generation: number,
+  updates: PhotoMetadata[],
+) {
   if (updates.length === 0) return;
-  const folder = get(currentFolder);
+  if (generation !== get(folderGeneration)) return;
+
   photos.update((list) => {
     if (list.length === 0) return list;
     const byPath = new Map(list.map((photo) => [photo.path, photo]));
     let changed = false;
     for (const update of updates) {
-      if (!byPath.has(update.path)) continue;
-      if (folder && !update.path.startsWith(folder)) continue;
-      byPath.set(update.path, { ...byPath.get(update.path)!, ...update });
+      const existing = byPath.get(update.path);
+      if (!existing) continue;
+      byPath.set(update.path, { ...existing, ...update });
       changed = true;
     }
     if (!changed) return list;
@@ -426,8 +434,9 @@ export function mergePhotoUpdates(updates: PhotoMetadata[]) {
     const byPath = new Map(list.map((photo) => [photo.path, photo]));
     let changed = false;
     for (const update of updates) {
-      if (!byPath.has(update.path)) continue;
-      byPath.set(update.path, { ...byPath.get(update.path)!, ...update });
+      const existing = byPath.get(update.path);
+      if (!existing) continue;
+      byPath.set(update.path, { ...existing, ...update });
       changed = true;
     }
     if (!changed) return list;
