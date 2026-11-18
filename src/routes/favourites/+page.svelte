@@ -341,7 +341,7 @@
     </div>
 
     <!-- Main Content Area -->
-    <div class="flex-1 overflow-hidden">
+    <div class="min-h-0 flex-1 overflow-hidden">
       {#if $favouriteScope === 'current' && $currentFolder}
         <!-- View 1: Current Folder Favorites -->
         {#if currentFolderPhotos.length === 0}
@@ -381,11 +381,17 @@
             </div>
           </div>
         {:else}
-          <Gallery photos={currentFolderPhotos} />
+          <div class="h-full min-h-0">
+            <Gallery
+              photos={currentFolderPhotos}
+              embedded
+              source="favourites"
+            />
+          </div>
         {/if}
       {:else}
         <!-- View 2: All Folders (Grouped Accordions) -->
-        <div class="custom-scrollbar h-full overflow-y-auto p-4 lg:p-6">
+        <div class="custom-scrollbar h-full min-h-0 overflow-y-auto p-4 lg:p-6">
           <div class="space-y-6">
             {#each $favouriteFolderGroups as group (group.folder_path)}
               {@const isCollapsed = collapsedFolders.has(group.folder_path)}
@@ -447,8 +453,12 @@
 
                 <!-- Photos Grid in this Folder -->
                 {#if !isCollapsed}
-                  <div class="h-[min(70vh,52rem)]">
-                    <Gallery photos={group.photos} embedded />
+                  <div class="h-[min(70vh,52rem)] min-h-0">
+                    <Gallery
+                      photos={group.photos}
+                      embedded
+                      source="favourites"
+                    />
                   </div>
                 {/if}
               </div>

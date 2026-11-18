@@ -34,9 +34,15 @@
   let {
     photos = [],
     embedded = false,
-  }: { photos: PhotoMetadata[]; embedded?: boolean } = $props();
+    source = 'library',
+  }: {
+    photos: PhotoMetadata[];
+    embedded?: boolean;
+    source?: 'library' | 'favourites';
+  } = $props();
   // Guard against a bad scan payload so the grid never receives a non-array.
   const photoList = $derived(Array.isArray(photos) ? photos : []);
+  const fromFavourites = $derived(source === 'favourites');
 
   let selectedImage = $state<PhotoMetadata | null>(null);
   let isSlideshowOpen = $state(false);
@@ -50,10 +56,11 @@
       .length,
   );
 
-  // Calculate dynamic columns based on container width and grid size
+  // Bucket width so scrollbar / sub-pixel jitter cannot flip column count.
+  let widthBucket = $derived(Math.floor(containerWidth / 16) * 16);
   let columns = $derived(
-    containerWidth > 0
-      ? Math.max(1, Math.floor(containerWidth / ($gridSize + 16)))
+    widthBucket > 0
+      ? Math.max(1, Math.floor(widthBucket / ($gridSize + 16)))
       : 1,
   );
 
@@ -62,16 +69,22 @@
   let processedPhotos = $derived.by(() => {
     let result = [...photoList];
 
-    if ($cullFilter !== 'all') {
-      result = result.filter((photo) => {
-        const flag = $cullFlags.get(photo.path) ?? 'unflagged';
-        return flag === $cullFilter;
-      });
-    }
+    // Favourites already passes a curated list. Library cull/search must not
+    // re-filter it (empty cullFlags + cull_filter=picked blanks the grid).
+    if (!fromFavourites) {
+      if ($cullFilter !== 'all') {
+        result = result.filter((photo) => {
+          const flag = $cullFlags.get(photo.path) ?? 'unflagged';
+          return flag === $cullFilter;
+        });
+      }
 
-    if ($searchQuery.trim()) {
-      const q = $searchQuery.toLowerCase();
-      result = result.filter((p) => p.metadata.name.toLowerCase().includes(q));
+      if ($searchQuery.trim()) {
+        const q = $searchQuery.toLowerCase();
+        result = result.filter((p) =>
+          p.metadata.name.toLowerCase().includes(q),
+        );
+      }
     }
 
     result.sort((a, b) => {
@@ -196,25 +209,65 @@
   // Keep options in sync without subscribing to the virtualizer store.
   // `$virtualizer.setOptions` notifies the store (onChange → writable.set),
   // which would re-run this effect forever and freeze the UI.
+  // Also skip no-op updates: measure() can nudge width → columns → effect,
+  // which pegged WebKit when Favourites rendered ~100+ cards.
+  let lastVirtualOpts = { count: -1, size: -1, lanes: -1, hasEl: false };
+  let measureRaf = 0;
+
   $effect(() => {
     const count = processedPhotos.length;
     const el = galleryContainer;
     const size = $gridSize;
     const lanes = columns;
+    const hasEl = !!el;
+    const overscan = embedded ? 2 : 10;
 
     untrack(() => {
+      const prev = lastVirtualOpts;
+      if (
+        prev.count === count &&
+        prev.size === size &&
+        prev.lanes === lanes &&
+        prev.hasEl === hasEl
+      ) {
+        return;
+      }
+
+      const lanesOnly =
+        prev.count === count &&
+        prev.size === size &&
+        prev.hasEl === hasEl &&
+        prev.lanes !== lanes;
+
+      lastVirtualOpts = { count, size, lanes, hasEl };
+
       const api = get(virtualizer);
       api.setOptions({
         count,
         getScrollElement: () => el,
         estimateSize: () => size + 48,
-        overscan: 10,
+        overscan,
         lanes,
       });
-      if (el && count > 0) {
+      if (!el || count === 0) return;
+
+      if (lanesOnly) {
+        if (measureRaf) cancelAnimationFrame(measureRaf);
+        measureRaf = requestAnimationFrame(() => {
+          measureRaf = 0;
+          api.measure();
+        });
+      } else {
         queueMicrotask(() => api.measure());
       }
     });
+
+    return () => {
+      if (measureRaf) {
+        cancelAnimationFrame(measureRaf);
+        measureRaf = 0;
+      }
+    };
   });
 
   // Explicitly watch for photo array changes to force scroll to top
@@ -277,6 +330,7 @@
   });
 
   $effect(() => {
+    if (embedded || fromFavourites) return;
     setShortcutLayer('grid', true);
     return () => setShortcutLayer('grid', false);
   });
