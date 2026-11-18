@@ -31,7 +31,10 @@
     shortcutMatches,
   } from '$lib/shortcuts';
 
-  let { photos = [] }: { photos: PhotoMetadata[] } = $props();
+  let {
+    photos = [],
+    embedded = false,
+  }: { photos: PhotoMetadata[]; embedded?: boolean } = $props();
   // Guard against a bad scan payload so the grid never receives a non-array.
   const photoList = $derived(Array.isArray(photos) ? photos : []);
 
@@ -285,17 +288,19 @@
   class="relative flex h-full flex-col overflow-hidden"
   style="--grid-item-size: {$gridSize}px"
 >
-  <ControlBar
-    onStartSlideshow={() => (isSlideshowOpen = true)}
-    canStartSlideshow={processedPhotos.length > 0}
-    photoCount={photoList.length}
-    {pickedCount}
-  />
+  {#if !embedded}
+    <ControlBar
+      onStartSlideshow={() => (isSlideshowOpen = true)}
+      canStartSlideshow={processedPhotos.length > 0}
+      photoCount={photoList.length}
+      {pickedCount}
+    />
+  {/if}
   <main
     class="custom-scrollbar flex-1 overflow-y-auto scroll-smooth"
     bind:this={galleryContainer}
   >
-    <div class="h-full p-6 lg:p-10">
+    <div class={embedded ? 'h-full p-2' : 'h-full p-6 lg:p-10'}>
       {#if processedPhotos.length === 0}
         <div class="flex h-full min-h-[400px] items-center justify-center">
           {#if photoList.length === 0 && subfolders.length > 0}

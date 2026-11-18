@@ -55,5 +55,5 @@ export class LruCache<T> {
   }
 }
 
-/** ±2 neighbours, with room to step back without reloading the original. */
-export const VIEWER_PRELOAD_LIMIT = 8;
+/** Current frame plus ±1 neighbours. */
+export const VIEWER_PRELOAD_LIMIT = 3;

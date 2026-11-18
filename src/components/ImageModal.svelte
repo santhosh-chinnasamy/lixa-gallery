@@ -260,11 +260,6 @@
     if (canShowPrevious) indicesToPreload.push(currentIndex - 1);
     if (canShowNext) indicesToPreload.push(currentIndex + 1);
 
-    // Preload next 2 images in each direction for smoother navigation
-    if (currentIndex - 2 >= 0) indicesToPreload.push(currentIndex - 2);
-    if (currentIndex + 2 < photoSource.length)
-      indicesToPreload.push(currentIndex + 2);
-
     indicesToPreload.forEach((index) => {
       const photo = photoSource[index];
       if (photo && !preloadedImages.has(photo.path)) {

@@ -12,8 +12,6 @@
   import { listen, type UnlistenFn } from '@tauri-apps/api/event';
   import { onDestroy, onMount } from 'svelte';
   import Gallery from '../../components/Gallery.svelte';
-  import ImageCard from '../../components/ImageCard.svelte';
-  import ImageModal from '../../components/ImageModal.svelte';
   import SlideshowModal from '../../components/SlideshowModal.svelte';
   import { error as logError } from '$lib/logger';
   import {
@@ -34,7 +32,7 @@
     currentFolderFavoritesCount,
     refreshFavourites,
   } from '../../stores/galleryStore';
-  import type { ExportReport, PhotoMetadata } from '../../types/photo';
+  import type { ExportReport } from '../../types/photo';
   import { setShortcutLayer } from '$lib/shortcuts';
 
   let exportStatus = $state('');
@@ -76,10 +74,6 @@
   let showClearFolderConfirmation = $state(false);
   let showExportModal = $state(false);
   let isSlideshowOpen = $state(false);
-
-  // Modal viewer state for All Folders view
-  let selectedModalImage = $state<PhotoMetadata | null>(null);
-  let modalPhotos = $state<PhotoMetadata[]>([]);
 
   // Collapsed state for folder accordions in All Folders view
   let collapsedFolders = $state<Set<string>>(new Set());
@@ -129,14 +123,6 @@
       next.add(folderPath);
     }
     collapsedFolders = next;
-  }
-
-  function handleImageClickInGroup(
-    photo: PhotoMetadata,
-    groupPhotos: PhotoMetadata[],
-  ) {
-    modalPhotos = groupPhotos;
-    selectedModalImage = photo;
   }
 
   function handleQuickExportFolder(folderPath: string) {
@@ -461,18 +447,8 @@
 
                 <!-- Photos Grid in this Folder -->
                 {#if !isCollapsed}
-                  <div class="p-4">
-                    <div
-                      class="grid grid-cols-2 gap-4 sm:grid-cols-3 md:grid-cols-4 lg:grid-cols-6 xl:grid-cols-8"
-                    >
-                      {#each group.photos as photo (photo.path)}
-                        <ImageCard
-                          {photo}
-                          handleImageClick={(p) =>
-                            handleImageClickInGroup(p, group.photos)}
-                        />
-                      {/each}
-                    </div>
+                  <div class="h-[min(70vh,52rem)]">
+                    <Gallery photos={group.photos} embedded />
                   </div>
                 {/if}
               </div>
@@ -483,13 +459,6 @@
     </div>
   {/if}
 </div>
-
-<!-- Modal Viewer for All Folders View -->
-<ImageModal
-  bind:selectedImage={selectedModalImage}
-  photos={modalPhotos}
-  onClose={() => (selectedModalImage = null)}
-/>
 
 <!-- Slideshow Modal -->
 <SlideshowModal

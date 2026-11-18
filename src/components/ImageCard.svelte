@@ -14,7 +14,7 @@
     isActive = false,
     galleryIndex = 0,
     handleImageClick,
-    isVisible = true,
+    isVisible = false,
   }: {
     photo: PhotoMetadata;
     tabindex?: number;
