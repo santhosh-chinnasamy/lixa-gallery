@@ -170,6 +170,14 @@ impl ImageProcessorTrait for RayonImageProcessor {
             .map_err(|err| GalleryError::Unknown(err.to_string()))?;
         Ok(Some(info))
     }
+
+    async fn ensure_decoded_preview(
+        &self,
+        source: &Path,
+        cache_dir: &Path,
+    ) -> Result<PathBuf> {
+        ensure_decoded_preview(source, cache_dir).await
+    }
 }
 
 /// Longest edge of a viewer preview. Smaller frames are not enlarged.

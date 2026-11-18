@@ -184,6 +184,14 @@ impl ImageProcessor for FakeImageProcessor {
     async fn read_exif(&self, _file_path: &Path) -> Result<Option<gallery_core::models::ExifInfo>> {
         Ok(None)
     }
+
+    async fn ensure_decoded_preview(
+        &self,
+        source: &Path,
+        _cache_dir: &Path,
+    ) -> Result<std::path::PathBuf> {
+        Ok(source.to_path_buf())
+    }
 }
 
 pub struct FakePhotoRepository {

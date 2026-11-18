@@ -480,6 +480,70 @@ impl GalleryService {
         Ok(metadata.preview_path)
     }
 
+    /// Decode a viewer preview through the bounded scheduler (`kind=preview`).
+    /// Returns the on-disk WebP path.
+    pub async fn get_or_create_preview(
+        &self,
+        original_path: &Path,
+        thumb_dir: &str,
+    ) -> Result<String> {
+        let file_meta = self.fs.get_file_metadata(original_path).await?;
+        let path_str = original_path.to_string_lossy().into_owned();
+        let key = WorkKey::preview(path_str.clone(), file_meta.modified, file_meta.size);
+
+        let mut attempts = 0;
+        loop {
+            attempts += 1;
+            let generation = self.scheduler.current_generation();
+            let processor = self.image_processor.clone();
+            let path = original_path.to_path_buf();
+            let thumb_dir = thumb_dir.to_string();
+            let file_meta = file_meta.clone();
+            let path_str = path_str.clone();
+            let key = key.clone();
+            match self
+                .scheduler
+                .run(
+                    WorkPriority::Interactive,
+                    key,
+                    generation,
+                    move || {
+                        let processor = processor.clone();
+                        async move {
+                            let preview = processor
+                                .ensure_decoded_preview(&path, Path::new(&thumb_dir))
+                                .await?;
+                            Ok(PhotoMetadata {
+                                metadata: file_meta,
+                                thumbnail_path: String::new(),
+                                path: path_str,
+                                sidecar_path: None,
+                                preview_path: Some(preview.to_string_lossy().into_owned()),
+                                exif: None,
+                                is_raw: is_raw_path(&path),
+                            })
+                        }
+                    },
+                )
+                .await
+            {
+                Ok(metadata) => {
+                    return metadata.preview_path.ok_or_else(|| {
+                        gallery_core::models::GalleryError::Unknown(
+                            "preview job returned no path".to_string(),
+                        )
+                    });
+                }
+                Err(err)
+                    if attempts < 2 && err.to_string().contains("cancelled") =>
+                {
+                    continue;
+                }
+                Err(err) => return Err(err),
+            }
+        }
+    }
+
     async fn schedule_materialize(
         &self,
         original_path: &Path,

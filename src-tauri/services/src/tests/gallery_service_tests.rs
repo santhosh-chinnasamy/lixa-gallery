@@ -243,6 +243,16 @@ impl gallery_core::image::ImageProcessor for CountingProcessor {
         tokio::time::sleep(std::time::Duration::from_millis(50)).await;
         FakeImageProcessor.read_exif(path).await
     }
+
+    async fn ensure_decoded_preview(
+        &self,
+        source: &Path,
+        cache_dir: &Path,
+    ) -> gallery_core::models::Result<PathBuf> {
+        FakeImageProcessor
+            .ensure_decoded_preview(source, cache_dir)
+            .await
+    }
 }
 
 #[tokio::test]

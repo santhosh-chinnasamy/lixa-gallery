@@ -19,6 +19,8 @@ pub enum WorkKind {
     Materialize,
     /// EXIF only — used when the thumb is already current.
     ExifOnly,
+    /// Decoded viewer preview (formats the webview cannot paint natively).
+    Preview,
 }
 
 /// Coalesce key. Path alone is not enough after an in-place edit.
@@ -64,6 +66,15 @@ impl WorkKey {
             mtime,
             size,
             kind: WorkKind::ExifOnly,
+        }
+    }
+
+    pub fn preview(path: impl Into<String>, mtime: u64, size: u64) -> Self {
+        Self {
+            path: path.into(),
+            mtime,
+            size,
+            kind: WorkKind::Preview,
         }
     }
 }

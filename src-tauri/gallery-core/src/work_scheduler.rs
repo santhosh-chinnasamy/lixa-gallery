@@ -4,9 +4,9 @@
 //! onto one execution; a later Interactive submit upgrades a queued Background
 //! job.
 //!
-//! [`begin_generation`] cancels **queued** work from a previous folder. Work
-//! that is already running always finishes (disk/DB are durable) but frees its
-//! scheduler slot so the new folder's Interactive work is not starved. On
+//! [`begin_generation`] cancels **queued** work from a previous folder and bumps
+//! the generation. In-flight jobs keep their `running` slots until `work.await`
+//! finishes — admission never exceeds [`ImageWorkScheduler::max_workers`]. On
 //! success, every waiter receives `Ok` so in-flight protocol requests can still
 //! serve bytes. Callers gate UI emits with [`ImageWorkScheduler::is_current`].
 
@@ -14,7 +14,7 @@ use crate::models::{GalleryError, PhotoMetadata, Result};
 use crate::work::{
     recommended_background_slots, recommended_pool_size, WorkKey, WorkPriority,
 };
-use std::collections::{HashMap, HashSet, VecDeque};
+use std::collections::{HashMap, VecDeque};
 use std::future::Future;
 use std::pin::Pin;
 use std::sync::atomic::{AtomicU64, Ordering};
@@ -37,9 +37,6 @@ struct State {
     /// Keys queued or running → current priority.
     active: HashMap<WorkKey, WorkPriority>,
     waiters: HashMap<WorkKey, Vec<Reply>>,
-    /// In-flight keys whose worker slots were released after a generation bump.
-    /// Decode still finishes; admission no longer waits on them.
-    detached: HashSet<WorkKey>,
     running: usize,
     running_background: usize,
     workers_started: usize,
@@ -81,7 +78,6 @@ impl ImageWorkScheduler {
                     background: VecDeque::new(),
                     active: HashMap::new(),
                     waiters: HashMap::new(),
-                    detached: HashSet::new(),
                     running: 0,
                     running_background: 0,
                     workers_started: 0,
@@ -102,9 +98,9 @@ impl ImageWorkScheduler {
         self.inner.state.lock().await.workers_started
     }
 
-    /// Bump the generation so queued work from a previous folder is dropped.
-    /// In-flight jobs keep running (and stay coalesce targets) but release their
-    /// admission slots so the new folder is not wedged behind durable stale work.
+    /// Bump the generation and cancel **queued** work from a previous folder.
+    /// In-flight jobs keep their `running` slots (and stay coalesce targets)
+    /// until they finish — never spawn past [`Self::max_workers`].
     /// Callers gate UI emits with [`Self::is_current`].
     pub async fn begin_generation(&self) -> u64 {
         let mut state = self.inner.state.lock().await;
@@ -116,31 +112,11 @@ impl ImageWorkScheduler {
         // until the worker finishes, so later submits can still coalesce.
         for key in cancelled_keys {
             state.active.remove(&key);
-            state.detached.remove(&key);
             if let Some(waiters) = state.waiters.remove(&key) {
                 for waiter in waiters {
                     let _ = waiter.send(Err("cancelled".to_string()));
                 }
             }
-        }
-        // Free slots held by durable in-flight work from the previous folder.
-        // Those tasks are still blocked in `work.await`, so also spawn overflow
-        // workers that can dequeue the new folder's Interactive jobs immediately.
-        let inflight: Vec<WorkKey> = state.active.keys().cloned().collect();
-        let mut released = 0usize;
-        for key in inflight {
-            if state.detached.insert(key) {
-                released += 1;
-            }
-        }
-        state.running = state.running.saturating_sub(released);
-        state.running_background = 0;
-        for _ in 0..released {
-            state.workers_started += 1;
-            let inner = self.inner.clone();
-            tokio::spawn(async move {
-                worker_loop(inner).await;
-            });
         }
         drop(state);
         self.inner.notify.notify_waiters();
@@ -314,12 +290,9 @@ async fn worker_loop(inner: Arc<Inner>) {
 
         {
             let mut state = inner.state.lock().await;
-            let detached = state.detached.remove(&key);
-            if !detached {
-                state.running = state.running.saturating_sub(1);
-                if is_background {
-                    state.running_background = state.running_background.saturating_sub(1);
-                }
+            state.running = state.running.saturating_sub(1);
+            if is_background {
+                state.running_background = state.running_background.saturating_sub(1);
             }
             state.active.remove(&key);
             if let Some(waiters) = state.waiters.remove(&key) {
@@ -708,6 +681,24 @@ mod tests {
         );
     }
 
+    struct ConcurrentGuard {
+        concurrent: Arc<AtomicUsize>,
+    }
+
+    impl Drop for ConcurrentGuard {
+        fn drop(&mut self) {
+            self.concurrent.fetch_sub(1, AtomicOrdering::SeqCst);
+        }
+    }
+
+    fn enter_body(concurrent: &Arc<AtomicUsize>, peak: &Arc<AtomicUsize>) -> ConcurrentGuard {
+        let now = concurrent.fetch_add(1, AtomicOrdering::SeqCst) + 1;
+        peak.fetch_max(now, AtomicOrdering::SeqCst);
+        ConcurrentGuard {
+            concurrent: concurrent.clone(),
+        }
+    }
+
     /// Hard-bound admission: with max_workers=1 a stale in-flight job may finish
     /// before new Interactive starts, and concurrent bodies never exceed the cap.
     #[tokio::test]
@@ -718,14 +709,6 @@ mod tests {
         let gate = Arc::new(Mutex::new(Some(release_rx)));
         let concurrent = Arc::new(AtomicUsize::new(0));
         let peak = Arc::new(AtomicUsize::new(0));
-
-        let track = |concurrent: Arc<AtomicUsize>, peak: Arc<AtomicUsize>| {
-            let now = concurrent.fetch_add(1, AtomicOrdering::SeqCst) + 1;
-            peak.fetch_max(now, AtomicOrdering::SeqCst);
-            move || {
-                concurrent.fetch_sub(1, AtomicOrdering::SeqCst);
-            }
-        };
 
         let stale = tokio::spawn({
             let sched = sched.clone();
@@ -743,7 +726,7 @@ mod tests {
                             let concurrent = concurrent;
                             let peak = peak;
                             async move {
-                                let _leave = track(concurrent, peak);
+                                let _guard = enter_body(&concurrent, &peak);
                                 if let Some(rx) = gate.lock().await.take() {
                                     let _ = rx.await;
                                 }
@@ -772,7 +755,7 @@ mod tests {
                             let concurrent = concurrent;
                             let peak = peak;
                             async move {
-                                let _leave = track(concurrent, peak);
+                                let _guard = enter_body(&concurrent, &peak);
                                 Ok(photo("/new.jpg"))
                             }
                         },

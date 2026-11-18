@@ -117,12 +117,13 @@ pub fn run() {
 
                     // TIFF on Windows and Linux cannot be painted by the webview.
                     // The viewer asks for a decoded WebP instead of the original.
+                    // Route through the bounded scheduler so folder switches cannot
+                    // oversubscribe decode past max_workers.
                     if request.preview {
-                        match infra::image::ensure_decoded_preview(
-                            &original_path,
-                            std::path::Path::new(&thumb_dir),
-                        )
-                        .await
+                        match state
+                            .gallery
+                            .get_or_create_preview(&original_path, &thumb_dir)
+                            .await
                         {
                             Ok(preview_path) => match std::fs::read(&preview_path) {
                                 Ok(data) => responder.respond(webp_response(200, data)),
