@@ -40,8 +40,8 @@
   let imageLoaded = $state(false);
   let imageError = $state(false);
 
-  // Bridge custom-protocol URLs through blob: under http:// Vite origins
-  // (WebKitGTK 2.54.1 blocks lixa-thumbnail:// on <img>).
+  // Prefer http://lixa-thumbnail.localhost (see protocolImage). Blob bridge
+  // remains as a last resort if a custom-scheme URL still arrives.
   $effect(() => {
     const src = imageSrc;
     imageLoaded = false;
@@ -65,6 +65,7 @@
         probe('thumb.ready', {
           name: fileName,
           bridged: safe.src.startsWith('blob:'),
+          form: safe.src.slice(0, 48),
         });
       } catch (error) {
         if (cancelled) return;
@@ -72,6 +73,7 @@
         probeWarn('thumb.fail', {
           name: fileName,
           err: error instanceof Error ? error.message : String(error),
+          src: src.slice(0, 80),
         });
       }
     })();

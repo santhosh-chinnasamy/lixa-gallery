@@ -1,4 +1,5 @@
 import type { PhotoMetadata } from '../types/photo';
+import { webviewProtocolUrl } from './protocolImage';
 
 /**
  * Thumbnail URL for the `lixa-thumbnail` protocol.
@@ -7,16 +8,17 @@ import type { PhotoMetadata } from '../types/photo';
  * URI path segment lets WebKit decode `%2F` and turn `/home/...` into
  * `home/...`, which then 404s. `path=` keeps the bytes intact.
  *
- * Under Vite (`http://localhost:1420`), WebKitGTK 2.54.0/2.54.1 refuses
- * custom-scheme `<img>` loads. ImageCard paints via fetch→blob
- * (`protocolImage.ts`); see tauri-apps/tauri#16201.
+ * Under Vite (`http://localhost:1420`), emit `http://lixa-thumbnail.localhost`
+ * so WebKitGTK does not block the load (tauri-apps/tauri#16201).
  */
 export function thumbnailUrl(
   photo: Pick<PhotoMetadata, 'path' | 'metadata'>,
 ): string {
   const path = encodeURIComponent(photo.path);
   const version = `${photo.metadata.modified}_${photo.metadata.size}`;
-  return `lixa-thumbnail://localhost/thumb?path=${path}&v=${version}`;
+  return webviewProtocolUrl(
+    `lixa-thumbnail://localhost/thumb?path=${path}&v=${version}`,
+  );
 }
 
 /**
@@ -28,5 +30,7 @@ export function previewUrl(
 ): string {
   const path = encodeURIComponent(photo.path);
   const version = `${photo.metadata.modified}_${photo.metadata.size}`;
-  return `lixa-thumbnail://localhost/thumb?path=${path}&v=${version}&kind=preview`;
+  return webviewProtocolUrl(
+    `lixa-thumbnail://localhost/thumb?path=${path}&v=${version}&kind=preview`,
+  );
 }

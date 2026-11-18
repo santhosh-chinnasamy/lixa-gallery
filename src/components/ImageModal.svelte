@@ -28,6 +28,7 @@
     immediateViewerSrc,
     resolveViewerSrc,
   } from '$lib/photoView';
+  import { probe, probeWarn } from '$lib/debugProbe';
   import Filename from './Filename.svelte';
   import X from '@lucide/svelte/icons/x';
   import Info from '@lucide/svelte/icons/info';
@@ -250,6 +251,10 @@
   function handleImageError() {
     imageError = true;
     imageLoaded = false;
+    probeWarn('modal.img.onerror', {
+      name: fileName ?? null,
+      src: viewerSrc.slice(0, 80),
+    });
   }
 
   // Preload adjacent images
@@ -506,18 +511,29 @@
     const photo = selectedImage;
     if (!photo) {
       viewerSrc = '';
+      probe('modal.close');
       return;
     }
+    probe('modal.open', {
+      name: photo.metadata.name,
+      path: photo.path.slice(0, 80),
+    });
     let cancelled = false;
     const ready = immediateViewerSrc(photo);
     if (ready) {
       viewerSrc = ready;
+      probe('modal.viewerSrc', { form: ready.slice(0, 64) });
     } else {
       viewerSrc = '';
       resolveViewerSrc(photo).then((src) => {
         if (cancelled) return;
-        if (src) viewerSrc = src;
-        else imageError = true;
+        if (src) {
+          viewerSrc = src;
+          probe('modal.viewerSrc', { form: src.slice(0, 64), async: true });
+        } else {
+          imageError = true;
+          probeWarn('modal.viewerSrc.fail', { name: photo.metadata.name });
+        }
       });
     }
     return () => {

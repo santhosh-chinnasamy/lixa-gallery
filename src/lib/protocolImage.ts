@@ -1,19 +1,36 @@
 /**
- * WebKitGTK 2.54.0/2.54.1 blocks custom-scheme `<img src>` when the page is
- * served from `http://localhost` (Vite `tauri dev`). `fetch()` of the same URL
- * still works. See tauri-apps/tauri#16201.
+ * WebKitGTK 2.54.0/2.54.1 (and some 2.54.2 builds under Vite) refuse
+ * custom-scheme `<img>` and often `fetch()` when the page is
+ * `http://localhost:1420`. Same failure mode as tauri-apps/tauri#16201.
  *
- * When the document origin is http(s), paint custom-protocol bytes through a
- * blob: URL instead. Production `tauri://` / custom-scheme pages are unchanged.
+ * Tauri already serves custom protocols at `http://{scheme}.localhost/…`.
+ * Prefer that form under http(s) page origins so `<img>` loads without a
+ * blob bridge. Keep fetch→blob as a last resort for stubborn schemes.
  */
 
-const CUSTOM_SCHEME = /^(lixa-thumbnail|asset):/i;
+const CUSTOM_SCHEME = /^(lixa-thumbnail|asset):\/\//i;
+const CUSTOM_LOCALHOST =
+  /^(lixa-thumbnail|asset):\/\/localhost\//i;
+
+export function pageIsHttpOrigin(): boolean {
+  if (typeof location === 'undefined') return false;
+  return location.protocol === 'http:' || location.protocol === 'https:';
+}
+
+/**
+ * Rewrite `scheme://localhost/…` → `http://scheme.localhost/…` under Vite
+ * http origins. Production `tauri://` pages keep the custom-scheme form.
+ */
+export function webviewProtocolUrl(url: string): string {
+  if (!pageIsHttpOrigin()) return url;
+  return url.replace(
+    CUSTOM_LOCALHOST,
+    (_match, scheme: string) => `http://${scheme.toLowerCase()}.localhost/`,
+  );
+}
 
 export function needsProtocolBlobBridge(url: string): boolean {
-  if (typeof location === 'undefined') return false;
-  if (location.protocol !== 'http:' && location.protocol !== 'https:') {
-    return false;
-  }
+  if (!pageIsHttpOrigin()) return false;
   return CUSTOM_SCHEME.test(url);
 }
 
@@ -24,11 +41,12 @@ export type SafeImageSrc = {
 };
 
 export async function webviewSafeImageSrc(url: string): Promise<SafeImageSrc> {
-  if (!needsProtocolBlobBridge(url)) {
-    return { src: url, revoke: () => {} };
+  const rewritten = webviewProtocolUrl(url);
+  if (!needsProtocolBlobBridge(rewritten)) {
+    return { src: rewritten, revoke: () => {} };
   }
 
-  const response = await fetch(url);
+  const response = await fetch(rewritten);
   if (!response.ok) {
     throw new Error(`protocol fetch ${response.status}`);
   }
