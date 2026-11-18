@@ -5,6 +5,7 @@
  * Enable with localStorage.lixa_debug = '1' (or always on in DEV).
  */
 import { debug as logDebug, info as logInfo, warn as logWarn } from './logger';
+import { blobCacheStats } from './protocolImage';
 
 const STORAGE_KEY = 'lixa_debug';
 
@@ -56,10 +57,15 @@ export function startProbeSession(name: string): () => void {
 
   const heartbeat = window.setInterval(() => {
     beats += 1;
+    const cache = blobCacheStats();
     probe('session.heartbeat', {
       name,
       beats,
       aliveMs: Math.round(performance.now() - t0),
+      blobEntries: cache.entries,
+      thumbIdleBytes: cache.thumbIdleBytes,
+      fullIdle: cache.fullIdle,
+      invokeInFlight: cache.invokeInFlight,
     });
   }, 2000);
 

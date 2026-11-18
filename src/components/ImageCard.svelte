@@ -40,8 +40,7 @@
   let imageLoaded = $state(false);
   let imageError = $state(false);
 
-  // Prefer http://lixa-thumbnail.localhost (see protocolImage). Blob bridge
-  // remains as a last resort if a custom-scheme URL still arrives.
+  // Under Vite, protocolImage serves invoke→blob with refcounted lifetime.
   $effect(() => {
     const src = imageSrc;
     imageLoaded = false;

@@ -2,6 +2,10 @@
  * WebKitGTK under Vite (`http://localhost:1420`) blocks custom-scheme and
  * often `http://{scheme}.localhost` `<img>` loads (tauri-apps/tauri#16201).
  * Serve image bytes through `invoke` → blob: URL instead.
+ *
+ * Blob lifetime is refcounted. Callers must call `revoke()`. Idle entries are
+ * dropped under a byte budget (thumbs) or entry cap (full-res) so WebKit RSS
+ * cannot climb for the whole session.
  */
 
 import { invoke } from '@tauri-apps/api/core';
@@ -9,6 +13,25 @@ import { invoke } from '@tauri-apps/api/core';
 const CUSTOM_LOCALHOST = /^(lixa-thumbnail|asset):\/\/localhost\//i;
 const THUMB_HOST = /lixa-thumbnail/i;
 const ASSET_HOST = /(^asset:)|(^https?:\/\/asset\.localhost)/i;
+
+/** Compressed thumb blob budget kept after all holders release. */
+const THUMB_BUDGET_BYTES = 96 * 1024 * 1024;
+/** Full-res blobs retained with zero holders (viewer neighbour warm set). */
+const FULL_IDLE_CAP = 3;
+/** Max concurrent get_thumbnail_bytes / read_image_bytes invokes. */
+const INVOKE_CONCURRENCY = 6;
+
+type ImageKind = 'thumb' | 'full';
+
+type CacheEntry = {
+  kind: ImageKind;
+  src: string;
+  bytes: number;
+  refs: number;
+  /** Insertion / last-acquire order for idle eviction. */
+  seq: number;
+  revokeUrl: () => void;
+};
 
 export function pageIsHttpOrigin(): boolean {
   if (typeof location === 'undefined') return false;
@@ -29,7 +52,7 @@ export function webviewProtocolUrl(url: string): string {
 
 export type SafeImageSrc = {
   src: string;
-  /** Revoke blob URLs when the consumer unmounts or replaces the src. */
+  /** Drop this holder's ref. Frees the blob when refs hit 0 and budgets say so. */
   revoke: () => void;
 };
 
@@ -56,7 +79,10 @@ function parseThumbnailRequest(
 function parseAssetPath(url: string): string | null {
   if (!ASSET_HOST.test(url)) return null;
   try {
-    const normalized = url.replace(/^asset:\/\/localhost\//i, 'http://asset.localhost/');
+    const normalized = url.replace(
+      /^asset:\/\/localhost\//i,
+      'http://asset.localhost/',
+    );
     const parsed = new URL(normalized);
     const raw = parsed.pathname.replace(/^\//, '');
     if (!raw) return null;
@@ -80,7 +106,12 @@ function sniffMime(bytes: Uint8Array): string {
   ) {
     return 'image/webp';
   }
-  if (bytes.length >= 3 && bytes[0] === 0xff && bytes[1] === 0xd8 && bytes[2] === 0xff) {
+  if (
+    bytes.length >= 3 &&
+    bytes[0] === 0xff &&
+    bytes[1] === 0xd8 &&
+    bytes[2] === 0xff
+  ) {
     return 'image/jpeg';
   }
   if (
@@ -102,49 +133,137 @@ function base64ToBytes(b64: string): Uint8Array {
   return out;
 }
 
-function blobFromBase64(b64: string): SafeImageSrc {
-  const bytes = base64ToBytes(b64);
-  const blob = new Blob([bytes], { type: sniffMime(bytes) });
-  const objectUrl = URL.createObjectURL(blob);
+let invokeInFlight = 0;
+const invokeWaiters: Array<() => void> = [];
+
+async function withInvokeSlot<T>(fn: () => Promise<T>): Promise<T> {
+  if (invokeInFlight >= INVOKE_CONCURRENCY) {
+    await new Promise<void>((resolve) => invokeWaiters.push(resolve));
+  }
+  invokeInFlight += 1;
+  try {
+    return await fn();
+  } finally {
+    invokeInFlight -= 1;
+    const next = invokeWaiters.shift();
+    if (next) next();
+  }
+}
+
+const entries = new Map<string, CacheEntry>();
+const inflight = new Map<string, Promise<CacheEntry>>();
+let seqCounter = 0;
+
+function idleThumbBytes(): number {
+  let total = 0;
+  for (const entry of entries.values()) {
+    if (entry.kind === 'thumb' && entry.refs === 0) total += entry.bytes;
+  }
+  return total;
+}
+
+function idleFullCount(): number {
+  let n = 0;
+  for (const entry of entries.values()) {
+    if (entry.kind === 'full' && entry.refs === 0) n += 1;
+  }
+  return n;
+}
+
+function destroyEntry(key: string, entry: CacheEntry): void {
+  entry.revokeUrl();
+  entries.delete(key);
+}
+
+/** Drop oldest zero-ref entries until budgets fit. */
+function evictIdle(): void {
+  const idle = [...entries.entries()]
+    .filter(([, e]) => e.refs === 0)
+    .sort((a, b) => a[1].seq - b[1].seq);
+
+  for (const [key, entry] of idle) {
+    const thumbOver = idleThumbBytes() > THUMB_BUDGET_BYTES;
+    const fullOver = idleFullCount() > FULL_IDLE_CAP;
+    if (!thumbOver && !fullOver) break;
+    if (entry.kind === 'thumb' && thumbOver) {
+      destroyEntry(key, entry);
+      continue;
+    }
+    if (entry.kind === 'full' && fullOver) {
+      destroyEntry(key, entry);
+    }
+  }
+}
+
+function hold(key: string, entry: CacheEntry): SafeImageSrc {
+  entry.refs += 1;
+  entry.seq = ++seqCounter;
+  let released = false;
   return {
-    src: objectUrl,
-    revoke: () => URL.revokeObjectURL(objectUrl),
+    src: entry.src,
+    revoke: () => {
+      if (released) return;
+      released = true;
+      entry.refs = Math.max(0, entry.refs - 1);
+      if (entry.refs === 0) {
+        // Full-res: free immediately when unused (GiB-class). Thumbs may warm
+        // until the byte budget forces eviction.
+        if (entry.kind === 'full') {
+          destroyEntry(key, entry);
+        } else {
+          evictIdle();
+        }
+      }
+    },
   };
 }
 
-/** In-flight + resolved blob cache so virtualized grids do not re-invoke. */
-const imageBlobCache = new Map<string, Promise<SafeImageSrc>>();
-
-async function cachedBlob(
-  cacheKey: string,
+async function loadEntry(
+  key: string,
+  kind: ImageKind,
   loader: () => Promise<string>,
-): Promise<SafeImageSrc> {
-  const cached = imageBlobCache.get(cacheKey);
-  if (cached) {
-    const hit = await cached;
-    return { src: hit.src, revoke: () => {} };
-  }
+): Promise<CacheEntry> {
+  const existing = entries.get(key);
+  if (existing) return existing;
 
-  const pending = (async (): Promise<SafeImageSrc> => {
-    const b64 = await loader();
-    const ready = blobFromBase64(b64);
-    return {
-      src: ready.src,
-      revoke: () => {
-        ready.revoke();
-        imageBlobCache.delete(cacheKey);
-      },
+  const pending = inflight.get(key);
+  if (pending) return pending;
+
+  const work = (async (): Promise<CacheEntry> => {
+    const b64 = await withInvokeSlot(loader);
+    const bytes = base64ToBytes(b64);
+    const blob = new Blob([bytes], { type: sniffMime(bytes) });
+    const objectUrl = URL.createObjectURL(blob);
+    const entry: CacheEntry = {
+      kind,
+      src: objectUrl,
+      bytes: bytes.byteLength,
+      refs: 0,
+      seq: ++seqCounter,
+      revokeUrl: () => URL.revokeObjectURL(objectUrl),
     };
+    entries.set(key, entry);
+    return entry;
   })();
 
-  imageBlobCache.set(cacheKey, pending);
+  inflight.set(key, work);
   try {
-    const ready = await pending;
-    return { src: ready.src, revoke: () => {} };
-  } catch (error) {
-    imageBlobCache.delete(cacheKey);
-    throw error;
+    return await work;
+  } finally {
+    inflight.delete(key);
   }
+}
+
+async function acquireBlob(
+  key: string,
+  kind: ImageKind,
+  loader: () => Promise<string>,
+): Promise<SafeImageSrc> {
+  const entry = await loadEntry(key, kind, loader);
+  // Hold before eviction so a brand-new entry is never dropped at refs=0.
+  const safe = hold(key, entry);
+  evictIdle();
+  return safe;
 }
 
 export async function webviewSafeImageSrc(url: string): Promise<SafeImageSrc> {
@@ -154,7 +273,7 @@ export async function webviewSafeImageSrc(url: string): Promise<SafeImageSrc> {
 
   const thumb = parseThumbnailRequest(url);
   if (thumb) {
-    return cachedBlob(url, () =>
+    return acquireBlob(url, 'thumb', () =>
       invoke<string>('get_thumbnail_bytes', {
         path: thumb.path,
         preview: thumb.preview,
@@ -164,10 +283,25 @@ export async function webviewSafeImageSrc(url: string): Promise<SafeImageSrc> {
 
   const assetPath = parseAssetPath(url);
   if (assetPath) {
-    return cachedBlob(url, () =>
+    return acquireBlob(url, 'full', () =>
       invoke<string>('read_image_bytes', { path: assetPath }),
     );
   }
 
   return { src: webviewProtocolUrl(url), revoke: () => {} };
+}
+
+/** Test / probe helpers. Not for product UI. */
+export function blobCacheStats(): {
+  entries: number;
+  thumbIdleBytes: number;
+  fullIdle: number;
+  invokeInFlight: number;
+} {
+  return {
+    entries: entries.size,
+    thumbIdleBytes: idleThumbBytes(),
+    fullIdle: idleFullCount(),
+    invokeInFlight,
+  };
 }

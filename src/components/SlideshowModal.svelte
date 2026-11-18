@@ -7,6 +7,7 @@
     immediateViewerSrc,
     resolveViewerSrc,
   } from '$lib/photoView';
+  import { webviewSafeImageSrc } from '$lib/protocolImage';
   import { getCurrentWindow } from '@tauri-apps/api/window';
   import { untrack, onDestroy } from 'svelte';
   import { fade } from 'svelte/transition';
@@ -77,12 +78,11 @@
 
   // Full-res preload cache. Cap and release so a long show cannot retain
   // every decoded frame in WebKit.
-  const preloadedImages = new LruCache<HTMLImageElement>(
-    VIEWER_PRELOAD_LIMIT,
-    (img) => {
-      img.src = '';
-    },
-  );
+  type PreloadSlot = { img: HTMLImageElement; revoke: () => void };
+  const preloadedImages = new LruCache<PreloadSlot>(VIEWER_PRELOAD_LIMIT, (slot) => {
+    slot.img.src = '';
+    slot.revoke();
+  });
 
   // Derive current photo
   const currentPhoto = $derived.by(() => {
@@ -136,21 +136,23 @@
 
     if (!nextPhoto || preloadedImages.has(nextPhoto.path)) return;
     const photo = nextPhoto;
-    const ready = immediateViewerSrc(photo);
-    if (ready) {
-      const img = new Image();
-      img.src = ready;
-      preloadedImages.set(photo.path, img);
-      return;
-    }
-    if (photo.is_raw) {
-      resolveViewerSrc(photo).then((src) => {
-        if (!src || preloadedImages.has(photo.path)) return;
+
+    const warm = (raw: string | null) => {
+      if (!raw || preloadedImages.has(photo.path)) return;
+      void webviewSafeImageSrc(raw).then((safe) => {
+        if (preloadedImages.has(photo.path)) {
+          safe.revoke();
+          return;
+        }
         const img = new Image();
-        img.src = src;
-        preloadedImages.set(photo.path, img);
+        img.src = safe.src;
+        preloadedImages.set(photo.path, { img, revoke: safe.revoke });
       });
-    }
+    };
+
+    const ready = immediateViewerSrc(photo);
+    if (ready) warm(ready);
+    else if (photo.is_raw) void resolveViewerSrc(photo).then(warm);
   }
 
   $effect(() => {
@@ -160,18 +162,39 @@
       return;
     }
     let cancelled = false;
+    let revoke = () => {};
+
+    const apply = async (raw: string | null) => {
+      if (!raw) {
+        if (!cancelled) handleImageError();
+        return;
+      }
+      try {
+        const safe = await webviewSafeImageSrc(raw);
+        if (cancelled) {
+          safe.revoke();
+          return;
+        }
+        revoke = safe.revoke;
+        slideSrc = safe.src;
+      } catch {
+        if (!cancelled) handleImageError();
+      }
+    };
+
     const ready = immediateViewerSrc(photo);
     if (ready) {
-      slideSrc = ready;
+      void apply(ready);
     } else {
       slideSrc = '';
-      resolveViewerSrc(photo).then((src) => {
-        if (!cancelled && src) slideSrc = src;
-        else if (!cancelled) handleImageError();
+      void resolveViewerSrc(photo).then((src) => {
+        if (cancelled) return;
+        void apply(src);
       });
     }
     return () => {
       cancelled = true;
+      revoke();
     };
   });
 

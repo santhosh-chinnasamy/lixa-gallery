@@ -87,12 +87,11 @@
   // Full-size originals. Capped so stepping through a shoot cannot keep
   // every visited file alive, and cleared when the viewer closes or the
   // open folder changes.
-  const preloadedImages = new LruCache<HTMLImageElement>(
-    VIEWER_PRELOAD_LIMIT,
-    (img) => {
-      img.src = '';
-    },
-  );
+  type PreloadSlot = { img: HTMLImageElement; revoke: () => void };
+  const preloadedImages = new LruCache<PreloadSlot>(VIEWER_PRELOAD_LIMIT, (slot) => {
+    slot.img.src = '';
+    slot.revoke();
+  });
   let preloadedFolder: string | null = null;
 
   let showInfo = $state(false);
@@ -258,7 +257,7 @@
     });
   }
 
-  // Preload adjacent images
+  // Preload adjacent images through the same blob bridge as the main viewer.
   function preloadAdjacentImages() {
     if (!selectedImage || currentIndex === -1) return;
 
@@ -268,21 +267,24 @@
 
     indicesToPreload.forEach((index) => {
       const photo = photoSource[index];
-      if (photo && !preloadedImages.has(photo.path)) {
-        const ready = immediateViewerSrc(photo);
-        if (ready) {
+      if (!photo || preloadedImages.has(photo.path)) return;
+
+      const warm = (raw: string | null) => {
+        if (!raw || preloadedImages.has(photo.path)) return;
+        void webviewSafeImageSrc(raw).then((safe) => {
+          if (preloadedImages.has(photo.path)) {
+            safe.revoke();
+            return;
+          }
           const img = new Image();
-          img.src = ready;
-          preloadedImages.set(photo.path, img);
-        } else if (photo.is_raw) {
-          resolveViewerSrc(photo).then((src) => {
-            if (!src || preloadedImages.has(photo.path)) return;
-            const img = new Image();
-            img.src = src;
-            preloadedImages.set(photo.path, img);
-          });
-        }
-      }
+          img.src = safe.src;
+          preloadedImages.set(photo.path, { img, revoke: safe.revoke });
+        });
+      };
+
+      const ready = immediateViewerSrc(photo);
+      if (ready) warm(ready);
+      else if (photo.is_raw) void resolveViewerSrc(photo).then(warm);
     });
   }
 
