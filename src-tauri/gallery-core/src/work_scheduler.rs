@@ -5,15 +5,16 @@
 //! job.
 //!
 //! [`begin_generation`] cancels **queued** work from a previous folder. Work
-//! that is already running always finishes (disk/DB are durable). On success,
-//! every waiter receives `Ok` so in-flight protocol requests can still serve
-//! bytes. Callers gate UI emits with [`ImageWorkScheduler::is_current`].
+//! that is already running always finishes (disk/DB are durable) but frees its
+//! scheduler slot so the new folder's Interactive work is not starved. On
+//! success, every waiter receives `Ok` so in-flight protocol requests can still
+//! serve bytes. Callers gate UI emits with [`ImageWorkScheduler::is_current`].
 
 use crate::models::{GalleryError, PhotoMetadata, Result};
 use crate::work::{
     recommended_background_slots, recommended_pool_size, WorkKey, WorkPriority,
 };
-use std::collections::{HashMap, VecDeque};
+use std::collections::{HashMap, HashSet, VecDeque};
 use std::future::Future;
 use std::pin::Pin;
 use std::sync::atomic::{AtomicU64, Ordering};
@@ -36,6 +37,9 @@ struct State {
     /// Keys queued or running → current priority.
     active: HashMap<WorkKey, WorkPriority>,
     waiters: HashMap<WorkKey, Vec<Reply>>,
+    /// In-flight keys whose worker slots were released after a generation bump.
+    /// Decode still finishes; admission no longer waits on them.
+    detached: HashSet<WorkKey>,
     running: usize,
     running_background: usize,
     workers_started: usize,
@@ -77,6 +81,7 @@ impl ImageWorkScheduler {
                     background: VecDeque::new(),
                     active: HashMap::new(),
                     waiters: HashMap::new(),
+                    detached: HashSet::new(),
                     running: 0,
                     running_background: 0,
                     workers_started: 0,
@@ -93,8 +98,9 @@ impl ImageWorkScheduler {
     }
 
     /// Bump the generation so queued work from a previous folder is dropped.
-    /// In-flight jobs keep running and deliver their result to waiters; callers
-    /// gate UI emits with [`Self::is_current`].
+    /// In-flight jobs keep running (and stay coalesce targets) but release their
+    /// admission slots so the new folder is not wedged behind durable stale work.
+    /// Callers gate UI emits with [`Self::is_current`].
     pub async fn begin_generation(&self) -> u64 {
         let mut state = self.inner.state.lock().await;
         let next = self.inner.generation.fetch_add(1, Ordering::SeqCst) + 1;
@@ -105,11 +111,31 @@ impl ImageWorkScheduler {
         // until the worker finishes, so later submits can still coalesce.
         for key in cancelled_keys {
             state.active.remove(&key);
+            state.detached.remove(&key);
             if let Some(waiters) = state.waiters.remove(&key) {
                 for waiter in waiters {
                     let _ = waiter.send(Err("cancelled".to_string()));
                 }
             }
+        }
+        // Free slots held by durable in-flight work from the previous folder.
+        // Those tasks are still blocked in `work.await`, so also spawn overflow
+        // workers that can dequeue the new folder's Interactive jobs immediately.
+        let inflight: Vec<WorkKey> = state.active.keys().cloned().collect();
+        let mut released = 0usize;
+        for key in inflight {
+            if state.detached.insert(key) {
+                released += 1;
+            }
+        }
+        state.running = state.running.saturating_sub(released);
+        state.running_background = 0;
+        for _ in 0..released {
+            state.workers_started += 1;
+            let inner = self.inner.clone();
+            tokio::spawn(async move {
+                worker_loop(inner).await;
+            });
         }
         drop(state);
         self.inner.notify.notify_waiters();
@@ -283,9 +309,12 @@ async fn worker_loop(inner: Arc<Inner>) {
 
         {
             let mut state = inner.state.lock().await;
-            state.running = state.running.saturating_sub(1);
-            if is_background {
-                state.running_background = state.running_background.saturating_sub(1);
+            let detached = state.detached.remove(&key);
+            if !detached {
+                state.running = state.running.saturating_sub(1);
+                if is_background {
+                    state.running_background = state.running_background.saturating_sub(1);
+                }
             }
             state.active.remove(&key);
             if let Some(waiters) = state.waiters.remove(&key) {
@@ -672,6 +701,76 @@ mod tests {
             result.is_ok(),
             "protocol waiter would 404 if this were Cancelled: {result:?}"
         );
+    }
+
+    /// After a generation bump, durable in-flight background work still occupies
+    /// workers. New-folder Interactive work must still start without waiting for
+    /// those stale jobs to finish — otherwise the grid/protocol looks wedged.
+    #[tokio::test]
+    async fn interactive_not_starved_by_durable_stale_inflight() {
+        let sched = ImageWorkScheduler::with_limits(1, 1);
+        let old_gen = sched.begin_generation().await;
+        let (release_tx, release_rx) = oneshot::channel::<()>();
+        let gate = Arc::new(Mutex::new(Some(release_rx)));
+
+        let stale = tokio::spawn({
+            let sched = sched.clone();
+            let gate = gate.clone();
+            async move {
+                sched
+                    .run(
+                        WorkPriority::Background,
+                        WorkKey::materialize("/old.jpg", 1, 1),
+                        old_gen,
+                        move || {
+                            let gate = gate;
+                            async move {
+                                if let Some(rx) = gate.lock().await.take() {
+                                    let _ = rx.await;
+                                }
+                                Ok(photo("/old.jpg"))
+                            }
+                        },
+                    )
+                    .await
+            }
+        });
+
+        tokio::time::sleep(Duration::from_millis(30)).await;
+        let new_gen = sched.begin_generation().await;
+
+        let started = Arc::new(AtomicUsize::new(0));
+        let started_flag = started.clone();
+        let interactive = tokio::spawn({
+            let sched = sched.clone();
+            async move {
+                sched
+                    .run(
+                        WorkPriority::Interactive,
+                        WorkKey::materialize("/new.jpg", 1, 1),
+                        new_gen,
+                        move || {
+                            let started_flag = started_flag;
+                            async move {
+                                started_flag.fetch_add(1, AtomicOrdering::SeqCst);
+                                Ok(photo("/new.jpg"))
+                            }
+                        },
+                    )
+                    .await
+            }
+        });
+
+        // Interactive must make progress while the stale job is still held.
+        tokio::time::sleep(Duration::from_millis(100)).await;
+        assert!(
+            started.load(AtomicOrdering::SeqCst) >= 1,
+            "interactive work for the new folder is starved behind durable stale in-flight work"
+        );
+
+        let _ = release_tx.send(());
+        let _ = stale.await.unwrap();
+        assert!(interactive.await.unwrap().is_ok());
     }
 }
 
