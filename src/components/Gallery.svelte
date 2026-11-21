@@ -47,13 +47,14 @@
   let selectedImage = $state<PhotoMetadata | null>(null);
   let isSlideshowOpen = $state(false);
   let galleryContainer = $state<HTMLElement | null>(null);
+  /** Stable grid width; ignore transient 0/tiny values that unmount the virtual row. */
   let containerWidth = $state(0);
   let activeIndex = $state(0);
   let focusCard = $state(false);
+  let widthProbe = $state<HTMLElement | null>(null);
 
   const pickedCount = $derived(
-    photoList.filter((photo) => $cullFlags.get(photo.path) === 'picked')
-      .length,
+    photoList.filter((photo) => $cullFlags.get(photo.path) === 'picked').length,
   );
 
   // Bucket width so scrollbar / sub-pixel jitter cannot flip column count.
@@ -206,6 +207,32 @@
     estimateSize: () => 100,
   });
 
+  // Width from a short probe (not the tall virtual content). Rapid scroll on
+  // WebKit used to flicker bind:clientWidth → containerWidth < 48 → unmount
+  // every card, leaving the virtualizer range stuck on one empty row.
+  $effect(() => {
+    const el = widthProbe;
+    if (!el || typeof ResizeObserver === 'undefined') return;
+
+    const applyWidth = (next: number) => {
+      untrack(() => {
+        if (next > 48) {
+          if (Math.abs(next - containerWidth) >= 1) containerWidth = next;
+          return;
+        }
+        // Ignore transient collapse; keep last good width for columns/layout.
+      });
+    };
+
+    applyWidth(el.clientWidth);
+    const ro = new ResizeObserver((entries) => {
+      const w = entries[0]?.contentRect.width ?? el.clientWidth;
+      applyWidth(w);
+    });
+    ro.observe(el);
+    return () => ro.disconnect();
+  });
+
   // Keep options in sync without subscribing to the virtualizer store.
   // `$virtualizer.setOptions` notifies the store (onChange → writable.set),
   // which would re-run this effect forever and freeze the UI.
@@ -214,13 +241,21 @@
   let lastVirtualOpts = { count: -1, size: -1, lanes: -1, hasEl: false };
   let measureRaf = 0;
 
+  function scheduleMeasure() {
+    if (measureRaf) cancelAnimationFrame(measureRaf);
+    measureRaf = requestAnimationFrame(() => {
+      measureRaf = 0;
+      get(virtualizer).measure();
+    });
+  }
+
   $effect(() => {
     const count = processedPhotos.length;
     const el = galleryContainer;
     const size = $gridSize;
     const lanes = columns;
     const hasEl = !!el;
-    const overscan = embedded ? 2 : 10;
+    const overscan = embedded ? 5 : 12;
 
     untrack(() => {
       const prev = lastVirtualOpts;
@@ -252,11 +287,7 @@
       if (!el || count === 0) return;
 
       if (lanesOnly) {
-        if (measureRaf) cancelAnimationFrame(measureRaf);
-        measureRaf = requestAnimationFrame(() => {
-          measureRaf = 0;
-          api.measure();
-        });
+        scheduleMeasure();
       } else {
         queueMicrotask(() => api.measure());
       }
@@ -267,6 +298,53 @@
         cancelAnimationFrame(measureRaf);
         measureRaf = 0;
       }
+    };
+  });
+
+  // After fast front/back scroll, WebKit can leave getVirtualItems() empty or
+  // stuck on a single row while total size stays huge. Remeasure on settle.
+  $effect(() => {
+    const el = galleryContainer;
+    if (!el) return;
+
+    let settleTimer = 0;
+    const recover = () => {
+      const api = get(virtualizer);
+      const count = untrack(() => processedPhotos.length);
+      if (count === 0) return;
+      const visible = api.getVirtualItems().length;
+      const rowH = untrack(() => $gridSize) + 48;
+      const viewportRows = Math.max(
+        1,
+        Math.ceil(el.clientHeight / Math.max(rowH, 1)),
+      );
+      const lanes = untrack(() => columns);
+      // One stuck row (screenshot symptom) is ~lanes items; a healthy
+      // viewport should paint roughly viewportRows * lanes (+ overscan).
+      const expectedMin = Math.min(
+        count,
+        Math.max(lanes + 1, viewportRows * lanes),
+      );
+      if (visible === 0 || visible < expectedMin) {
+        // Remeasure + resync scroll offset (stale offset → blank grid).
+        const top = el.scrollTop;
+        api.measure();
+        api.scrollToOffset(top);
+      }
+    };
+
+    const onScroll = () => {
+      if (settleTimer) clearTimeout(settleTimer);
+      settleTimer = window.setTimeout(recover, 80);
+    };
+    const onScrollEnd = () => recover();
+
+    el.addEventListener('scroll', onScroll, { passive: true });
+    el.addEventListener('scrollend', onScrollEnd);
+    return () => {
+      el.removeEventListener('scroll', onScroll);
+      el.removeEventListener('scrollend', onScrollEnd);
+      if (settleTimer) clearTimeout(settleTimer);
     };
   });
 
@@ -305,9 +383,7 @@
     }
     const index = activeIndex;
     const api = untrack(() => get(virtualizer));
-    const rendered = api
-      .getVirtualItems()
-      .some((item) => item.index === index);
+    const rendered = api.getVirtualItems().some((item) => item.index === index);
     if (!rendered) {
       api.scrollToIndex(index, { align: 'auto' });
       return;
@@ -351,10 +427,16 @@
     />
   {/if}
   <main
-    class="custom-scrollbar flex-1 overflow-y-auto scroll-smooth"
+    class="custom-scrollbar flex-1 overflow-y-auto"
     bind:this={galleryContainer}
   >
     <div class={embedded ? 'h-full p-2' : 'h-full p-6 lg:p-10'}>
+      <!-- Width probe: short element so scroll cannot zero clientWidth. -->
+      <div
+        bind:this={widthProbe}
+        class="h-0 w-full overflow-hidden"
+        aria-hidden="true"
+      ></div>
       {#if processedPhotos.length === 0}
         <div class="flex h-full min-h-[400px] items-center justify-center">
           {#if photoList.length === 0 && subfolders.length > 0}
@@ -413,35 +495,32 @@
         </div>
       {:else}
         <div
-          bind:clientWidth={containerWidth}
           class="relative w-full"
           style="height: {$virtualizer.getTotalSize()}px;"
         >
-          {#if containerWidth > 48}
-            {#each $virtualizer.getVirtualItems() as virtualItem (processedPhotos[virtualItem.index]?.path ?? virtualItem.index)}
-              {@const photo = processedPhotos[virtualItem.index]}
-              {@const columnWidth = columns > 0 ? containerWidth / columns : 0}
+          {#each $virtualizer.getVirtualItems() as virtualItem (virtualItem.key)}
+            {@const photo = processedPhotos[virtualItem.index]}
+            {@const columnWidth = columns > 0 ? containerWidth / columns : 0}
+            <div
+              style="position: absolute; top: 0; left: 0; transform: translateY({virtualItem.start}px) translateX({virtualItem.lane *
+                columnWidth}px); width: {columnWidth}px; height: {virtualItem.size}px; padding: 8px; display: flex; justify-content: center;"
+            >
               <div
-                style="position: absolute; top: 0; left: 0; transform: translateY({virtualItem.start}px) translateX({virtualItem.lane *
-                  columnWidth}px); width: {columnWidth}px; height: {virtualItem.size}px; padding: 8px; display: flex; justify-content: center;"
+                style="width: 100%; max-width: calc(var(--grid-item-size) * 1.5);"
               >
-                <div
-                  style="width: 100%; max-width: calc(var(--grid-item-size) * 1.5);"
-                >
-                  {#if photo}
-                    <ImageCard
-                      {photo}
-                      tabindex={virtualItem.index === activeIndex ? 0 : -1}
-                      isActive={virtualItem.index === activeIndex}
-                      galleryIndex={virtualItem.index}
-                      {handleImageClick}
-                      isVisible={true}
-                    />
-                  {/if}
-                </div>
+                {#if photo && columnWidth > 0}
+                  <ImageCard
+                    {photo}
+                    tabindex={virtualItem.index === activeIndex ? 0 : -1}
+                    isActive={virtualItem.index === activeIndex}
+                    galleryIndex={virtualItem.index}
+                    {handleImageClick}
+                    isVisible={true}
+                  />
+                {/if}
               </div>
-            {/each}
-          {/if}
+            </div>
+          {/each}
         </div>
       {/if}
     </div>
