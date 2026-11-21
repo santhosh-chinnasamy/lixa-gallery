@@ -1,0 +1,12 @@
+{
+  "name": "lixa-gallery-e2e",
+  "private": true,
+  "type": "module",
+  "description": "WebDriver scenarios for the Lixa Gallery desktop app. Not part of the app build.",
+  "scripts": {
+    "test": "node scenarios/run-all.mjs"
+  },
+  "dependencies": {
+    "selenium-webdriver": "4.27.0"
+  }
+}
