@@ -199,6 +199,7 @@ pub fn run() {
             commands::get_folder_tree,
             commands::open_logs_dir,
             commands::get_log_dir,
+            commands::ensure_thumbnail_path,
             commands::get_thumbnail_bytes,
             commands::read_image_bytes
         ])

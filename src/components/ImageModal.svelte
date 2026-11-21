@@ -1,9 +1,6 @@
 <script lang="ts">
   import { Button } from '$lib/components/ui/button';
-  import {
-    gridImageUrl,
-    UNSUPPORTED_FORMAT_MESSAGE,
-  } from '$lib/imageSource';
+  import { UNSUPPORTED_FORMAT_MESSAGE } from '$lib/imageSource';
   import { LruCache, VIEWER_PRELOAD_LIMIT } from '$lib/lruCache';
   import { cn } from '$lib/utils';
   import { fade, scale as scaleTransition } from 'svelte/transition';
@@ -28,6 +25,7 @@
     immediateViewerSrc,
     resolveViewerSrc,
   } from '$lib/photoView';
+  import { gridThumbUrl } from '$lib/gridThumbUrl';
   import { probe, probeWarn } from '$lib/debugProbe';
   import { webviewSafeImageSrc } from '$lib/protocolImage';
   import Filename from './Filename.svelte';
@@ -524,21 +522,9 @@
     });
     let cancelled = false;
     let revokeViewer = () => {};
-    let revokeBlur = () => {};
 
-    const thumb = gridImageUrl(photo);
-    if (thumb) {
-      void webviewSafeImageSrc(thumb).then((safe) => {
-        if (cancelled) {
-          safe.revoke();
-          return;
-        }
-        revokeBlur = safe.revoke;
-        blurSrc = safe.src;
-      });
-    } else {
-      blurSrc = null;
-    }
+    // Blur placeholder: same-origin /@fs (or protocol). Never invoke→blob.
+    blurSrc = gridThumbUrl(photo);
 
     const applyViewer = async (raw: string | null) => {
       if (!raw) {
@@ -584,7 +570,6 @@
     return () => {
       cancelled = true;
       revokeViewer();
-      revokeBlur();
     };
   });
 

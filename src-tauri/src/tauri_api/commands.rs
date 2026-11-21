@@ -238,6 +238,22 @@ pub fn get_log_dir(app_handle: AppHandle) -> Result<String, String> {
     Ok(log_dir.to_string_lossy().to_string())
 }
 
+/// Ensure a WebP thumbnail exists on disk and return its absolute path.
+/// Used by the Vite grid (`/__lixa_thumb__`) when DB `thumbnail_path` is stale.
+#[tauri::command]
+pub async fn ensure_thumbnail_path(
+    state: State<'_, AppState>,
+    path: String,
+) -> Result<String, String> {
+    use std::path::PathBuf;
+    let original_path = PathBuf::from(&path);
+    state
+        .gallery
+        .get_or_create_thumbnail(&original_path, &state.thumbnail_path)
+        .await
+        .map_err(|err| err.to_string())
+}
+
 /// Thumbnail / preview bytes as base64. Used when WebKit blocks custom-protocol
 /// `<img>` / `fetch` from the Vite `http://localhost` origin (tauri#16201).
 ///

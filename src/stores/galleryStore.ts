@@ -444,6 +444,31 @@ export function mergePhotoUpdates(
     if (!changed) return list;
     return list.map((photo) => byPath.get(photo.path) ?? photo);
   });
+
+  // All Folders favourites render from group.photos; patch those too or
+  // thumbs stay empty after background materialize.
+  favouriteFolderGroups.update((groups) => {
+    if (groups.length === 0) return groups;
+    let changed = false;
+    const next = groups.map((group) => {
+      if (group.photos.length === 0) return group;
+      const byPath = new Map(group.photos.map((photo) => [photo.path, photo]));
+      let groupChanged = false;
+      for (const update of updates) {
+        const existing = byPath.get(update.path);
+        if (!existing) continue;
+        byPath.set(update.path, { ...existing, ...update });
+        groupChanged = true;
+      }
+      if (!groupChanged) return group;
+      changed = true;
+      return {
+        ...group,
+        photos: group.photos.map((photo) => byPath.get(photo.path) ?? photo),
+      };
+    });
+    return changed ? next : groups;
+  });
 }
 
 export async function loadFolderTree(path: string) {
