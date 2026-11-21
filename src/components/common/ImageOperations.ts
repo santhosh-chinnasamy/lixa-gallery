@@ -41,6 +41,12 @@ function normalizeScanResult(raw: unknown): FolderScanResult {
 }
 
 export async function loadPath(folderPath: string, isRoot = true) {
+  // Re-clicking the open folder rescans and remounts cards; ImageCards then
+  // flash Loading even though WebPs are already on disk. No-op when unchanged.
+  if (folderPath === get(currentFolder)) {
+    return;
+  }
+
   try {
     isLoading.set(true);
     const mode = get(loadingMode);

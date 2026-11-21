@@ -37,8 +37,11 @@
   // Under http, never fall through to protocol URLs (gridThumbUrl returns null).
   let ensuredSrc = $state<string | null>(null);
   let ensureAttempted = $state(false);
+  let ensureForPath = $state<string | null>(null);
   let imageLoaded = $state(false);
   let imageError = $state(false);
+  let lastPaintSrc = $state<string | null>(null);
+
   let imageSrc = $derived(ensuredSrc ?? gridThumbUrl(photo));
   // Http + no disk webp yet: stay on Loading until ensure finishes (or errors).
   let awaitingHttpThumb = $derived(
@@ -52,22 +55,32 @@
       return;
     }
     ensuredSrc = `/__lixa_thumb__?p=${encodeURIComponent(thumbPath)}`;
+  }
+
+  // Reset paint state only when the URL identity changes. Replacing the photo
+  // object (same path + same thumb URL) must not clear imageLoaded — browsers
+  // often skip onload for a cached src, which left cards stuck on Loading.
+  $effect(() => {
+    const src = imageSrc;
+    if (src === lastPaintSrc) return;
+    lastPaintSrc = src;
     imageLoaded = false;
     imageError = false;
-  }
+  });
 
   $effect(() => {
     const path = photo.path;
     void photo.thumbnail_path;
-    ensuredSrc = null;
-    ensureAttempted = false;
-    imageLoaded = false;
-    imageError = false;
 
-    // Under Vite http: empty thumb → keep Loading and materialize once.
-    // Do not emit protocol URLs or invoke→blob on the grid.
+    if (ensureForPath !== path) {
+      ensureForPath = path;
+      ensureAttempted = false;
+      ensuredSrc = null;
+    }
+
     if (!pageIsHttpOrigin()) return;
     if (gridThumbUrl(photo) !== null) return;
+    if (ensureAttempted) return;
 
     let cancelled = false;
     ensureAttempted = true;
@@ -101,8 +114,7 @@
   }
 
   function handleImageError() {
-    // Stale DB path (legacy .thumbnails/NAME.webp). Rematerialize once and
-    // point at the new file via same-origin middleware — never invoke→blob.
+    // Stale DB path. Rematerialize once — never invoke→blob on the grid.
     if (!ensureAttempted && pageIsHttpOrigin()) {
       ensureAttempted = true;
       void ensureThumbnailPath(photo.path)
