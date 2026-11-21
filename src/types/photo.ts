@@ -25,6 +25,18 @@ export interface PhotoMetadata {
   is_raw?: boolean;
 }
 
+/** Return value of `scan_folder`. */
+export interface FolderScanResult {
+  generation: number;
+  photos: PhotoMetadata[];
+}
+
+/** Payload for the `photos-updated` event. */
+export interface PhotosUpdatedEvent {
+  generation: number;
+  photos: PhotoMetadata[];
+}
+
 export interface FileMetadata {
   name: string;
   modified: number;

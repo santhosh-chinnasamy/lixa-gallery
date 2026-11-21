@@ -13,6 +13,7 @@ unicode-normalization = "0.1"
 sqlx = { version = "0.8.6", features = ["sqlite", "runtime-tokio"] }
 rayon = "1.10"
 image = { version = "0.25.6", features = ["avif", "tiff", "webp", "jpeg", "png", "bmp", "gif"] }
+jpeg-decoder = "0.3"
 kamadak-exif = "0.6.1"
 webp = "0.3"
 mime_guess = "2.0"

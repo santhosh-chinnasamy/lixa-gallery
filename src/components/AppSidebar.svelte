@@ -18,6 +18,7 @@
   import { loadPath } from './common/ImageOperations';
   import { goto } from '$app/navigation';
   import FolderExplorer from './FolderExplorer.svelte';
+  import { probe } from '$lib/debugProbe';
 
   let isRecentOpen = $state(true);
 
@@ -42,13 +43,31 @@
   }
 
   function handleHomeClick() {
+    probe('sidebar.homeClick', { path: page.url.pathname });
     clearPhotos();
-    goto('/');
+    void goto('/').then(
+      () => probe('sidebar.homeClick.done'),
+      (error) =>
+        probe('sidebar.homeClick.fail', {
+          err: error instanceof Error ? error.message : String(error),
+        }),
+    );
   }
 
   function handleRecentClick(path: string) {
+    probe('sidebar.recentClick', { path });
     loadPath(path);
-    goto('/');
+    void goto('/').then(
+      () => probe('sidebar.recentClick.done'),
+      (error) =>
+        probe('sidebar.recentClick.fail', {
+          err: error instanceof Error ? error.message : String(error),
+        }),
+    );
+  }
+
+  function handleNavClick(url: string) {
+    probe('sidebar.navClick', { url, from: page.url.pathname });
   }
 
   function toggleRecent() {
@@ -95,6 +114,7 @@
                     href={item.url}
                     {...props}
                     class="flex w-full items-center gap-3"
+                    onclick={() => handleNavClick(item.url)}
                   >
                     <item.icon
                       size={20}
@@ -170,6 +190,7 @@
                     href={item.url}
                     {...props}
                     class="flex w-full items-center gap-3"
+                    onclick={() => handleNavClick(item.url)}
                   >
                     <item.icon
                       size={20}
@@ -230,6 +251,7 @@
               href="/settings"
               {...props}
               class="flex w-full items-center gap-3"
+              onclick={() => handleNavClick('/settings')}
             >
               <SettingsIcon
                 size={20}

@@ -22,6 +22,8 @@ export interface FolderNode {
 export const photos = writable<PhotoMetadata[]>([]);
 export const isLoading = writable(false);
 export const currentFolder = writable<string | null>(null);
+/** Folder session from the last successful `scan_folder`. */
+export const folderGeneration = writable(0);
 export const folderTree = writable<FolderNode | null>(null);
 
 export type SortOption = 'name' | 'date' | 'size';
@@ -396,8 +398,77 @@ export async function refreshFavourites() {
 export function clearPhotos() {
   photos.set([]);
   currentFolder.set(null);
+  folderGeneration.set(0);
   folderTree.set(null);
   expandedFolders.clear();
+}
+
+/**
+ * Merge backend materialize/EXIF results into the open folder list.
+ * Drops patches from a different folder session; patches by path only.
+ * Preserves list order so thumb-only patches do not reshuffle the grid.
+ */
+export function mergePhotoUpdates(
+  generation: number,
+  updates: PhotoMetadata[],
+) {
+  if (!Array.isArray(updates) || updates.length === 0) return;
+  const liveGeneration = get(folderGeneration);
+  // Drop patches from a different folder session. generation 0 means "use live".
+  if (generation !== 0 && generation !== liveGeneration) return;
+
+  photos.update((list) => {
+    if (list.length === 0) return list;
+    const byPath = new Map(list.map((photo) => [photo.path, photo]));
+    let changed = false;
+    for (const update of updates) {
+      const existing = byPath.get(update.path);
+      if (!existing) continue;
+      byPath.set(update.path, { ...existing, ...update });
+      changed = true;
+    }
+    if (!changed) return list;
+    return list.map((photo) => byPath.get(photo.path) ?? photo);
+  });
+
+  favouritePhotos.update((list) => {
+    if (list.length === 0) return list;
+    const byPath = new Map(list.map((photo) => [photo.path, photo]));
+    let changed = false;
+    for (const update of updates) {
+      const existing = byPath.get(update.path);
+      if (!existing) continue;
+      byPath.set(update.path, { ...existing, ...update });
+      changed = true;
+    }
+    if (!changed) return list;
+    return list.map((photo) => byPath.get(photo.path) ?? photo);
+  });
+
+  // All Folders favourites render from group.photos; patch those too or
+  // thumbs stay empty after background materialize.
+  favouriteFolderGroups.update((groups) => {
+    if (groups.length === 0) return groups;
+    let changed = false;
+    const next = groups.map((group) => {
+      if (group.photos.length === 0) return group;
+      const byPath = new Map(group.photos.map((photo) => [photo.path, photo]));
+      let groupChanged = false;
+      for (const update of updates) {
+        const existing = byPath.get(update.path);
+        if (!existing) continue;
+        byPath.set(update.path, { ...existing, ...update });
+        groupChanged = true;
+      }
+      if (!groupChanged) return group;
+      changed = true;
+      return {
+        ...group,
+        photos: group.photos.map((photo) => byPath.get(photo.path) ?? photo),
+      };
+    });
+    return changed ? next : groups;
+  });
 }
 
 export async function loadFolderTree(path: string) {

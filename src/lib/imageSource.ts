@@ -1,6 +1,12 @@
 import { convertFileSrc } from '@tauri-apps/api/core';
 import type { PhotoMetadata } from '../types/photo';
+import { webviewProtocolUrl } from './protocolImage';
 import { previewUrl, thumbnailUrl } from './thumbnail';
+
+/** Asset URL safe for `<img>` under the Vite http origin. */
+export function assetUrl(filePath: string): string {
+  return webviewProtocolUrl(convertFileSrc(filePath));
+}
 
 export const UNSUPPORTED_FORMAT_MESSAGE =
   'Format not supported on this platform';
@@ -53,7 +59,7 @@ export function gridImageUrl(
 ): string | null {
   const ext = extensionOf(photo.path);
   if (isHeic(ext)) {
-    return paintsTiffAndHeic ? convertFileSrc(photo.path) : null;
+    return paintsTiffAndHeic ? assetUrl(photo.path) : null;
   }
   return thumbnailUrl(photo);
 }
@@ -68,10 +74,10 @@ export function viewerImageUrl(
 ): string | null {
   const ext = extensionOf(photo.path);
   if (isHeic(ext)) {
-    return paintsTiffAndHeic ? convertFileSrc(photo.path) : null;
+    return paintsTiffAndHeic ? assetUrl(photo.path) : null;
   }
   if (isTiff(ext) && !paintsTiffAndHeic) {
     return previewUrl(photo);
   }
-  return convertFileSrc(photo.path);
+  return assetUrl(photo.path);
 }

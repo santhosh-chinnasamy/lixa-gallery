@@ -1,9 +1,6 @@
 <script lang="ts">
   import { Button } from '$lib/components/ui/button';
-  import {
-    gridImageUrl,
-    UNSUPPORTED_FORMAT_MESSAGE,
-  } from '$lib/imageSource';
+  import { UNSUPPORTED_FORMAT_MESSAGE } from '$lib/imageSource';
   import { LruCache, VIEWER_PRELOAD_LIMIT } from '$lib/lruCache';
   import { cn } from '$lib/utils';
   import { fade, scale as scaleTransition } from 'svelte/transition';
@@ -28,6 +25,9 @@
     immediateViewerSrc,
     resolveViewerSrc,
   } from '$lib/photoView';
+  import { gridThumbUrl } from '$lib/gridThumbUrl';
+  import { probe, probeWarn } from '$lib/debugProbe';
+  import { webviewSafeImageSrc } from '$lib/protocolImage';
   import Filename from './Filename.svelte';
   import X from '@lucide/svelte/icons/x';
   import Info from '@lucide/svelte/icons/info';
@@ -76,21 +76,20 @@
       : 'unflagged',
   );
   const fileName = $derived(selectedImage?.metadata.name);
-  const blurSrc = $derived(selectedImage ? gridImageUrl(selectedImage) : null);
 
   // Modal and Image states
   let isSlideshowOpen = $state(false);
   let imageLoaded = $state(false);
   let imageError = $state(false);
+  let blurSrc = $state<string | null>(null);
   // Full-size originals. Capped so stepping through a shoot cannot keep
   // every visited file alive, and cleared when the viewer closes or the
   // open folder changes.
-  const preloadedImages = new LruCache<HTMLImageElement>(
-    VIEWER_PRELOAD_LIMIT,
-    (img) => {
-      img.src = '';
-    },
-  );
+  type PreloadSlot = { img: HTMLImageElement; revoke: () => void };
+  const preloadedImages = new LruCache<PreloadSlot>(VIEWER_PRELOAD_LIMIT, (slot) => {
+    slot.img.src = '';
+    slot.revoke();
+  });
   let preloadedFolder: string | null = null;
 
   let showInfo = $state(false);
@@ -250,9 +249,13 @@
   function handleImageError() {
     imageError = true;
     imageLoaded = false;
+    probeWarn('modal.img.onerror', {
+      name: fileName ?? null,
+      src: viewerSrc.slice(0, 80),
+    });
   }
 
-  // Preload adjacent images
+  // Preload adjacent images through the same blob bridge as the main viewer.
   function preloadAdjacentImages() {
     if (!selectedImage || currentIndex === -1) return;
 
@@ -260,28 +263,26 @@
     if (canShowPrevious) indicesToPreload.push(currentIndex - 1);
     if (canShowNext) indicesToPreload.push(currentIndex + 1);
 
-    // Preload next 2 images in each direction for smoother navigation
-    if (currentIndex - 2 >= 0) indicesToPreload.push(currentIndex - 2);
-    if (currentIndex + 2 < photoSource.length)
-      indicesToPreload.push(currentIndex + 2);
-
     indicesToPreload.forEach((index) => {
       const photo = photoSource[index];
-      if (photo && !preloadedImages.has(photo.path)) {
-        const ready = immediateViewerSrc(photo);
-        if (ready) {
+      if (!photo || preloadedImages.has(photo.path)) return;
+
+      const warm = (raw: string | null) => {
+        if (!raw || preloadedImages.has(photo.path)) return;
+        void webviewSafeImageSrc(raw).then((safe) => {
+          if (preloadedImages.has(photo.path)) {
+            safe.revoke();
+            return;
+          }
           const img = new Image();
-          img.src = ready;
-          preloadedImages.set(photo.path, img);
-        } else if (photo.is_raw) {
-          resolveViewerSrc(photo).then((src) => {
-            if (!src || preloadedImages.has(photo.path)) return;
-            const img = new Image();
-            img.src = src;
-            preloadedImages.set(photo.path, img);
-          });
-        }
-      }
+          img.src = safe.src;
+          preloadedImages.set(photo.path, { img, revoke: safe.revoke });
+        });
+      };
+
+      const ready = immediateViewerSrc(photo);
+      if (ready) warm(ready);
+      else if (photo.is_raw) void resolveViewerSrc(photo).then(warm);
     });
   }
 
@@ -511,22 +512,64 @@
     const photo = selectedImage;
     if (!photo) {
       viewerSrc = '';
+      blurSrc = null;
+      probe('modal.close');
       return;
     }
+    probe('modal.open', {
+      name: photo.metadata.name,
+      path: photo.path.slice(0, 80),
+    });
     let cancelled = false;
+    let revokeViewer = () => {};
+
+    // Blur placeholder: same-origin /@fs (or protocol). Never invoke→blob.
+    blurSrc = gridThumbUrl(photo);
+
+    const applyViewer = async (raw: string | null) => {
+      if (!raw) {
+        if (!cancelled) {
+          viewerSrc = '';
+          imageError = true;
+          probeWarn('modal.viewerSrc.fail', { name: photo.metadata.name });
+        }
+        return;
+      }
+      try {
+        const safe = await webviewSafeImageSrc(raw);
+        if (cancelled) {
+          safe.revoke();
+          return;
+        }
+        revokeViewer = safe.revoke;
+        viewerSrc = safe.src;
+        probe('modal.viewerSrc', {
+          form: safe.src.slice(0, 64),
+          via: safe.src.startsWith('blob:') ? 'invoke-blob' : 'url',
+        });
+      } catch (error) {
+        if (cancelled) return;
+        imageError = true;
+        probeWarn('modal.viewerSrc.fail', {
+          name: photo.metadata.name,
+          err: error instanceof Error ? error.message : String(error),
+        });
+      }
+    };
+
     const ready = immediateViewerSrc(photo);
     if (ready) {
-      viewerSrc = ready;
+      void applyViewer(ready);
     } else {
       viewerSrc = '';
-      resolveViewerSrc(photo).then((src) => {
+      void resolveViewerSrc(photo).then((src) => {
         if (cancelled) return;
-        if (src) viewerSrc = src;
-        else imageError = true;
+        void applyViewer(src);
       });
     }
     return () => {
       cancelled = true;
+      revokeViewer();
     };
   });
 

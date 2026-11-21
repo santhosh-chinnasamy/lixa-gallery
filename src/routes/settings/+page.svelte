@@ -105,7 +105,7 @@
   ];
 </script>
 
-<div class="custom-scrollbar flex-1 overflow-y-auto p-6 lg:p-10">
+<div class="custom-scrollbar h-full min-h-0 flex-1 overflow-y-auto p-6 lg:p-10">
   <div class="mx-auto max-w-4xl space-y-8">
     <!-- Page Header -->
     <div class="border-b pb-5">

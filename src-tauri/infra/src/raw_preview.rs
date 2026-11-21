@@ -64,10 +64,11 @@ pub fn render_raw(source: &Path, thumb_dir: &str) -> Result<RawRender> {
     }
 
     if paths.preview.is_file() && paths.thumbnail.is_file() {
+        // Cheap container tags only. Callers merge DB EXIF when present.
         return Ok(RawRender {
             thumbnail_path: paths.thumbnail.to_string_lossy().into_owned(),
             preview_path: Some(paths.preview.to_string_lossy().into_owned()),
-            exif: exif_for_cached(source),
+            exif: exif_info::parse_path(source).info,
         });
     }
 
@@ -122,10 +123,6 @@ pub fn render_raw(source: &Path, thumb_dir: &str) -> Result<RawRender> {
         preview_path: Some(paths.preview.to_string_lossy().into_owned()),
         exif: parsed.info,
     })
-}
-
-fn exif_for_cached(source: &Path) -> ExifInfo {
-    exif_info::parse_path(source).info
 }
 
 fn fit_within(image: image::DynamicImage, max_edge: u32) -> image::DynamicImage {

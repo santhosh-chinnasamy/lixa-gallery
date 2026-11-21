@@ -1,10 +1,10 @@
-import { convertFileSrc, invoke } from '@tauri-apps/api/core';
-import { viewerImageUrl } from './imageSource';
+import { invoke } from '@tauri-apps/api/core';
+import { assetUrl, viewerImageUrl } from './imageSource';
 import type { PhotoMetadata } from '../types/photo';
 
 /** A URL the webview can paint, or null when a RAW preview still has to be extracted. */
 export function immediateViewerSrc(photo: PhotoMetadata): string | null {
-  if (photo.preview_path) return convertFileSrc(photo.preview_path);
+  if (photo.preview_path) return assetUrl(photo.preview_path);
   if (photo.is_raw) return null;
   return viewerImageUrl(photo);
 }
@@ -18,7 +18,7 @@ export async function resolveViewerSrc(
     const preview = await invoke<string | null>('ensure_raw_preview', {
       path: photo.path,
     });
-    return preview ? convertFileSrc(preview) : null;
+    return preview ? assetUrl(preview) : null;
   } catch {
     return null;
   }

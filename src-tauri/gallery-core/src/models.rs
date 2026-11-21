@@ -79,6 +79,41 @@ impl ExifInfo {
             && self.height.is_none()
             && self.orientation.is_none()
     }
+
+    /// Keep existing fields; fill only gaps from `other`.
+    pub fn merge_gaps_from(&mut self, other: &ExifInfo) {
+        fn take<T: Clone>(slot: &mut Option<T>, extra: &Option<T>) {
+            if slot.is_none() {
+                *slot = extra.clone();
+            }
+        }
+        take(&mut self.camera, &other.camera);
+        take(&mut self.lens, &other.lens);
+        take(&mut self.focal_length, &other.focal_length);
+        take(&mut self.aperture, &other.aperture);
+        take(&mut self.shutter, &other.shutter);
+        take(&mut self.iso, &other.iso);
+        take(&mut self.date, &other.date);
+        take(&mut self.captured_at, &other.captured_at);
+        take(&mut self.captured_subsec, &other.captured_subsec);
+        take(&mut self.width, &other.width);
+        take(&mut self.height, &other.height);
+        take(&mut self.orientation, &other.orientation);
+    }
+}
+
+/// Payload for `photos-updated`. Generation lets the UI drop stale folder work.
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct PhotosUpdatedEvent {
+    pub generation: u64,
+    pub photos: Vec<PhotoMetadata>,
+}
+
+/// Return value of `scan_folder` so the UI can bind to the folder session.
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct FolderScanResult {
+    pub generation: u64,
+    pub photos: Vec<PhotoMetadata>,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]

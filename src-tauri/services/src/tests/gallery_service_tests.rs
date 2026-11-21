@@ -31,6 +31,7 @@ async fn test_scan_folder_finds_new_images() {
         fs,
         logger,
         tokio::runtime::Handle::current(),
+        Arc::new(FakeEventHub),
     );
 
     let results = service
@@ -38,8 +39,9 @@ async fn test_scan_folder_finds_new_images() {
         .await
         .unwrap();
 
-    assert_eq!(results.len(), 1);
-    assert_eq!(results[0].metadata.name, "img1.jpg");
+    assert_eq!(results.photos.len(), 1);
+    assert_eq!(results.photos[0].metadata.name, "img1.jpg");
+    assert!(results.generation >= 1);
 
     // Check if it was cached in repo
     let cached = repo.photos.lock().unwrap();
@@ -89,6 +91,7 @@ async fn test_scan_folder_groups_a_raw_jpeg_pair() {
         fs,
         Arc::new(FakeBenchmarkLogger),
         tokio::runtime::Handle::current(),
+        Arc::new(FakeEventHub),
     );
 
     let results = service
@@ -96,14 +99,16 @@ async fn test_scan_folder_groups_a_raw_jpeg_pair() {
         .await
         .unwrap();
 
-    assert_eq!(results.len(), 2);
+    assert_eq!(results.photos.len(), 2);
     let pair = results
+        .photos
         .iter()
         .find(|photo| photo.metadata.name == "IMG_0001.jpg")
         .unwrap();
     assert_eq!(pair.sidecar_path.as_deref(), Some("/pics/IMG_0001.CR2"));
     assert!(!pair.is_raw);
     let raw = results
+        .photos
         .iter()
         .find(|photo| photo.metadata.name == "solo.NEF")
         .unwrap();
@@ -207,7 +212,112 @@ fn service_with(fs: Arc<dyn gallery_core::fs::FileSystem>) -> GalleryService {
         fs,
         Arc::new(FakeBenchmarkLogger),
         tokio::runtime::Handle::current(),
+        Arc::new(FakeEventHub),
     )
+}
+
+/// Counts EXIF / convert calls so lazy scan can assert the critical path
+/// does not wait on them.
+struct CountingProcessor {
+    convert_calls: Mutex<usize>,
+    exif_calls: Mutex<usize>,
+}
+
+#[async_trait::async_trait]
+impl gallery_core::image::ImageProcessor for CountingProcessor {
+    async fn convert_image(
+        &self,
+        path: &Path,
+        _thumb_dir: &str,
+    ) -> gallery_core::models::Result<gallery_core::models::PhotoMetadata> {
+        *self.convert_calls.lock().unwrap() += 1;
+        tokio::time::sleep(std::time::Duration::from_millis(50)).await;
+        FakeImageProcessor.convert_image(path, _thumb_dir).await
+    }
+
+    async fn read_exif(
+        &self,
+        path: &Path,
+    ) -> gallery_core::models::Result<Option<gallery_core::models::ExifInfo>> {
+        *self.exif_calls.lock().unwrap() += 1;
+        tokio::time::sleep(std::time::Duration::from_millis(50)).await;
+        FakeImageProcessor.read_exif(path).await
+    }
+
+    async fn ensure_decoded_preview(
+        &self,
+        source: &Path,
+        cache_dir: &Path,
+    ) -> gallery_core::models::Result<PathBuf> {
+        FakeImageProcessor
+            .ensure_decoded_preview(source, cache_dir)
+            .await
+    }
+}
+
+#[tokio::test]
+async fn lazy_scan_returns_without_waiting_on_exif_or_convert() {
+    let fs = Arc::new(FakeFileSystem {
+        files: Mutex::new(vec![
+            (
+                PathBuf::from("/pics/a.jpg"),
+                FileMetadata {
+                    name: "a.jpg".to_string(),
+                    modified: 1,
+                    created: 1,
+                    size: 10,
+                },
+            ),
+            (
+                PathBuf::from("/pics/b.jpg"),
+                FileMetadata {
+                    name: "b.jpg".to_string(),
+                    modified: 2,
+                    created: 2,
+                    size: 20,
+                },
+            ),
+        ]),
+        copied: Mutex::new(vec![]),
+    });
+    let processor = Arc::new(CountingProcessor {
+        convert_calls: Mutex::new(0),
+        exif_calls: Mutex::new(0),
+    });
+    let events = Arc::new(RecordingEventHub {
+        photos: Mutex::new(vec![]),
+    });
+    let service = GalleryService::new(
+        Arc::new(FakePhotoRepository {
+            photos: Mutex::new(vec![]),
+        }),
+        processor.clone(),
+        fs,
+        Arc::new(FakeBenchmarkLogger),
+        tokio::runtime::Handle::current(),
+        events.clone(),
+    );
+
+    let started = std::time::Instant::now();
+    let results = service
+        .scan_folder("/pics", "/thumbs", LoadingMode::Lazy)
+        .await
+        .unwrap();
+    let elapsed = started.elapsed();
+
+    assert_eq!(results.photos.len(), 2);
+    // Two 50ms EXIF/convert waits would push this well over 40ms if awaited.
+    assert!(
+        elapsed < std::time::Duration::from_millis(40),
+        "lazy scan blocked on image work: {elapsed:?}"
+    );
+    assert_eq!(*processor.exif_calls.lock().unwrap(), 0);
+    assert_eq!(*processor.convert_calls.lock().unwrap(), 0);
+
+    // Background work waits for interactive idle, then converts and emits.
+    tokio::time::sleep(std::time::Duration::from_millis(800)).await;
+    assert!(*processor.convert_calls.lock().unwrap() >= 1);
+    assert!(!events.photos.lock().unwrap().is_empty());
 }
 
 #[tokio::test]

@@ -10,7 +10,7 @@
   import Play from '@lucide/svelte/icons/play';
   import { invoke } from '@tauri-apps/api/core';
   import { listen, type UnlistenFn } from '@tauri-apps/api/event';
-  import { onDestroy } from 'svelte';
+  import { onDestroy, onMount } from 'svelte';
   import Gallery from '../../components/Gallery.svelte';
   import ImageCard from '../../components/ImageCard.svelte';
   import ImageModal from '../../components/ImageModal.svelte';
@@ -36,6 +36,8 @@
   } from '../../stores/galleryStore';
   import type { ExportReport, PhotoMetadata } from '../../types/photo';
   import { setShortcutLayer } from '$lib/shortcuts';
+  import { probe, startProbeSession } from '$lib/debugProbe';
+  import { get } from 'svelte/store';
 
   let exportStatus = $state('');
   let isExporting = $state(false);
@@ -77,24 +79,61 @@
   let showExportModal = $state(false);
   let isSlideshowOpen = $state(false);
 
-  // Modal viewer state for All Folders view
+  // Specific folder targeted for quick export (null = use modal's general scope)
+  let exportTargetFolder = $state<string | null>(null);
+  let collapsedFolders = $state<Set<string>>(new Set());
   let selectedModalImage = $state<PhotoMetadata | null>(null);
   let modalPhotos = $state<PhotoMetadata[]>([]);
 
-  // Collapsed state for folder accordions in All Folders view
-  let collapsedFolders = $state<Set<string>>(new Set());
+  function toggleFolderCollapse(folderPath: string) {
+    const next = new Set(collapsedFolders);
+    if (next.has(folderPath)) next.delete(folderPath);
+    else next.add(folderPath);
+    collapsedFolders = next;
+  }
 
-  // Specific folder targeted for quick export (null = use modal's general scope)
-  let exportTargetFolder = $state<string | null>(null);
+  function handleImageClickInGroup(
+    photo: PhotoMetadata,
+    groupPhotos: PhotoMetadata[],
+  ) {
+    modalPhotos = groupPhotos;
+    selectedModalImage = photo;
+  }
 
-  // Auto-refresh when entering page
-  $effect(() => {
-    refreshFavourites();
+  function handleQuickExportFolder(folderPath: string) {
+    exportTargetFolder = folderPath;
+    showExportModal = true;
+  }
+
+  // Load once on enter. An $effect here can re-fire if refresh touches tracked state.
+  onMount(() => {
+    const stopProbe = startProbeSession('favourites');
+    probe('favourites.mount', {
+      favorites: get(favorites).size,
+      scope: get(favouriteScope),
+      folder: get(currentFolder),
+    });
+    void refreshFavourites().then(() => {
+      probe('favourites.refreshed', {
+        favorites: get(favorites).size,
+        photos: get(favouritePhotos).length,
+        groups: get(favouriteFolderGroups).length,
+        scope: get(favouriteScope),
+      });
+    });
+    return () => {
+      probe('favourites.unmount');
+      stopProbe();
+    };
   });
 
   $effect(() => {
     setShortcutLayer('favourites', true);
-    return () => setShortcutLayer('favourites', false);
+    probe('favourites.shortcutLayer', { active: true });
+    return () => {
+      setShortcutLayer('favourites', false);
+      probe('favourites.shortcutLayer', { active: false });
+    };
   });
 
   // Automatically adjust scope if no folder is open
@@ -120,29 +159,6 @@
       showExportModal = true;
     },
   };
-
-  function toggleFolderCollapse(folderPath: string) {
-    const next = new Set(collapsedFolders);
-    if (next.has(folderPath)) {
-      next.delete(folderPath);
-    } else {
-      next.add(folderPath);
-    }
-    collapsedFolders = next;
-  }
-
-  function handleImageClickInGroup(
-    photo: PhotoMetadata,
-    groupPhotos: PhotoMetadata[],
-  ) {
-    modalPhotos = groupPhotos;
-    selectedModalImage = photo;
-  }
-
-  function handleQuickExportFolder(folderPath: string) {
-    exportTargetFolder = folderPath;
-    showExportModal = true;
-  }
 
   async function handleClearCurrentFolder() {
     if ($currentFolder) {
@@ -355,7 +371,7 @@
     </div>
 
     <!-- Main Content Area -->
-    <div class="flex-1 overflow-hidden">
+    <div class="min-h-0 flex-1 overflow-hidden">
       {#if $favouriteScope === 'current' && $currentFolder}
         <!-- View 1: Current Folder Favorites -->
         {#if currentFolderPhotos.length === 0}
@@ -395,18 +411,23 @@
             </div>
           </div>
         {:else}
-          <Gallery photos={currentFolderPhotos} />
+          <div class="h-full min-h-0">
+            <Gallery
+              photos={currentFolderPhotos}
+              embedded
+              source="favourites"
+            />
+          </div>
         {/if}
       {:else}
-        <!-- View 2: All Folders (Grouped Accordions) -->
-        <div class="custom-scrollbar h-full overflow-y-auto p-4 lg:p-6">
+        <!-- Match main: accordion + CSS grid ImageCards. No loading gate. -->
+        <div class="custom-scrollbar h-full min-h-0 overflow-y-auto p-4 lg:p-6">
           <div class="space-y-6">
             {#each $favouriteFolderGroups as group (group.folder_path)}
               {@const isCollapsed = collapsedFolders.has(group.folder_path)}
               <div
                 class="shadow-xs backdrop-blur-xs rounded-xl border bg-card/60 transition-all"
               >
-                <!-- Folder Section Header -->
                 <div
                   class="flex items-center justify-between border-b bg-muted/30 px-4 py-3"
                 >
@@ -445,21 +466,16 @@
                       </p>
                     </div>
                   </button>
-
-                  <div class="flex items-center gap-2">
-                    <Button
-                      variant="ghost"
-                      size="sm"
-                      class="h-7 gap-1 text-xs text-muted-foreground hover:text-foreground"
-                      onclick={() => handleQuickExportFolder(group.folder_path)}
-                    >
-                      <DownloadIcon size={12} />
-                      <span class="hidden sm:inline">Export Folder</span>
-                    </Button>
-                  </div>
+                  <Button
+                    variant="ghost"
+                    size="sm"
+                    class="h-7 gap-1 text-xs text-muted-foreground hover:text-foreground"
+                    onclick={() => handleQuickExportFolder(group.folder_path)}
+                  >
+                    <DownloadIcon size={12} />
+                    <span class="hidden sm:inline">Export Folder</span>
+                  </Button>
                 </div>
-
-                <!-- Photos Grid in this Folder -->
                 {#if !isCollapsed}
                   <div class="p-4">
                     <div
@@ -484,7 +500,6 @@
   {/if}
 </div>
 
-<!-- Modal Viewer for All Folders View -->
 <ImageModal
   bind:selectedImage={selectedModalImage}
   photos={modalPhotos}
