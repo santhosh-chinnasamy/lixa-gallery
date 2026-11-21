@@ -343,6 +343,8 @@ impl GalleryService {
                 needs_exif.len()
             );
 
+            // Larger chunks → fewer photos-updated storms while the user scrolls.
+            const FLUSH_EVERY: usize = 64;
             let mut chunk: Vec<PhotoMetadata> = Vec::new();
 
             let mut materialize_stream = stream::iter(needs_processing)
@@ -398,8 +400,10 @@ impl GalleryService {
                 let Some(photo) = maybe else { continue };
                 // Always persist so the next open is warm, even if the folder changed.
                 chunk.push(photo);
-                if chunk.len() >= 10 {
+                if chunk.len() >= FLUSH_EVERY {
                     flush_chunk(&photo_repo, &events, &scheduler, generation, &mut chunk).await;
+                    // Let Interactive (visible thumbs / UI) claim the pool between batches.
+                    breathe_for_interactive(&scheduler).await;
                 }
             }
 
@@ -442,8 +446,9 @@ impl GalleryService {
             while let Some(maybe) = exif_stream.next().await {
                 let Some(photo) = maybe else { continue };
                 chunk.push(photo);
-                if chunk.len() >= 10 {
+                if chunk.len() >= FLUSH_EVERY {
                     flush_chunk(&photo_repo, &events, &scheduler, generation, &mut chunk).await;
+                    breathe_for_interactive(&scheduler).await;
                 }
             }
 
@@ -687,6 +692,17 @@ async fn flush_chunk(
         let _ = events.emit_photos_updated(generation, chunk);
     }
     chunk.clear();
+}
+
+/// Pause background indexing briefly so Interactive work and the webview can run.
+async fn breathe_for_interactive(scheduler: &ImageWorkScheduler) {
+    scheduler
+        .wait_until_interactive_idle(
+            std::time::Duration::from_millis(50),
+            std::time::Duration::from_millis(200),
+        )
+        .await;
+    tokio::task::yield_now().await;
 }
 
 /// True when the stored thumb path is usable for this identity.

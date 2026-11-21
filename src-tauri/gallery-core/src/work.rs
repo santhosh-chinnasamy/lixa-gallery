@@ -88,9 +88,14 @@ pub fn recommended_pool_size() -> usize {
     (cores / 2).clamp(2, 6)
 }
 
-/// Background slots leave room for interactive work on small pools.
-pub fn recommended_background_slots(pool_size: usize) -> usize {
-    pool_size.saturating_sub(1).clamp(1, 3)
+/// At most one background materialize at a time.
+///
+/// Each job already burns a Rayon/decode core. Running several background
+/// jobs in parallel saturated the machine (measured ~270% CPU) and starved
+/// the webview while scrolling a large Lazy folder. Interactive work still
+/// uses the rest of the scheduler pool.
+pub fn recommended_background_slots(_pool_size: usize) -> usize {
+    1
 }
 
 #[cfg(test)]
@@ -106,7 +111,7 @@ mod tests {
     fn pool_size_is_capped_and_non_zero() {
         let n = recommended_pool_size();
         assert!((2..=6).contains(&n));
-        assert!((1..=3).contains(&recommended_background_slots(n)));
+        assert_eq!(recommended_background_slots(n), 1);
     }
 
     #[test]
