@@ -59,3 +59,5 @@ site/dist
 /e2e/fixtures/sets/
 /e2e/out/
 /e2e/node_modules/
+**/__pycache__/
+*.pyc
