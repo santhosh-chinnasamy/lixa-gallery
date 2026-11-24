@@ -91,10 +91,10 @@ pub fn recommended_pool_size() -> usize {
 
 /// At most one background materialize at a time.
 ///
-/// Each job already burns a Rayon/decode core. Running several background
-/// jobs in parallel saturated the machine (measured ~270% CPU) and starved
-/// the webview while scrolling a large Lazy folder. Interactive work still
-/// uses the rest of the scheduler pool.
+/// This does not reserve a worker. Visible work may use every pool slot.
+/// A background job is started only while nothing interactive is queued or
+/// running, and then only up to this many jobs. Each job already burns a
+/// decode core; several at once saturated the machine (measured ~270% CPU).
 pub fn recommended_background_slots(_pool_size: usize) -> usize {
     1
 }
