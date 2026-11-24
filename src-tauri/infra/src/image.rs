@@ -8,24 +8,15 @@ use gallery_core::image::ImageProcessor as ImageProcessorTrait;
 use gallery_core::models::{ExifInfo, GalleryError, PhotoMetadata, Result};
 use image::{GenericImageView, ImageDecoder};
 use std::path::{Path, PathBuf};
-use std::sync::Arc;
 
-pub struct RayonImageProcessor {
-    pool: Arc<rayon::ThreadPool>,
-}
+pub struct RayonImageProcessor;
 
 impl RayonImageProcessor {
     pub fn new() -> Self {
-        // Scheduler bounds how many converts run at once. Keep Rayon at one
-        // thread so N concurrent jobs use ~N cores, not N × pool_size.
-        let pool = rayon::ThreadPoolBuilder::new()
-            .num_threads(1)
-            .thread_name(|i| format!("rayon-img-{i}"))
-            .build()
-            .expect("Failed to create Rayon thread pool");
-        Self {
-            pool: Arc::new(pool),
-        }
+        // Each decode runs on its own `spawn_blocking` thread. A shared
+        // one-thread Rayon pool queued every `install` call, so the
+        // scheduler could admit several jobs and still decode one at a time.
+        Self
     }
 }
 
@@ -45,12 +36,10 @@ impl ImageProcessorTrait for RayonImageProcessor {
         if is_raw {
             let path = file_path.to_path_buf();
             let thumb_dir = thumbnail_dir.to_string();
-            let pool = self.pool.clone();
-            let rendered = tokio::task::spawn_blocking(move || {
-                pool.install(|| raw_preview::render_raw(&path, &thumb_dir))
-            })
-            .await
-            .map_err(|err| GalleryError::Unknown(err.to_string()))??;
+            let rendered =
+                tokio::task::spawn_blocking(move || raw_preview::render_raw(&path, &thumb_dir))
+                    .await
+                    .map_err(|err| GalleryError::Unknown(err.to_string()))??;
 
             return Ok(PhotoMetadata {
                 metadata,
@@ -71,8 +60,7 @@ impl ImageProcessorTrait for RayonImageProcessor {
 
         let exif = {
             let path = file_path.to_path_buf();
-            let pool = self.pool.clone();
-            tokio::task::spawn_blocking(move || pool.install(|| exif_info::from_path(&path)))
+            tokio::task::spawn_blocking(move || exif_info::from_path(&path))
                 .await
                 .map_err(|err| GalleryError::Unknown(err.to_string()))?
         };
@@ -112,30 +100,27 @@ impl ImageProcessorTrait for RayonImageProcessor {
         // Decode off the async executor. The output path is already unique to
         // this source path and identity, so two folders cannot overwrite it.
         let path = file_path.to_path_buf();
-        let pool = self.pool.clone();
         let output_path_result = tokio::task::spawn_blocking(move || {
-            pool.install(|| {
-                let thumbnail = match open_oriented_thumbnail(&path, THUMB_MAX_EDGE) {
-                    Ok(img) => img,
-                    Err(e) => {
-                        log::warn!(
-                            "Failed to open image {}: {}. Falling back to original.",
-                            path.display(),
-                            e
-                        );
-                        return Ok::<Option<PathBuf>, GalleryError>(None);
-                    }
-                };
-
-                write_webp_atomic(&thumbnail, &output_path)?;
-                if let Err(err) = thumbnail_cache::remove_other_identity_files(&output_path) {
+            let thumbnail = match open_oriented_thumbnail(&path, THUMB_MAX_EDGE) {
+                Ok(img) => img,
+                Err(e) => {
                     log::warn!(
-                        "Could not remove stale thumbnails beside {}: {err}",
-                        output_path.display()
+                        "Failed to open image {}: {}. Falling back to original.",
+                        path.display(),
+                        e
                     );
+                    return Ok::<Option<PathBuf>, GalleryError>(None);
                 }
-                Ok::<Option<PathBuf>, GalleryError>(Some(output_path))
-            })
+            };
+
+            write_webp_atomic(&thumbnail, &output_path)?;
+            if let Err(err) = thumbnail_cache::remove_other_identity_files(&output_path) {
+                log::warn!(
+                    "Could not remove stale thumbnails beside {}: {err}",
+                    output_path.display()
+                );
+            }
+            Ok::<Option<PathBuf>, GalleryError>(Some(output_path))
         })
         .await
         .map_err(|e| GalleryError::Unknown(e.to_string()))?;
@@ -165,18 +150,13 @@ impl ImageProcessorTrait for RayonImageProcessor {
 
     async fn read_exif(&self, file_path: &Path) -> Result<Option<ExifInfo>> {
         let path = file_path.to_path_buf();
-        let pool = self.pool.clone();
-        let info = tokio::task::spawn_blocking(move || pool.install(|| exif_info::from_path(&path)))
+        let info = tokio::task::spawn_blocking(move || exif_info::from_path(&path))
             .await
             .map_err(|err| GalleryError::Unknown(err.to_string()))?;
         Ok(Some(info))
     }
 
-    async fn ensure_decoded_preview(
-        &self,
-        source: &Path,
-        cache_dir: &Path,
-    ) -> Result<PathBuf> {
+    async fn ensure_decoded_preview(&self, source: &Path, cache_dir: &Path) -> Result<PathBuf> {
         ensure_decoded_preview(source, cache_dir).await
     }
 }
@@ -273,7 +253,9 @@ fn open_jpeg_thumbnail(
     let file = std::fs::File::open(path).map_err(|err| err.to_string())?;
     let mut decoder = jpeg_decoder::Decoder::new(BufReader::new(file));
     decoder.read_info().map_err(|err| err.to_string())?;
-    let info = decoder.info().ok_or_else(|| "jpeg missing header info".to_string())?;
+    let info = decoder
+        .info()
+        .ok_or_else(|| "jpeg missing header info".to_string())?;
     let target = max_edge.min(u32::from(u16::MAX)) as u16;
     let (out_w, out_h) = decoder
         .scale(target, target)
@@ -714,11 +696,9 @@ mod tests {
         assert_eq!(webp_files(&cache).len(), 1);
     }
 
-
     #[tokio::test]
     async fn camera_jpeg_writes_a_decodable_webp_thumb() {
-        let source =
-            Path::new("/home/santhosh/Pictures/marriage/100MSDCF/DSC04630.JPG");
+        let source = Path::new("/home/santhosh/Pictures/marriage/100MSDCF/DSC04630.JPG");
         if !source.is_file() {
             return;
         }
