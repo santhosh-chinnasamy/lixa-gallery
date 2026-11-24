@@ -60,9 +60,12 @@ for (let run = 1; run <= RUNS; run += 1) {
     let snap = null;
     while (Date.now() - started < 4000) {
       snap = await snapshot(driver);
-      if (snap.photoCount && snap.loaded > 0 && snap.loaded < (snap.cells || 1)) break;
-      if (snap.photoCount && Date.now() - started > 1500) break;
-      await sleep(100);
+      const cells = snap.cells || 0;
+      const loaded = snap.loaded || 0;
+      const gridUp = Boolean(snap.photoCount) || cells > 0;
+      if (gridUp && loaded < cells) break;
+      if (gridUp && Date.now() - started > 400) break;
+      await sleep(80);
     }
     const mid = snap;
     await openFolder(driver, FOLDER_D);
@@ -70,7 +73,7 @@ for (let run = 1; run <= RUNS; run += 1) {
     let dSnap = null;
     while (Date.now() - dStart < 4000) {
       dSnap = await snapshot(driver);
-      if (dSnap.photoCount) break;
+      if (dSnap.photoCount || (dSnap.cells || 0) > 0) break;
       await sleep(100);
     }
     await openFolder(driver, FOLDER_A);

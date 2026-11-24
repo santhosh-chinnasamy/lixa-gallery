@@ -519,7 +519,8 @@ async function favourites(session) {
   await openTimed(session, folders.E, 60000);
   const beforePick = await snapshot(session.driver);
   if (!beforePick.hasPickCounter) {
-    await favLink[0].click();
+    const link = await session.driver.findElements(By.css('a[href="/favourites"]'));
+    if (link.length) await link[0].click();
     await sleep(800);
     record({
       scenario: 'favourites-export',
