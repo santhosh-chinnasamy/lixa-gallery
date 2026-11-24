@@ -1,6 +1,6 @@
 # Real-app end-to-end harness
 
-Drives a **release** build of Lixa Gallery with tauri-driver and WebKitWebDriver under Xvfb. Photos are real Creative Commons / public-domain JPEGs from Wikimedia Commons and real CC0 camera RAW files from raw.pixls.us. Nothing in this folder changes application code.
+Drives a **release** build of Lixa Gallery with tauri-driver and WebKitWebDriver under Xvfb. Photos are real Creative Commons / public-domain JPEGs from Wikimedia Commons and real CC0 camera RAW files from raw.pixls.us. Nothing in this folder changes application code. Recorded 24 Nov 2026 timings are in [e2e/reports/2026-11-24.md](reports/2026-11-24.md).
 
 ## Prereqs
 
