@@ -79,13 +79,14 @@ impl WorkKey {
     }
 }
 
-/// Leave headroom for the OS and webview. Never use every core.
+/// Leave one core for the OS and the webview. Thumbnail decode is CPU-bound,
+/// so the rest of the machine should be decoding. A fixed pool of 4 was the
+/// previous Rayon default; halving the core count left cold grids on two workers.
 pub fn recommended_pool_size() -> usize {
     let cores = std::thread::available_parallelism()
         .map(|n| n.get())
         .unwrap_or(4);
-    // Visible-first + cheaper decode leave headroom for a slightly larger pool.
-    (cores / 2).clamp(2, 6)
+    cores.saturating_sub(1).max(2)
 }
 
 /// At most one background materialize at a time.
@@ -108,9 +109,13 @@ mod tests {
     }
 
     #[test]
-    fn pool_size_is_capped_and_non_zero() {
+    fn pool_size_is_cores_minus_one_at_least_two() {
+        let cores = std::thread::available_parallelism()
+            .map(|n| n.get())
+            .unwrap_or(4);
         let n = recommended_pool_size();
-        assert!((2..=6).contains(&n));
+        assert_eq!(n, cores.saturating_sub(1).max(2));
+        assert!(n >= 2);
         assert_eq!(recommended_background_slots(n), 1);
     }
 
