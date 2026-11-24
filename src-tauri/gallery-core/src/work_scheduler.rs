@@ -5,10 +5,12 @@
 //! job.
 //!
 //! [`begin_generation`] cancels **queued** work from a previous folder and bumps
-//! the generation. In-flight jobs keep their `running` slots until `work.await`
-//! finishes — admission never exceeds [`ImageWorkScheduler::max_workers`]. On
-//! success, every waiter receives `Ok` so in-flight protocol requests can still
-//! serve bytes. Callers gate UI emits with [`ImageWorkScheduler::is_current`].
+//! the generation. In-flight decodes from the old folder keep running so a
+//! protocol waiter can still receive `Ok`, but they do not count against
+//! [`ImageWorkScheduler::max_workers`]. A worker checks the generation before
+//! polling a job and drops it unstarted when the folder has already changed.
+//! Current-generation admission never exceeds the cap, and the worker tasks
+//! themselves stay within it.
 
 use crate::models::{GalleryError, PhotoMetadata, Result};
 use crate::work::{recommended_background_slots, recommended_pool_size, WorkKey, WorkPriority};
@@ -26,6 +28,9 @@ type Reply = oneshot::Sender<std::result::Result<PhotoMetadata, String>>;
 struct Job {
     key: WorkKey,
     priority: WorkPriority,
+    /// Folder session that submitted this job. Compared with [`Inner::generation`]
+    /// before the future is polled.
+    generation: u64,
     work: JobFuture,
 }
 
@@ -35,7 +40,12 @@ struct State {
     /// Keys queued or running → current priority.
     active: HashMap<WorkKey, WorkPriority>,
     waiters: HashMap<WorkKey, Vec<Reply>>,
-    running: usize,
+    /// In-flight jobs whose generation is still current. This is the admission cap.
+    running_current: usize,
+    /// In-flight jobs from older folders. They keep decoding but do not block
+    /// admission of the current generation.
+    running_stale: usize,
+    /// Current-generation background jobs. Not a reservation against visible work.
     running_background: usize,
     workers_started: usize,
 }
@@ -76,7 +86,8 @@ impl ImageWorkScheduler {
                     background: VecDeque::new(),
                     active: HashMap::new(),
                     waiters: HashMap::new(),
-                    running: 0,
+                    running_current: 0,
+                    running_stale: 0,
                     running_background: 0,
                     workers_started: 0,
                 }),
@@ -97,8 +108,10 @@ impl ImageWorkScheduler {
     }
 
     /// Bump the generation and cancel **queued** work from a previous folder.
-    /// In-flight jobs keep their `running` slots (and stay coalesce targets)
-    /// until they finish — never spawn past [`Self::max_workers`].
+    ///
+    /// In-flight jobs stay coalesce targets until they finish, but they stop
+    /// counting against [`Self::max_workers`] so the new folder is admitted
+    /// immediately. Worker tasks are not spawned past the cap.
     /// Callers gate UI emits with [`Self::is_current`].
     pub async fn begin_generation(&self) -> u64 {
         let mut state = self.inner.state.lock().await;
@@ -116,6 +129,10 @@ impl ImageWorkScheduler {
                 }
             }
         }
+        // Everything still inside `work` belongs to an older folder now.
+        state.running_stale = state.running_stale.saturating_add(state.running_current);
+        state.running_current = 0;
+        state.running_background = 0;
         drop(state);
         self.inner.notify.notify_waiters();
         next
@@ -182,6 +199,11 @@ impl ImageWorkScheduler {
         let (tx, rx) = oneshot::channel();
         {
             let mut state = self.inner.state.lock().await;
+            // Re-check under the lock. A folder switch can land between the
+            // early return above and this enqueue.
+            if self.inner.generation.load(Ordering::SeqCst) != generation {
+                return Err(cancelled());
+            }
             if state.active.contains_key(&key) {
                 if priority == WorkPriority::Interactive {
                     if let Some(existing) = state.active.get_mut(&key) {
@@ -204,6 +226,7 @@ impl ImageWorkScheduler {
                 let job = Job {
                     key,
                     priority,
+                    generation,
                     work: Box::pin(work()),
                 };
                 match priority {
@@ -235,11 +258,89 @@ impl ImageWorkScheduler {
 }
 
 fn interactive_busy(state: &State) -> bool {
-    !state.interactive.is_empty() || state.running > state.running_background
+    !state.interactive.is_empty() || state.running_current > state.running_background
 }
 
 fn cancelled() -> GalleryError {
     GalleryError::Unknown("cancelled".to_string())
+}
+
+fn cancel_unstarted(state: &mut State, job: Job) {
+    state.active.remove(&job.key);
+    if let Some(waiters) = state.waiters.remove(&job.key) {
+        for waiter in waiters {
+            let _ = waiter.send(Err("cancelled".to_string()));
+        }
+    }
+}
+
+fn claim_job(state: &mut State, inner: &Inner) -> Option<Job> {
+    let current = inner.generation.load(Ordering::SeqCst);
+    while state
+        .interactive
+        .front()
+        .is_some_and(|job| job.generation != current)
+    {
+        let job = state.interactive.pop_front().expect("stale interactive");
+        cancel_unstarted(state, job);
+    }
+    while state
+        .background
+        .front()
+        .is_some_and(|job| job.generation != current)
+    {
+        let job = state.background.pop_front().expect("stale background");
+        cancel_unstarted(state, job);
+    }
+
+    // Visible work may use every current-generation slot. A background job
+    // already running keeps its one slot; a new one waits until visible is idle.
+    if !state.interactive.is_empty() && state.running_current < inner.max_workers {
+        let job = state.interactive.pop_front().expect("interactive");
+        state.running_current += 1;
+        return Some(job);
+    }
+
+    let interactive_running = state
+        .running_current
+        .saturating_sub(state.running_background);
+    let visible_idle = state.interactive.is_empty() && interactive_running == 0;
+    if visible_idle
+        && state.running_background < inner.max_background
+        && state.running_current < inner.max_workers
+        && !state.background.is_empty()
+    {
+        let job = state.background.pop_front().expect("background");
+        state.running_current += 1;
+        state.running_background += 1;
+        return Some(job);
+    }
+    None
+}
+
+async fn settle_job(
+    inner: &Inner,
+    generation: u64,
+    is_background: bool,
+    key: WorkKey,
+    outcome: std::result::Result<PhotoMetadata, String>,
+) {
+    let mut state = inner.state.lock().await;
+    if generation == inner.generation.load(Ordering::SeqCst) {
+        state.running_current = state.running_current.saturating_sub(1);
+        if is_background {
+            state.running_background = state.running_background.saturating_sub(1);
+        }
+    } else {
+        // `begin_generation` already moved this slot from current to stale.
+        state.running_stale = state.running_stale.saturating_sub(1);
+    }
+    state.active.remove(&key);
+    if let Some(waiters) = state.waiters.remove(&key) {
+        for waiter in waiters {
+            let _ = waiter.send(outcome.clone());
+        }
+    }
 }
 
 async fn worker_loop(inner: Arc<Inner>) {
@@ -247,63 +348,52 @@ async fn worker_loop(inner: Arc<Inner>) {
         let job = {
             let mut state = inner.state.lock().await;
             loop {
-                // A free slot is not a background slot. Between protocol
-                // requests the interactive queue is often empty while visible
-                // decodes are still running; starting background then left
-                // only the remaining workers on the grid.
-                let interactive_running = state.running.saturating_sub(state.running_background);
-                let visible_idle = state.interactive.is_empty() && interactive_running == 0;
-                let can_background =
-                    state.running_background < inner.max_background && visible_idle;
-                let next = if !state.interactive.is_empty() && state.running < inner.max_workers {
-                    state.interactive.pop_front()
-                } else if can_background
-                    && !state.background.is_empty()
-                    && state.running < inner.max_workers
-                {
-                    state.background.pop_front()
-                } else {
-                    None
-                };
-
-                if let Some(job) = next {
-                    state.running += 1;
-                    if job.priority == WorkPriority::Background {
-                        state.running_background += 1;
-                    }
+                if let Some(job) = claim_job(&mut state, &inner) {
                     break job;
                 }
-
                 drop(state);
                 inner.notify.notified().await;
                 state = inner.state.lock().await;
             }
         };
 
-        let is_background = job.priority == WorkPriority::Background;
-        let key = job.key.clone();
-
-        // Always run once dequeued. Folder switches must not discard durable
-        // decode work; callers gate UI emits via is_current.
-        let outcome = match job.work.await {
-            Ok(photo) => Ok(photo),
-            Err(err) => Err(err.to_string()),
-        };
-
-        {
-            let mut state = inner.state.lock().await;
-            state.running = state.running.saturating_sub(1);
-            if is_background {
-                state.running_background = state.running_background.saturating_sub(1);
+        // Detach the decode from the worker task. Otherwise a stale in-flight
+        // body holds the only tasks `ensure_workers` is allowed to spawn, and
+        // the new folder waits even though it does not count against the cap.
+        let inner_job = inner.clone();
+        tokio::spawn(async move {
+            let generation = job.generation;
+            let is_background = job.priority == WorkPriority::Background;
+            let key = job.key.clone();
+            if inner_job.generation.load(Ordering::SeqCst) != generation {
+                // Cooperative cancel: do not poll a job the folder switch
+                // already invalidated. Dropping the future skips the decode.
+                settle_job(
+                    &inner_job,
+                    generation,
+                    is_background,
+                    key,
+                    Err("cancelled".to_string()),
+                )
+                .await;
+                inner_job.notify.notify_waiters();
+                return;
             }
-            state.active.remove(&key);
-            if let Some(waiters) = state.waiters.remove(&key) {
-                for waiter in waiters {
-                    let _ = waiter.send(outcome.clone());
-                }
-            }
+            let outcome = match job.work.await {
+                Ok(photo) => Ok(photo),
+                Err(err) => Err(err.to_string()),
+            };
+            settle_job(&inner_job, generation, is_background, key, outcome).await;
+            inner_job.notify.notify_waiters();
+        });
+    }
+}
+
+impl Clone for ImageWorkScheduler {
+    fn clone(&self) -> Self {
+        Self {
+            inner: self.inner.clone(),
         }
-        inner.notify.notify_waiters();
     }
 }
 
@@ -683,40 +773,23 @@ mod tests {
         );
     }
 
-    struct ConcurrentGuard {
-        concurrent: Arc<AtomicUsize>,
-    }
-
-    impl Drop for ConcurrentGuard {
-        fn drop(&mut self) {
-            self.concurrent.fetch_sub(1, AtomicOrdering::SeqCst);
-        }
-    }
-
-    fn enter_body(concurrent: &Arc<AtomicUsize>, peak: &Arc<AtomicUsize>) -> ConcurrentGuard {
-        let now = concurrent.fetch_add(1, AtomicOrdering::SeqCst) + 1;
-        peak.fetch_max(now, AtomicOrdering::SeqCst);
-        ConcurrentGuard {
-            concurrent: concurrent.clone(),
-        }
-    }
-
-    /// Hard-bound admission: with max_workers=1 a stale in-flight job may finish
-    /// before new Interactive starts, and concurrent bodies never exceed the cap.
+    /// A decode started under the previous folder must not hold the only
+    /// admission slot. The new folder's body runs before the stale gate opens,
+    /// and worker tasks stay within max_workers.
     #[tokio::test]
-    async fn generation_bump_keeps_hard_worker_bound() {
+    async fn stale_generation_does_not_block_new_admission() {
         let sched = ImageWorkScheduler::with_limits(1, 1);
         let old_gen = sched.begin_generation().await;
         let (release_tx, release_rx) = oneshot::channel::<()>();
         let gate = Arc::new(Mutex::new(Some(release_rx)));
-        let concurrent = Arc::new(AtomicUsize::new(0));
-        let peak = Arc::new(AtomicUsize::new(0));
+        let stale_entered = Arc::new(AtomicUsize::new(0));
+        let fresh_entered = Arc::new(AtomicUsize::new(0));
+        let queued_runs = Arc::new(AtomicUsize::new(0));
 
         let stale = tokio::spawn({
             let sched = sched.clone();
             let gate = gate.clone();
-            let concurrent = concurrent.clone();
-            let peak = peak.clone();
+            let stale_entered = stale_entered.clone();
             async move {
                 sched
                     .run(
@@ -725,10 +798,9 @@ mod tests {
                         old_gen,
                         move || {
                             let gate = gate;
-                            let concurrent = concurrent;
-                            let peak = peak;
+                            let stale_entered = stale_entered;
                             async move {
-                                let _guard = enter_body(&concurrent, &peak);
+                                stale_entered.fetch_add(1, AtomicOrdering::SeqCst);
                                 if let Some(rx) = gate.lock().await.take() {
                                     let _ = rx.await;
                                 }
@@ -740,13 +812,41 @@ mod tests {
             }
         });
 
-        tokio::time::sleep(Duration::from_millis(30)).await;
-        let new_gen = sched.begin_generation().await;
+        let fill_deadline = Instant::now() + Duration::from_secs(2);
+        while stale_entered.load(AtomicOrdering::SeqCst) == 0 {
+            assert!(
+                Instant::now() < fill_deadline,
+                "stale job never entered its body"
+            );
+            tokio::time::sleep(Duration::from_millis(5)).await;
+        }
 
-        let interactive = tokio::spawn({
+        let queued_runs_bg = queued_runs.clone();
+        let queued = tokio::spawn({
             let sched = sched.clone();
-            let concurrent = concurrent.clone();
-            let peak = peak.clone();
+            async move {
+                sched
+                    .run(
+                        WorkPriority::Interactive,
+                        WorkKey::materialize("/queued.jpg", 1, 1),
+                        old_gen,
+                        move || {
+                            let queued_runs = queued_runs_bg;
+                            async move {
+                                queued_runs.fetch_add(1, AtomicOrdering::SeqCst);
+                                Ok(photo("/queued.jpg"))
+                            }
+                        },
+                    )
+                    .await
+            }
+        });
+        tokio::time::sleep(Duration::from_millis(20)).await;
+
+        let new_gen = sched.begin_generation().await;
+        let fresh = tokio::spawn({
+            let sched = sched.clone();
+            let fresh_entered = fresh_entered.clone();
             async move {
                 sched
                     .run(
@@ -754,10 +854,9 @@ mod tests {
                         WorkKey::materialize("/new.jpg", 1, 1),
                         new_gen,
                         move || {
-                            let concurrent = concurrent;
-                            let peak = peak;
+                            let fresh_entered = fresh_entered;
                             async move {
-                                let _guard = enter_body(&concurrent, &peak);
+                                fresh_entered.fetch_add(1, AtomicOrdering::SeqCst);
                                 Ok(photo("/new.jpg"))
                             }
                         },
@@ -766,36 +865,50 @@ mod tests {
             }
         });
 
-        // Stale may still hold the only slot; Interactive is allowed to wait.
-        tokio::time::sleep(Duration::from_millis(50)).await;
-        assert!(
-            peak.load(AtomicOrdering::SeqCst) <= 1,
-            "concurrent bodies exceeded max_workers=1"
-        );
-
-        let _ = release_tx.send(());
-        let _ = stale.await.unwrap();
-        assert!(interactive.await.unwrap().is_ok());
-        assert!(
-            peak.load(AtomicOrdering::SeqCst) <= 1,
-            "peak concurrent bodies exceeded max_workers=1: {}",
-            peak.load(AtomicOrdering::SeqCst)
-        );
+        let admit_deadline = Instant::now() + Duration::from_secs(2);
+        while fresh_entered.load(AtomicOrdering::SeqCst) == 0 {
+            assert!(
+                Instant::now() < admit_deadline,
+                "new generation was not admitted while a stale decode still held its body"
+            );
+            tokio::time::sleep(Duration::from_millis(5)).await;
+        }
         assert!(
             sched.workers_started().await <= 1,
             "workers_started exceeded max_workers"
         );
+
+        let fresh_result = tokio::time::timeout(Duration::from_secs(2), fresh)
+            .await
+            .expect("new generation decode did not finish while stale work was blocked")
+            .unwrap();
+        assert!(
+            fresh_result.is_ok(),
+            "new generation job failed: {fresh_result:?}"
+        );
+
+        let _ = release_tx.send(());
+        assert!(stale.await.unwrap().is_ok());
+        let queued_result = queued.await.unwrap();
+        assert!(
+            queued_result.is_err(),
+            "queued stale job should be cancelled, got {queued_result:?}"
+        );
+        assert_eq!(
+            queued_runs.load(AtomicOrdering::SeqCst),
+            0,
+            "cancelled queued job must not be decoded"
+        );
     }
 
-    /// Rapid folder switches must not oversubscribe decode past max_workers while
-    /// durable in-flight jobs are still blocked in their bodies.
+    /// Folder switches must not spawn worker tasks past max_workers, and new
+    /// generations must finish even while the previous folder's bodies are blocked.
     #[tokio::test]
-    async fn rapid_generation_bumps_peak_concurrent_bodies_bounded() {
+    async fn rapid_generation_bumps_admit_new_work_without_extra_workers() {
         let max_workers = 2;
         let sched = ImageWorkScheduler::with_limits(max_workers, 1);
         let gen = sched.begin_generation().await;
         let concurrent = Arc::new(AtomicUsize::new(0));
-        let peak = Arc::new(AtomicUsize::new(0));
         let mut release_txs = Vec::new();
         let mut stale_handles = Vec::new();
 
@@ -806,7 +919,6 @@ mod tests {
             let path = format!("/stale-{i}.jpg");
             let sched = sched.clone();
             let concurrent = concurrent.clone();
-            let peak = peak.clone();
             stale_handles.push(tokio::spawn(async move {
                 sched
                     .run(
@@ -818,10 +930,8 @@ mod tests {
                         move || {
                             let gate = gate;
                             let concurrent = concurrent;
-                            let peak = peak;
                             async move {
-                                let now = concurrent.fetch_add(1, AtomicOrdering::SeqCst) + 1;
-                                peak.fetch_max(now, AtomicOrdering::SeqCst);
+                                concurrent.fetch_add(1, AtomicOrdering::SeqCst);
                                 if let Some(rx) = gate.lock().await.take() {
                                     let _ = rx.await;
                                 }
@@ -849,8 +959,6 @@ mod tests {
             let new_gen = sched.begin_generation().await;
             let path = format!("/new-{bump}.jpg");
             let sched = sched.clone();
-            let concurrent = concurrent.clone();
-            let peak = peak.clone();
             interactive_handles.push(tokio::spawn(async move {
                 sched
                     .run(
@@ -858,13 +966,9 @@ mod tests {
                         WorkKey::materialize(path.clone(), 1, 1),
                         new_gen,
                         move || {
-                            let concurrent = concurrent;
-                            let peak = peak;
+                            let path = path.clone();
                             async move {
-                                let now = concurrent.fetch_add(1, AtomicOrdering::SeqCst) + 1;
-                                peak.fetch_max(now, AtomicOrdering::SeqCst);
                                 tokio::time::sleep(Duration::from_millis(5)).await;
-                                concurrent.fetch_sub(1, AtomicOrdering::SeqCst);
                                 Ok(photo(&path))
                             }
                         },
@@ -874,11 +978,15 @@ mod tests {
             tokio::time::sleep(Duration::from_millis(5)).await;
         }
 
-        tokio::time::sleep(Duration::from_millis(30)).await;
-        let observed_peak = peak.load(AtomicOrdering::SeqCst);
+        for handle in interactive_handles {
+            let joined = tokio::time::timeout(Duration::from_secs(2), handle)
+                .await
+                .expect("new generation blocked on stale in-flight jobs");
+            let _ = joined.unwrap();
+        }
         assert!(
-            observed_peak <= max_workers,
-            "peak concurrent job bodies {observed_peak} exceeded max_workers={max_workers}"
+            sched.workers_started().await <= max_workers,
+            "workers_started exceeded max_workers during generation bumps"
         );
 
         for tx in release_txs {
@@ -887,14 +995,6 @@ mod tests {
         for handle in stale_handles {
             let _ = handle.await.unwrap();
         }
-        for handle in interactive_handles {
-            let _ = handle.await.unwrap();
-        }
-        assert!(
-            peak.load(AtomicOrdering::SeqCst) <= max_workers,
-            "final peak {} exceeded max_workers={max_workers}",
-            peak.load(AtomicOrdering::SeqCst)
-        );
     }
 
     /// Detaching slots and spawning overflow workers on each bump was the hang:
@@ -1051,14 +1151,6 @@ mod tests {
         assert_eq!(background_entered.load(AtomicOrdering::SeqCst), 1);
         for handle in interactive {
             let _ = handle.await.unwrap();
-        }
-    }
-}
-
-impl Clone for ImageWorkScheduler {
-    fn clone(&self) -> Self {
-        Self {
-            inner: self.inner.clone(),
         }
     }
 }
