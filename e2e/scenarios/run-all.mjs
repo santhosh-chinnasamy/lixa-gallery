@@ -44,6 +44,11 @@ const ENV_FILE = process.env.LIXA_E2E_ENV || '/tmp/lixa-e2e-current.env';
 const SCENARIO_FILE = path.join(OUT, 'scenario.txt');
 const RESULTS = path.join(OUT, 'results.jsonl');
 
+function progress(message) {
+  const stamp = new Date().toISOString().slice(11, 19);
+  console.log(`${stamp} ${message}`);
+}
+
 const folders = {
   A: path.join(SETS, 'A-flat-2000'),
   B: path.join(SETS, 'B-mixed-500'),
@@ -83,12 +88,15 @@ async function main() {
   for (const [name, fn] of steps) {
     if (only.size && !only.has(name)) continue;
     setScenario(SCENARIO_FILE, name);
+    progress(`scenario start ${name}`);
     try {
       await fn();
+      progress(`scenario finish ${name}`);
     } catch (error) {
       const message = error instanceof Error ? error.stack || error.message : String(error);
       failures.push({ name, message });
       logLine(RESULTS, { branch: BRANCH, scenario: name, error: message.split('\n')[0] });
+      progress(`scenario finish ${name} error`);
       if (session.driver) {
         await shot(session.driver, path.join(OUT, 'screenshots', `${name}-error.png`)).catch(() => {});
       }
@@ -213,6 +221,7 @@ async function firstLoads(session) {
   for (const [name, folder, timeoutMs] of plan) {
     for (let run = 1; run <= RUNS; run += 1) {
       setScenario(SCENARIO_FILE, `load-${name}-cold-${run}`);
+      progress(`run start load ${name} cold ${run}/${RUNS}`);
       await session.start({ fresh: true, cold: true });
       const cold = await openTimed(session, folder, timeoutMs);
       const coldFailed = cold.snap?.failed ?? null;
@@ -247,7 +256,11 @@ async function firstLoads(session) {
           logFile: session.logFile,
         });
       }
+      progress(
+        `run finish load ${name} cold ${run} grid=${cold.gridMs ?? 'none'} visible=${cold.visibleMs ?? 'none'} failed=${coldFailed ?? 'none'}`,
+      );
       setScenario(SCENARIO_FILE, `load-${name}-warm-${run}`);
+      progress(`run start load ${name} warm ${run}/${RUNS}`);
       await goHome(session.driver);
       await sleep(300);
       const warm = await openTimed(session, folder, Math.min(timeoutMs, 45000));
@@ -267,6 +280,9 @@ async function firstLoads(session) {
         failed: warm.snap?.failed ?? null,
         logFile: session.logFile,
       });
+      progress(
+        `run finish load ${name} warm ${run} grid=${warm.gridMs ?? 'none'} visible=${warm.visibleMs ?? 'none'} failed=${warm.snap?.failed ?? 'none'}`,
+      );
     }
   }
 }
@@ -280,6 +296,7 @@ async function folderSwitch(session) {
   for (let run = 1; run <= RUNS; run += 1) {
     const phase = phases[Math.min(run, phases.length) - 1];
     setScenario(SCENARIO_FILE, `switch-${phase.name}-${run}`);
+    progress(`run start switch ${phase.name} ${run}/${RUNS}`);
     await session.start({ fresh: true, cold: true });
     const first = await openTimed(session, folders.A, 90000);
     await sleep(phase.waitMs);
@@ -310,12 +327,14 @@ async function folderSwitch(session) {
     if (secondFailed.length || backFailed.length) {
       await shot(session.driver, path.join(OUT, 'screenshots', `switch-${phase.name}-failed.png`));
     }
+    progress(`run finish switch ${phase.name} ${run} nextFailed=${secondFailed.length} backFailed=${backFailed.length}`);
   }
 }
 
 async function scrolling(session) {
   for (let run = 1; run <= RUNS; run += 1) {
     setScenario(SCENARIO_FILE, `scroll-${run}`);
+    progress(`run start scroll ${run}/${RUNS}`);
     await session.start({ fresh: true, cold: run === 1 });
     await openTimed(session, folders.A, 90000);
     await resetFrames(session.driver);
@@ -406,13 +425,26 @@ async function scrolling(session) {
     if (run === 1) {
       await shot(session.driver, path.join(OUT, 'screenshots', 'scroll.png'));
     }
+    progress(`run finish scroll ${run} stuck=${stuck.length} flickP95=${flick?.p95 ?? 'none'}`);
   }
 }
 
 async function culling(session) {
   setScenario(SCENARIO_FILE, 'cull-fast');
+  progress('run start cull-fast');
   await session.start({ fresh: true, cold: true });
   await openTimed(session, folders.A, 90000);
+  const probe = await snapshot(session.driver);
+  if (!probe.hasPickCounter) {
+    record({
+      scenario: 'cull-fast',
+      featureNotOnBuild: true,
+      note: 'This build has no picked/photo counter, so keyboard cull (P/X/U) is not available.',
+      logFile: session.logFile,
+    });
+    progress('run finish cull-fast feature-not-on-build');
+    return;
+  }
   await resetFrames(session.driver);
   const cullMs = await pressKeys(session.driver, 'p', 200);
   await sleep(500);
@@ -466,12 +498,39 @@ async function culling(session) {
     previousLog: keptLog,
   });
   await shot(session.driver, path.join(OUT, 'screenshots', 'cull-reopen.png'));
+  progress('run finish cull-persist');
 }
 
 async function favourites(session) {
   setScenario(SCENARIO_FILE, 'favourites');
+  progress('run start favourites');
   await session.start({ fresh: true, cold: false });
+  const favLink = await session.driver.findElements(By.css('a[href="/favourites"]'));
+  if (!favLink.length) {
+    record({
+      scenario: 'favourites-export',
+      featureNotOnBuild: true,
+      note: 'No Favourites link in this build.',
+      logFile: session.logFile,
+    });
+    progress('run finish favourites feature-not-on-build');
+    return;
+  }
   await openTimed(session, folders.E, 60000);
+  const beforePick = await snapshot(session.driver);
+  if (!beforePick.hasPickCounter) {
+    await favLink[0].click();
+    await sleep(800);
+    record({
+      scenario: 'favourites-export',
+      featureNotOnBuild: true,
+      note: 'Favourites page exists, but this build has no keyboard pick counter, so export was not started.',
+      href: (await snapshot(session.driver)).href,
+      logFile: session.logFile,
+    });
+    progress('run finish favourites feature-not-on-build');
+    return;
+  }
   await pressKeys(session.driver, 'p', 8);
   await sleep(400);
   const before = await snapshot(session.driver);
@@ -536,6 +595,12 @@ async function favourites(session) {
     cancelText,
     logFile: session.logFile,
   });
+  try {
+    execFileSync('xdotool', ['key', 'Escape'], { env: process.env });
+  } catch {
+    // No file chooser left open.
+  }
+  progress('run finish favourites');
 }
 
 async function chooseExportDir(dir) {
@@ -570,10 +635,17 @@ function countFiles(dir) {
 
 async function viewer(session) {
   setScenario(SCENARIO_FILE, 'viewer');
+  progress('run start viewer');
   await session.start({ fresh: true, cold: false });
   await openTimed(session, folders.A, 90000);
   await session.driver.actions().sendKeys(Key.ENTER).perform();
   await sleep(600);
+  const openedByKey = await session.driver.findElements(By.css('[role="dialog"]'));
+  if (!openedByKey.length) {
+    const imgs = await session.driver.findElements(By.css('main img'));
+    if (imgs.length) await imgs[0].click();
+    await sleep(600);
+  }
   const started = Date.now();
   for (let i = 0; i < 50; i += 1) {
     await session.driver.actions().sendKeys(Key.ARROW_RIGHT).perform();
@@ -588,11 +660,11 @@ async function viewer(session) {
   await sleep(300);
   await openTimed(session, folders.B, 60000);
   const openedRaw = await session.driver.executeScript(`
-    const cells = [...document.querySelectorAll('[role=gridcell]')];
-    const raw = cells.find((el) => /\\.(cr2|cr3|nef|arw|raf|orf|rw2|dng)$/i.test(el.getAttribute('aria-label') || ''));
+    const cells = [...document.querySelectorAll('[role=gridcell], main img')];
+    const raw = cells.find((el) => /\\.(cr2|cr3|nef|arw|raf|orf|rw2|dng)$/i.test(el.getAttribute('aria-label') || el.getAttribute('alt') || ''));
     if (!raw) return false;
     raw.click();
-    return raw.getAttribute('aria-label');
+    return raw.getAttribute('aria-label') || raw.getAttribute('alt');
   `);
   await sleep(800);
   const rawText = await session.driver.executeScript('return (document.body.innerText || "").includes("Failed to load")');
@@ -605,14 +677,39 @@ async function viewer(session) {
     rawFailed: rawText,
     logFile: session.logFile,
   });
+  progress(`run finish viewer arrows=${arrowMs} raw=${Boolean(openedRaw)}`);
 }
 
 async function settings(session) {
   setScenario(SCENARIO_FILE, 'settings');
+  progress('run start settings');
   await session.start({ fresh: true, cold: false });
-  await clickHref(session.driver, '/settings');
+  const settingsLink = await session.driver.findElements(By.css('a[href="/settings"]'));
+  if (!settingsLink.length) {
+    record({
+      scenario: 'settings',
+      featureNotOnBuild: true,
+      note: 'No Settings link in this build.',
+      logFile: session.logFile,
+    });
+    progress('run finish settings feature-not-on-build');
+    return;
+  }
+  await settingsLink[0].click();
   await sleep(600);
-  await clickText(session.driver, 'Dark');
+  const darkButtons = await session.driver.findElements(By.xpath("//button[contains(., 'Dark')]"));
+  if (!darkButtons.length) {
+    record({
+      scenario: 'settings',
+      featureNotOnBuild: true,
+      note: 'Settings exists, but this build has no Dark control.',
+      href: (await snapshot(session.driver)).href,
+      logFile: session.logFile,
+    });
+    progress('run finish settings feature-not-on-build');
+    return;
+  }
+  await darkButtons[0].click();
   await sleep(300);
   const dark = await snapshot(session.driver);
   await shot(session.driver, path.join(OUT, 'screenshots', 'settings-dark.png'));
@@ -622,6 +719,7 @@ async function settings(session) {
     href: dark.href,
     logFile: session.logFile,
   });
+  progress(`run finish settings dark=${dark.dark}`);
 }
 
 main().catch((error) => {

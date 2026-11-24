@@ -7,15 +7,24 @@ import { Builder, By, Key, until } from 'selenium-webdriver';
 const exec = promisify(execFile);
 
 export const SNAPSHOT_JS = `return (() => {
-  const cells = [...document.querySelectorAll('[role="gridcell"]')];
-  const imgs = cells.flatMap((cell) => [...cell.querySelectorAll('img')]);
+  const gridCells = [...document.querySelectorAll('[role="gridcell"]')];
+  const main = document.querySelector('main');
+  const mainImgs = main ? [...main.querySelectorAll('img')] : [];
+  const cells = gridCells.length ? gridCells : mainImgs;
+  const imgs = gridCells.length
+    ? gridCells.flatMap((cell) => [...cell.querySelectorAll('img')])
+    : mainImgs;
   const loaded = imgs.filter((img) => img.complete && img.naturalWidth > 0).length;
-  const failed = cells.filter((el) => (el.innerText || '').includes('Failed to load')).length;
-  const loading = cells.filter((el) => (el.innerText || '').includes('Loading')).length;
+  const failNodes = (gridCells.length ? gridCells : (main ? [...main.querySelectorAll('div')] : []))
+    .filter((el) => {
+      return (el.innerText || '').trim() === 'Failed to load';
+    });
+  const failed = failNodes.length;
+  const loading = (gridCells.length ? gridCells : (main ? [...main.querySelectorAll('div')] : []))
+    .filter((el) => (el.innerText || '').trim() === 'Loading...').length;
   const text = document.body ? document.body.innerText : '';
   const countMatch = text.match(/(\\d+)\\s+picked\\s*\\/\\s*(\\d+)/);
-  const failedNames = cells
-    .filter((el) => (el.innerText || '').includes('Failed to load'))
+  const failedNames = failNodes
     .map((el) => el.getAttribute('aria-label') || '')
     .filter(Boolean);
   return {
@@ -26,7 +35,8 @@ export const SNAPSHOT_JS = `return (() => {
     failedNames,
     photoCount: countMatch ? Number(countMatch[2]) : null,
     picked: countMatch ? Number(countMatch[1]) : null,
-    emptyFolder: text.includes('No photos in this folder'),
+    hasPickCounter: Boolean(countMatch),
+    emptyFolder: text.includes('No photos in this folder') || text.includes("doesn't appear to contain any supported files"),
     ready: text.includes('Ready to Cull'),
     href: location.href,
     dark: document.documentElement.classList.contains('dark'),
@@ -302,7 +312,7 @@ export async function waitForGrid(driver, timeoutMs) {
       continue;
     }
     const elapsed = Date.now() - start;
-    if (gridMs === null && ((last.photoCount && last.photoCount > 0) || last.emptyFolder)) gridMs = elapsed;
+    if (gridMs === null && ((last.photoCount && last.photoCount > 0) || last.emptyFolder || last.cells > 0)) gridMs = elapsed;
     if (firstThumbMs === null && last.loaded > 0) firstThumbMs = elapsed;
     const settled =
       last.emptyFolder ||

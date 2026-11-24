@@ -2,7 +2,8 @@
 """Download real CC/CC0/public-domain photos and build e2e folder sets.
 
 Idempotent: files land in a cache keyed by checksum. Re-runs skip complete
-objects. Details go to the cache log. Stdout is a one-line summary only.
+objects. Details go to the cache log. Stdout is timestamped progress
+(counts and byte totals only) plus a final SUMMARY line.
 """
 
 from __future__ import annotations
@@ -56,9 +57,14 @@ LICENSE_BAD = re.compile(
 
 
 def log(cache: Path, message: str) -> None:
-    line = f"{time.strftime('%H:%M:%S')} {message}\n"
+    line = f"{time.strftime('%H:%M:%S')} {message}"
+    cache.mkdir(parents=True, exist_ok=True)
     with (cache / "fetch.log").open("a", encoding="utf-8") as handle:
-        handle.write(line)
+        handle.write(line + "\n")
+    # Terminal progress stays free of URLs and file lists.
+    if "http://" in message or "https://" in message or "File:" in message:
+        return
+    print(line, flush=True)
 
 
 def request(url: str, data: bytes | None = None, timeout: int = 90) -> bytes:
@@ -157,18 +163,53 @@ def download_file(url: str, dest: Path, expected_sha1: str | None) -> int:
             return dest.stat().st_size
     dest.parent.mkdir(parents=True, exist_ok=True)
     part = dest.with_suffix(dest.suffix + ".part")
-    req = urllib.request.Request(url, headers={"User-Agent": UA})
-    with urllib.request.urlopen(req, timeout=240) as resp, part.open("wb") as handle:
-        while True:
-            chunk = resp.read(1024 * 1024)
-            if not chunk:
-                break
-            handle.write(chunk)
-    if expected_sha1 is not None:
-        got = sha1_file(part)
-        if got != expected_sha1:
+    last_error: Exception | None = None
+    for attempt in range(6):
+        try:
+            req = urllib.request.Request(url, headers={"User-Agent": UA})
+            with urllib.request.urlopen(req, timeout=240) as resp, part.open("wb") as handle:
+                got = 0
+                reported = 0
+                while True:
+                    chunk = resp.read(1024 * 1024)
+                    if not chunk:
+                        break
+                    handle.write(chunk)
+                    got += len(chunk)
+                    if got - reported >= 8_000_000:
+                        reported = got
+                        print(
+                            f"{time.strftime('%H:%M:%S')} downloading {got // 1_000_000}MB",
+                            flush=True,
+                        )
+            break
+        except urllib.error.HTTPError as err:
+            last_error = err
             part.unlink(missing_ok=True)
-            raise RuntimeError(f"checksum mismatch for {url}")
+            if err.code == 429:
+                wait = 20 + attempt * 15
+                print(
+                    f"{time.strftime('%H:%M:%S')} rate limited, sleeping {wait}s",
+                    flush=True,
+                )
+                time.sleep(wait)
+                continue
+            if err.code not in {500, 502, 503, 504}:
+                raise
+            time.sleep(2 + attempt * 3)
+        except Exception as err:  # noqa: BLE001
+            last_error = err
+            part.unlink(missing_ok=True)
+            time.sleep(2 + attempt * 2)
+    else:
+        raise RuntimeError(f"download failed: {last_error}")
+    if not part.exists():
+        raise RuntimeError(f"download failed: {last_error}")
+    if expected_sha1 is not None:
+        got_sha = sha1_file(part)
+        if got_sha != expected_sha1:
+            part.unlink(missing_ok=True)
+            raise RuntimeError("checksum mismatch")
     os.replace(part, dest)
     return dest.stat().st_size
 
@@ -551,7 +592,7 @@ def cmd_fetch(cache: Path, sets: Path) -> None:
         candidates = collect_jpeg_candidates(cache, JPEG_TARGET + 40)
         todo = [item for item in candidates if item["url"] not in rows]
         log(cache, f"jpeg download queue={len(todo)}")
-        with ThreadPoolExecutor(max_workers=4) as pool:
+        with ThreadPoolExecutor(max_workers=2) as pool:
             futures = [pool.submit(cache_jpeg, cache, item) for item in todo]
             for future in as_completed(futures):
                 row = future.result()
@@ -559,9 +600,8 @@ def cmd_fetch(cache: Path, sets: Path) -> None:
                     continue
                 rows[row["source_url"]] = row
                 have_jpeg += 1
-                if have_jpeg % 10 == 0:
-                    save_manifest(manifest_path, rows)
-                    log(cache, f"jpeg cached={have_jpeg}")
+                save_manifest(manifest_path, rows)
+                log(cache, f"jpeg cached={have_jpeg} bytes={row['bytes']}")
                 if have_jpeg >= JPEG_TARGET:
                     break
         save_manifest(manifest_path, rows)
@@ -578,9 +618,8 @@ def cmd_fetch(cache: Path, sets: Path) -> None:
                     continue
                 rows[row["source_url"]] = row
                 have_raw += 1
-                if have_raw % 5 == 0:
-                    save_manifest(manifest_path, rows)
-                    log(cache, f"raw cached={have_raw}")
+                save_manifest(manifest_path, rows)
+                log(cache, f"raw cached={have_raw} ext={row['ext']} bytes={row['bytes']}")
                 if have_raw >= RAW_TARGET:
                     break
         save_manifest(manifest_path, rows)
