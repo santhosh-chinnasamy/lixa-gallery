@@ -5,7 +5,7 @@
   import ControlBar from './ControlBar.svelte';
   import type { PhotoMetadata } from '../types/photo';
   import type { CullAction } from '../lib/cull';
-  import { dateSortKey } from '$lib/photoView';
+  import { projectPhotoOrder, type AppliedSort } from '$lib/photoOrder';
   import { createVirtualizer } from '@tanstack/svelte-virtual';
   import { immediateSubfolders } from '$lib/folderEmptyState';
   import { tick, untrack } from 'svelte';
@@ -14,6 +14,7 @@
     searchQuery,
     sortBy,
     sortOrder,
+    photosRevision,
     gridSize,
     folderTree,
     currentFolder,
@@ -67,14 +68,22 @@
 
   let subfolders = $derived(immediateSubfolders($folderTree, $currentFolder));
 
+  // Last displayed order. Thumbnail patches keep it so the grid does not
+  // localeCompare the whole folder on every batch.
+  let orderedPhotos: PhotoMetadata[] | null = null;
+  let appliedSort: AppliedSort | null = null;
+
   let processedPhotos = $derived.by(() => {
-    let result = [...photoList];
+    // In-place thumbnail patches keep the photos array identity. This counter
+    // is what makes the derived re-read those slots.
+    void $photosRevision;
+    let incoming = photoList;
 
     // Favourites already passes a curated list. Library cull/search must not
     // re-filter it (empty cullFlags + cull_filter=picked blanks the grid).
     if (!fromFavourites) {
       if ($cullFilter !== 'all') {
-        result = result.filter((photo) => {
+        incoming = incoming.filter((photo) => {
           const flag = $cullFlags.get(photo.path) ?? 'unflagged';
           return flag === $cullFilter;
         });
@@ -82,29 +91,24 @@
 
       if ($searchQuery.trim()) {
         const q = $searchQuery.toLowerCase();
-        result = result.filter((p) =>
+        incoming = incoming.filter((p) =>
           p.metadata.name.toLowerCase().includes(q),
         );
       }
     }
 
-    result.sort((a, b) => {
-      let comparison = 0;
-      switch ($sortBy) {
-        case 'name':
-          comparison = a.metadata.name.localeCompare(b.metadata.name);
-          break;
-        case 'date':
-          comparison = dateSortKey(a) - dateSortKey(b);
-          break;
-        case 'size':
-          comparison = a.metadata.size - b.metadata.size;
-          break;
-      }
-      return $sortOrder === 'asc' ? comparison : -comparison;
-    });
-
-    return result;
+    const sortByNow = $sortBy;
+    const sortOrderNow = $sortOrder;
+    const next = projectPhotoOrder(
+      orderedPhotos,
+      incoming,
+      sortByNow,
+      sortOrderNow,
+      appliedSort,
+    );
+    orderedPhotos = next;
+    appliedSort = { sortBy: sortByNow, sortOrder: sortOrderNow };
+    return next;
   });
 
   const handleImageClick = (photo: PhotoMetadata) => {
