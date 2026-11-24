@@ -165,9 +165,10 @@ impl ImageProcessorTrait for RayonImageProcessor {
     async fn read_exif(&self, file_path: &Path) -> Result<Option<ExifInfo>> {
         let path = file_path.to_path_buf();
         let pool = self.pool.clone();
-        let info = tokio::task::spawn_blocking(move || pool.install(|| exif_info::from_path(&path)))
-            .await
-            .map_err(|err| GalleryError::Unknown(err.to_string()))?;
+        let info =
+            tokio::task::spawn_blocking(move || pool.install(|| exif_info::from_path(&path)))
+                .await
+                .map_err(|err| GalleryError::Unknown(err.to_string()))?;
         Ok(Some(info))
     }
 }
