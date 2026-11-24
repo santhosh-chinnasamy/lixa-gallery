@@ -93,8 +93,8 @@ jobs:
         working-directory: src-tauri
         run: cargo test --workspace
 
-      # Installer bundling stays on pull requests into main. Release
-      # workflows are unchanged and still run only from main.
+      # Pull-request bundling stays on pull requests into main.
+      # Develop preview installers are published by preview.yml.
       - name: build app
         if: ${{ github.base_ref == 'main' }}
         run: yarn tauri build
