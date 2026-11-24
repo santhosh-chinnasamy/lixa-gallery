@@ -33,6 +33,7 @@ def main() -> None:
         print("no samples.csv")
         return
     fig, axes = plt.subplots(2, 1, figsize=(12, 7), sharex=False)
+    cpu_title = "CPU while the gallery was open"
     for path in csvs:
         rows = load(path)
         if not rows:
@@ -48,15 +49,17 @@ def main() -> None:
                 f(row, "core0_pct") + f(row, "core1_pct") + f(row, "core2_pct") + f(row, "core3_pct")
                 for row in rows
             ]
+            cpu_title = "Machine CPU while the gallery was open (sum of 4 cores)"
         else:
             cpu = proc_cpu
+            cpu_title = "App + WebKit CPU while the gallery was open (100 = one core)"
         thumb = [f(row, "thumb_bytes") / (1024 * 1024) for row in rows]
         axes[0].plot(t, cpu, label=branch, linewidth=1.0)
         axes[1].plot(t, thumb, label=branch, linewidth=1.0)
         peak_rss = max(rss) if rss else 0
         peak_cpu = max(cpu) if cpu else 0
         print(f"{branch} samples={len(rows)} peak_rss_mb={peak_rss:.0f} peak_cpu_pct={peak_cpu:.0f}")
-    axes[0].set_title("Machine CPU while the gallery was open (sum of 4 cores)")
+    axes[0].set_title(cpu_title)
     axes[0].set_ylabel("CPU (percent, 100 = one core)")
     axes[0].set_xlabel("Time since sampler start (s)")
     axes[0].legend()
