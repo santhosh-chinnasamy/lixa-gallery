@@ -11,16 +11,14 @@
 //! serve bytes. Callers gate UI emits with [`ImageWorkScheduler::is_current`].
 
 use crate::models::{GalleryError, PhotoMetadata, Result};
-use crate::work::{
-    recommended_background_slots, recommended_pool_size, WorkKey, WorkPriority,
-};
+use crate::work::{recommended_background_slots, recommended_pool_size, WorkKey, WorkPriority};
 use std::collections::{HashMap, VecDeque};
 use std::future::Future;
 use std::pin::Pin;
 use std::sync::atomic::{AtomicU64, Ordering};
 use std::sync::Arc;
 use std::time::{Duration, Instant};
-use tokio::sync::{Mutex, Notify, oneshot};
+use tokio::sync::{oneshot, Mutex, Notify};
 
 type JobFuture = Pin<Box<dyn Future<Output = Result<PhotoMetadata>> + Send>>;
 type Reply = oneshot::Sender<std::result::Result<PhotoMetadata, String>>;
@@ -249,11 +247,15 @@ async fn worker_loop(inner: Arc<Inner>) {
         let job = {
             let mut state = inner.state.lock().await;
             loop {
-                let can_background = state.running_background < inner.max_background
-                    && state.interactive.is_empty();
-                let next = if !state.interactive.is_empty()
-                    && state.running < inner.max_workers
-                {
+                // A free slot is not a background slot. Between protocol
+                // requests the interactive queue is often empty while visible
+                // decodes are still running; starting background then left
+                // only the remaining workers on the grid.
+                let interactive_running = state.running.saturating_sub(state.running_background);
+                let visible_idle = state.interactive.is_empty() && interactive_running == 0;
+                let can_background =
+                    state.running_background < inner.max_background && visible_idle;
+                let next = if !state.interactive.is_empty() && state.running < inner.max_workers {
                     state.interactive.pop_front()
                 } else if can_background
                     && !state.background.is_empty()
@@ -948,6 +950,106 @@ mod tests {
             let _ = tx.send(());
         }
         for handle in handles {
+            let _ = handle.await.unwrap();
+        }
+    }
+
+    /// Visible decodes use every worker. Background does not take a free slot
+    /// while any interactive job is still running, and a freed slot goes to
+    /// queued visible work first.
+    #[tokio::test]
+    async fn visible_work_is_admitted_ahead_of_background() {
+        let sched = ImageWorkScheduler::with_limits(2, 1);
+        let gen = sched.begin_generation().await;
+        let interactive_entered = Arc::new(AtomicUsize::new(0));
+        let mut releases = Vec::new();
+        let mut interactive = Vec::new();
+
+        for i in 0..2 {
+            let (release_tx, release_rx) = oneshot::channel::<()>();
+            releases.push(release_tx);
+            let gate = Arc::new(Mutex::new(Some(release_rx)));
+            let sched = sched.clone();
+            let interactive_entered = interactive_entered.clone();
+            let path = format!("/visible-{i}.jpg");
+            interactive.push(tokio::spawn(async move {
+                sched
+                    .run(
+                        WorkPriority::Interactive,
+                        WorkKey::materialize(path.clone(), 1, 1),
+                        gen,
+                        move || {
+                            let gate = gate;
+                            let interactive_entered = interactive_entered;
+                            async move {
+                                interactive_entered.fetch_add(1, AtomicOrdering::SeqCst);
+                                if let Some(rx) = gate.lock().await.take() {
+                                    let _ = rx.await;
+                                }
+                                Ok(photo(&path))
+                            }
+                        },
+                    )
+                    .await
+            }));
+        }
+
+        let fill_deadline = Instant::now() + Duration::from_secs(2);
+        while interactive_entered.load(AtomicOrdering::SeqCst) < 2 {
+            assert!(
+                Instant::now() < fill_deadline,
+                "visible jobs did not fill both workers"
+            );
+            tokio::time::sleep(Duration::from_millis(5)).await;
+        }
+
+        let background_entered = Arc::new(AtomicUsize::new(0));
+        let background = {
+            let sched = sched.clone();
+            let background_entered = background_entered.clone();
+            tokio::spawn(async move {
+                sched
+                    .run(
+                        WorkPriority::Background,
+                        WorkKey::materialize("/bg.jpg", 1, 1),
+                        gen,
+                        move || {
+                            let background_entered = background_entered;
+                            async move {
+                                background_entered.fetch_add(1, AtomicOrdering::SeqCst);
+                                Ok(photo("/bg.jpg"))
+                            }
+                        },
+                    )
+                    .await
+            })
+        };
+
+        tokio::time::sleep(Duration::from_millis(40)).await;
+        assert_eq!(
+            background_entered.load(AtomicOrdering::SeqCst),
+            0,
+            "background took a worker while visible decodes were running"
+        );
+
+        // One visible job finishes and one is still running. The freed slot
+        // must not start background.
+        let _ = releases.remove(0).send(());
+        tokio::time::sleep(Duration::from_millis(40)).await;
+        assert_eq!(
+            background_entered.load(AtomicOrdering::SeqCst),
+            0,
+            "background started while a visible job was still in flight"
+        );
+
+        let _ = releases.remove(0).send(());
+        let bg_result = tokio::time::timeout(Duration::from_secs(2), background)
+            .await
+            .expect("background was not admitted after visible work went idle")
+            .unwrap();
+        assert!(bg_result.is_ok());
+        assert_eq!(background_entered.load(AtomicOrdering::SeqCst), 1);
+        for handle in interactive {
             let _ = handle.await.unwrap();
         }
     }
