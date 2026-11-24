@@ -31,11 +31,4 @@ export function formatLabel(photo: PhotoMetadata): string {
   return side ? `${own} + ${side}` : own;
 }
 
-/** Capture time when the file has it, otherwise the file's own timestamp. */
-export function dateSortKey(photo: PhotoMetadata): number {
-  const captured = photo.exif?.captured_at;
-  if (captured != null) {
-    return captured * 1_000_000 + (photo.exif?.captured_subsec ?? 0);
-  }
-  return (photo.metadata.created || photo.metadata.modified) * 1_000_000;
-}
+export { dateSortKey } from './photoOrder';
