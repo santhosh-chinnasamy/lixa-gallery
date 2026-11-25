@@ -109,8 +109,7 @@ pub fn run() {
                     };
 
                     let request = infra::thumbnail_cache::parse_thumbnail_request(tail);
-                    let original_path =
-                        std::path::PathBuf::from(decode_source_path(request.path));
+                    let original_path = std::path::PathBuf::from(decode_source_path(request.path));
 
                     let state = app_handle.state::<AppState>();
                     let thumb_dir = state.thumbnail_path.clone();
@@ -200,6 +199,8 @@ pub fn run() {
             commands::open_logs_dir,
             commands::get_log_dir,
             commands::ensure_thumbnail_path,
+            commands::preview_is_cached,
+            commands::warm_preview,
             commands::get_thumbnail_bytes,
             commands::read_image_bytes
         ])
@@ -295,15 +296,11 @@ mod protocol_tests {
     #[test]
     fn uri_tail_strips_custom_and_http_origins() {
         assert_eq!(
-            thumbnail_uri_tail(
-                "lixa-thumbnail://localhost/thumb?path=%2Fhome%2Fa.jpg&v=1_2"
-            ),
+            thumbnail_uri_tail("lixa-thumbnail://localhost/thumb?path=%2Fhome%2Fa.jpg&v=1_2"),
             Some("thumb?path=%2Fhome%2Fa.jpg&v=1_2")
         );
         assert_eq!(
-            thumbnail_uri_tail(
-                "http://lixa-thumbnail.localhost/thumb?path=%2Ftmp%2Fb.jpg&v=1_2"
-            ),
+            thumbnail_uri_tail("http://lixa-thumbnail.localhost/thumb?path=%2Ftmp%2Fb.jpg&v=1_2"),
             Some("thumb?path=%2Ftmp%2Fb.jpg&v=1_2")
         );
         assert_eq!(thumbnail_uri_tail("https://evil.example/x"), None);

@@ -24,6 +24,22 @@ export async function resolveViewerSrc(
   }
 }
 
+/** Is the viewer-sized WebP already on disk? Cheap stat; false on any error. */
+export async function previewIsCached(
+  photo: Pick<PhotoMetadata, 'path'>,
+): Promise<boolean> {
+  try {
+    return await invoke<boolean>('preview_is_cached', { path: photo.path });
+  } catch {
+    return false;
+  }
+}
+
+/** Warm the viewer preview in the background for a photo likely to be opened. */
+export function warmViewerPreview(photo: Pick<PhotoMetadata, 'path'>): void {
+  void invoke('warm_preview', { path: photo.path }).catch(() => {});
+}
+
 export function formatLabel(photo: PhotoMetadata): string {
   const own = photo.metadata.name.split('.').pop() || 'Unknown';
   if (!photo.sidecar_path) return own;
