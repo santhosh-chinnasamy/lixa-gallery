@@ -546,12 +546,20 @@
     let cancelled = false;
     let revokeViewer = () => {};
     let swapTimer: ReturnType<typeof setTimeout> | undefined;
+    // Monotonic display stage so a late preview apply cannot overwrite a
+    // loaded original (preview apply is fire-and-forget relative to decode).
+    const PREVIEW = 0;
+    const FULL = 1;
+    let stage = PREVIEW;
 
     // Blur placeholder: same-origin /@fs (or protocol). Never invoke→blob.
     blurSrc = gridThumbUrl(photo);
 
-    const applySafe = (safe: { src: string; revoke: () => void }) => {
-      if (cancelled) {
+    const applySafe = (
+      safe: { src: string; revoke: () => void },
+      forStage: number,
+    ) => {
+      if (cancelled || forStage < stage) {
         safe.revoke();
         return;
       }
@@ -564,9 +572,9 @@
       });
     };
 
-    const applyViewer = async (raw: string | null) => {
+    const applyViewer = async (raw: string | null, forStage: number) => {
       if (!raw) {
-        if (!cancelled) {
+        if (!cancelled && forStage >= stage) {
           viewerSrc = '';
           imageError = true;
           probeWarn('modal.viewerSrc.fail', { name: photo.metadata.name });
@@ -574,9 +582,9 @@
         return;
       }
       try {
-        applySafe(await webviewSafeImageSrc(raw));
+        applySafe(await webviewSafeImageSrc(raw), forStage);
       } catch (error) {
-        if (cancelled) return;
+        if (cancelled || forStage < stage) return;
         imageError = true;
         probeWarn('modal.viewerSrc.fail', {
           name: photo.metadata.name,
@@ -587,16 +595,19 @@
 
     // Swap to the original only after it decoded, so moving from the preview
     // never shows a blank frame.
-    const applyOriginalAfterDecode = async (raw: string | null) => {
+    const applyOriginalAfterDecode = async (
+      raw: string | null,
+      forStage: number,
+    ) => {
       if (!raw) return;
       try {
         const safe = await webviewSafeImageSrc(raw);
-        if (cancelled) {
+        if (cancelled || forStage < stage) {
           safe.revoke();
           return;
         }
         const probeImg = new Image();
-        probeImg.onload = () => applySafe(safe);
+        probeImg.onload = () => applySafe(safe, forStage);
         probeImg.onerror = () => safe.revoke();
         probeImg.src = safe.src;
       } catch {
@@ -605,19 +616,20 @@
     };
 
     const showOriginal = () => {
+      stage = FULL;
       const ready = immediateViewerSrc(photo);
       if (ready) {
-        void applyViewer(ready);
+        void applyViewer(ready, FULL);
       } else {
         viewerSrc = '';
         void resolveViewerSrc(photo).then((src) => {
-          if (!cancelled) void applyViewer(src);
+          if (!cancelled) void applyViewer(src, FULL);
         });
       }
     };
 
     if (prefersDecodedPreview(photo)) {
-      void previewIsCached(photo).then((cached) => {
+      void previewIsCached(photo).then(async (cached) => {
         if (cancelled) return;
         if (!cached) {
           // Cold preview: no reason to wait for one. Paint the original and
@@ -628,10 +640,14 @@
         }
         // Warm preview: paint the small WebP now, then bring in the original
         // once the frame is settled. Rapid arrow browsing stays on previews.
-        void applyViewer(previewUrl(photo));
+        // Await apply so the settle timer starts after the preview is on
+        // screen, not after the cache check alone.
+        await applyViewer(previewUrl(photo), PREVIEW);
+        if (cancelled) return;
         swapTimer = setTimeout(() => {
-          if (!cancelled)
-            void applyOriginalAfterDecode(immediateViewerSrc(photo));
+          if (cancelled) return;
+          stage = FULL;
+          void applyOriginalAfterDecode(immediateViewerSrc(photo), FULL);
         }, FULL_RES_SETTLE_MS);
       });
     } else {
