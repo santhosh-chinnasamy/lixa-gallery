@@ -18,11 +18,7 @@ impl EventHub for TauriEventHub {
         Ok(())
     }
 
-    fn emit_photos_updated(
-        &self,
-        generation: u64,
-        photos: &[PhotoMetadata],
-    ) -> anyhow::Result<()> {
+    fn emit_photos_updated(&self, generation: u64, photos: &[PhotoMetadata]) -> anyhow::Result<()> {
         if photos.is_empty() {
             return Ok(());
         }

@@ -5,9 +5,5 @@ pub trait EventHub: Send + Sync {
 
     /// Batched photo rows after materialize / EXIF so the UI can merge by path.
     /// `generation` is the folder session that produced the patch.
-    fn emit_photos_updated(
-        &self,
-        generation: u64,
-        photos: &[PhotoMetadata],
-    ) -> anyhow::Result<()>;
+    fn emit_photos_updated(&self, generation: u64, photos: &[PhotoMetadata]) -> anyhow::Result<()>;
 }
