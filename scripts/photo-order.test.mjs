@@ -1,7 +1,7 @@
 import assert from 'node:assert/strict';
 import test from 'node:test';
 import { patchByPath, rebuildPathIndex } from '../src/lib/photoListPatch.ts';
-import { projectPhotoOrder } from '../src/lib/photoOrder.ts';
+import { projectPhotoOrder, remapOrder } from '../src/lib/photoOrder.ts';
 
 function photo(path, name, extra = {}) {
   return {
@@ -160,4 +160,35 @@ test('filling in a capture time reorders a date sort and nothing else', () => {
     byName.map((item) => item.path),
     ['/a.jpg', '/b.jpg'],
   );
+});
+
+test('remapping after a thumbnail patch stays in display order', () => {
+  // The backend delivers rows in folder order; the grid displays them sorted.
+  const incoming = [
+    photo('/b.jpg', 'b'),
+    photo('/a.jpg', 'a'),
+    photo('/c.jpg', 'c'),
+  ];
+  const displayed = projectPhotoOrder(null, incoming, 'name', 'asc', null);
+  const incomingIndex = new Map(incoming.map((item, at) => [item.path, at]));
+
+  // Patch the 'a' row in place, exactly like mergePhotoUpdates does.
+  const aAt = incomingIndex.get('/a.jpg');
+  incoming[aAt] = { ...incoming[aAt], thumbnail_path: '/cache/a.webp' };
+
+  const remapped = remapOrder(displayed, incoming, incomingIndex);
+  assert.notEqual(remapped, displayed);
+  assert.deepEqual(
+    remapped.map((item) => item.path),
+    ['/a.jpg', '/b.jpg', '/c.jpg'],
+  );
+  assert.equal(remapped[0].thumbnail_path, '/cache/a.webp');
+  assert.equal(remapped[1], displayed[1], 'untouched rows keep their objects');
+});
+
+test('remapping returns the same array when no row changed', () => {
+  const incoming = [photo('/a.jpg', 'a'), photo('/b.jpg', 'b')];
+  const displayed = projectPhotoOrder(null, incoming, 'name', 'asc', null);
+  const incomingIndex = new Map(incoming.map((item, at) => [item.path, at]));
+  assert.equal(remapOrder(displayed, incoming, incomingIndex), displayed);
 });

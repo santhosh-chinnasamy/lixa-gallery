@@ -105,3 +105,26 @@ export function projectPhotoOrder(
   sorted.sort((a, b) => comparePhotos(a, b, sortBy, sortOrder));
   return sorted;
 }
+
+/**
+ * Rebuild the displayed array after in-place thumbnail patches.
+ *
+ * The order is already known (`indexByPath` is the cached path → index map for
+ * the displayed order), so this is a single pointer pass with no map build and
+ * no sort-key comparison. Returns `previous` when nothing was replaced.
+ */
+export function remapOrder(
+  previous: PhotoMetadata[],
+  incoming: PhotoMetadata[],
+  indexByPath: ReadonlyMap<string, number>,
+): PhotoMetadata[] {
+  let changed = false;
+  const next = new Array<PhotoMetadata>(previous.length);
+  for (let i = 0; i < previous.length; i++) {
+    const at = indexByPath.get(previous[i].path);
+    const photo = at === undefined ? previous[i] : incoming[at];
+    if (photo !== previous[i]) changed = true;
+    next[i] = photo;
+  }
+  return changed ? next : previous;
+}
