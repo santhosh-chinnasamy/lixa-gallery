@@ -1,0 +1,218 @@
+name: Preview
+
+# Rolling pre-release from develop. main stays the stable channel:
+# release.yml (release-please) still runs only on push to main, and its tags
+# are lixa-gallery-vX.Y.Z. This workflow's git tag is the literal name
+# `preview`, which release-please does not treat as a version tag. The GitHub
+# release is a prerelease and is not marked latest, so /releases/latest keeps
+# pointing at the stable channel.
+
+on:
+  push:
+    branches:
+      - develop
+    paths-ignore:
+      - 'docs/**'
+      - '*.md'
+      - '.github/ISSUE_TEMPLATE/**'
+  workflow_dispatch:
+    inputs:
+      publish:
+        description: 'Publish the rolling preview release. Leave false for a dry run.'
+        type: boolean
+        default: false
+
+permissions:
+  contents: read
+
+concurrency:
+  group: preview-${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  version:
+    name: Prepare preview version
+    runs-on: ubuntu-latest
+    outputs:
+      version: ${{ steps.meta.outputs.version }}
+      short_sha: ${{ steps.meta.outputs.short_sha }}
+      date: ${{ steps.meta.outputs.date }}
+      publish: ${{ steps.meta.outputs.publish }}
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Compute preview version
+        id: meta
+        env:
+          EVENT_NAME: ${{ github.event_name }}
+          PUBLISH_INPUT: ${{ inputs.publish }}
+          FULL_SHA: ${{ github.sha }}
+          RUN_NUMBER: ${{ github.run_number }}
+        run: |
+          set -euo pipefail
+          date_stamp="$(date -u +%Y%m%d)"
+          version="$(node scripts/preview-version.mjs --date "$date_stamp" --run "$RUN_NUMBER")"
+          short_sha="$(git rev-parse --short=7 HEAD)"
+          if [ "$EVENT_NAME" = "push" ] || [ "$PUBLISH_INPUT" = "true" ]; then
+            publish=true
+          else
+            publish=false
+          fi
+          echo "version=$version" >> "$GITHUB_OUTPUT"
+          echo "short_sha=$short_sha" >> "$GITHUB_OUTPUT"
+          echo "date=$date_stamp" >> "$GITHUB_OUTPUT"
+          echo "publish=$publish" >> "$GITHUB_OUTPUT"
+          echo "Preview version: $version"
+          echo "Publish: $publish"
+          echo "Commit: $short_sha ($FULL_SHA)"
+
+      # Patch only this runner. bump-version.js commits only with --commit.
+      - name: Patch version in the workspace
+        env:
+          VERSION: ${{ steps.meta.outputs.version }}
+          FULL_SHA: ${{ github.sha }}
+        run: |
+          set -euo pipefail
+          node scripts/bump-version.js "$VERSION"
+          if git diff --quiet -- package.json src-tauri/tauri.conf.json src-tauri/Cargo.toml src-tauri/Cargo.lock; then
+            echo "expected the preview version to be written into the workspace"
+            exit 1
+          fi
+          if [ "$(git rev-parse HEAD)" != "$FULL_SHA" ]; then
+            echo "version patch must stay uncommitted"
+            exit 1
+          fi
+          git status --short
+
+  publish:
+    name: Publish preview release
+    needs: version
+    if: needs.version.outputs.publish == 'true'
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+    outputs:
+      release_id: ${{ steps.release.outputs.release_id }}
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Replace rolling preview release
+        id: release
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          GH_REPO: ${{ github.repository }}
+          VERSION: ${{ needs.version.outputs.version }}
+          SHORT_SHA: ${{ needs.version.outputs.short_sha }}
+          DATE: ${{ needs.version.outputs.date }}
+          FULL_SHA: ${{ github.sha }}
+        run: |
+          set -euo pipefail
+          if gh release view preview >/dev/null 2>&1; then
+            gh release delete preview --yes --cleanup-tag
+          fi
+          # Drop a leftover tag if the release was already gone.
+          gh api -X DELETE "repos/${GH_REPO}/git/refs/tags/preview" >/dev/null 2>&1 || true
+
+          notes="$(mktemp)"
+          printf '%s\n' \
+            "Commit: ${SHORT_SHA} (https://github.com/${GH_REPO}/commit/${FULL_SHA})" \
+            "Full SHA: ${FULL_SHA}" \
+            "Date: ${DATE}" \
+            "" \
+            "Preview builds are unsigned and may be unstable." \
+            > "$notes"
+
+          gh release create preview \
+            --target "$FULL_SHA" \
+            --title "Preview (develop) ${VERSION}" \
+            --notes-file "$notes" \
+            --prerelease \
+            --latest=false
+
+          release_id="$(gh release view preview --json databaseId --jq .databaseId)"
+          if [ -z "$release_id" ]; then
+            echo "preview release id is missing"
+            exit 1
+          fi
+          echo "release_id=$release_id" >> "$GITHUB_OUTPUT"
+
+          prerelease="$(gh api "repos/${GH_REPO}/releases/tags/preview" --jq .prerelease)"
+          latest_tag="$(gh api "repos/${GH_REPO}/releases/latest" --jq .tag_name)"
+          tagged="$(gh api "repos/${GH_REPO}/commits/preview" --jq .sha)"
+          if [ "$prerelease" != "true" ] || [ "$latest_tag" = "preview" ] || [ "$tagged" != "$FULL_SHA" ]; then
+            echo "preview release must be a prerelease, not latest, and point at ${FULL_SHA}"
+            echo "prerelease=$prerelease latest=$latest_tag tagged=$tagged"
+            exit 1
+          fi
+
+  build:
+    name: Build preview installers
+    needs: [version, publish]
+    if: needs.version.outputs.publish == 'true' && needs.publish.result == 'success'
+    permissions:
+      contents: write
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - platform: macos-latest
+            args: '--target aarch64-apple-darwin'
+          - platform: macos-latest
+            args: '--target x86_64-apple-darwin'
+          - platform: ubuntu-22.04
+            args: ''
+          # WiX/MSI ProductVersion must be numeric. "preview" is not, so the
+          # Windows preview ships the NSIS installer only.
+          - platform: windows-latest
+            args: '--bundles nsis'
+    runs-on: ${{ matrix.platform }}
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: setup node
+        uses: actions/setup-node@v4
+        with:
+          node-version: lts/*
+          cache: yarn
+
+      - name: install Rust stable
+        uses: dtolnay/rust-toolchain@stable
+        with:
+          targets: ${{ matrix.platform == 'macos-latest' && 'aarch64-apple-darwin,x86_64-apple-darwin' || '' }}
+
+      - name: cache Rust
+        uses: Swatinem/rust-cache@v2
+        with:
+          workspaces: src-tauri
+
+      - name: install dependencies (ubuntu only)
+        if: matrix.platform == 'ubuntu-22.04'
+        run: |
+          sudo apt-get update
+          sudo DEBIAN_FRONTEND=noninteractive apt-get install -y libwebkit2gtk-4.0-dev libwebkit2gtk-4.1-dev libappindicator3-dev librsvg2-dev patchelf
+
+      - name: install frontend dependencies
+        run: yarn install
+
+      - name: Patch version in the workspace
+        shell: bash
+        env:
+          VERSION: ${{ needs.version.outputs.version }}
+          FULL_SHA: ${{ github.sha }}
+        run: |
+          set -euo pipefail
+          node scripts/bump-version.js "$VERSION"
+          if [ "$(git rev-parse HEAD)" != "$FULL_SHA" ]; then
+            echo "version patch must stay uncommitted"
+            exit 1
+          fi
+
+      # releaseId uploads onto the release created above. tauri-action does
+      # not create or update that release, so it stays prerelease and not latest.
+      - uses: tauri-apps/tauri-action@v0
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        with:
+          releaseId: ${{ needs.publish.outputs.release_id }}
+          tagName: preview
+          args: ${{ matrix.args }}
