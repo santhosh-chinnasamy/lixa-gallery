@@ -498,6 +498,36 @@ export function clearPhotos() {
 }
 
 /**
+ * Bump the materialization revision at most once per frame.
+ *
+ * The backend emits a `photos-updated` batch every ~10–64 rows, so a cold
+ * 2,000-photo folder produced hundreds of grid re-derives per second. The
+ * patches are already in the array by the next frame; one revision bump per
+ * frame is enough to make the grid read them.
+ */
+let revisionFrame = 0;
+
+function schedulePhotosRevision() {
+  if (revisionFrame) return;
+  const schedule = (callback: () => void): number => {
+    if (typeof requestAnimationFrame === 'function') {
+      return requestAnimationFrame(callback);
+    }
+    return setTimeout(callback, 16) as unknown as number;
+  };
+  revisionFrame = schedule(() => {
+    revisionFrame = 0;
+    photosRevision.update((revision) => revision + 1);
+  });
+}
+
+/** True while the Favourites page owns the lists that `mergePhotoUpdates` patches. */
+function favouritesPageIsOpen(): boolean {
+  if (typeof location === 'undefined') return false;
+  return location.pathname.replace(/\/+$/, '') === '/favourites';
+}
+
+/**
  * Merge backend materialize/EXIF results into the open folder list.
  * Drops patches from a different folder session; patches by path only.
  * Preserves list order so thumb-only patches do not reshuffle the grid.
@@ -511,13 +541,17 @@ export function mergePhotoUpdates(
   // Drop patches from a different folder session. generation 0 means "use live".
   if (generation !== 0 && generation !== liveGeneration) return;
 
-  if (photos.patch(updates)) {
-    photosRevision.update((revision) => revision + 1);
+  if (photos.patch(updates)) schedulePhotosRevision();
+
+  // Favourites rebuilds both lists from `refreshFavourites()` when the page
+  // mounts, so patching them on every library batch is wasted work for a grid
+  // nobody is looking at. Patch them only while that page is open.
+  if (favouritesPageIsOpen()) {
+    favouritePhotos.patch(updates);
+    // All Folders favourites render from group.photos; patch those too or
+    // thumbs stay empty after background materialize.
+    favouriteFolderGroups.patch(updates);
   }
-  favouritePhotos.patch(updates);
-  // All Folders favourites render from group.photos; patch those too or
-  // thumbs stay empty after background materialize.
-  favouriteFolderGroups.patch(updates);
 }
 
 export async function loadFolderTree(path: string) {

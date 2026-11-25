@@ -5,7 +5,11 @@
   import ControlBar from './ControlBar.svelte';
   import type { PhotoMetadata } from '../types/photo';
   import type { CullAction } from '../lib/cull';
-  import { projectPhotoOrder, type AppliedSort } from '$lib/photoOrder';
+  import {
+    projectPhotoOrder,
+    remapOrder,
+    type AppliedSort,
+  } from '$lib/photoOrder';
   import { createVirtualizer } from '@tanstack/svelte-virtual';
   import { immediateSubfolders } from '$lib/folderEmptyState';
   import { tick, untrack } from 'svelte';
@@ -72,6 +76,12 @@
   // localeCompare the whole folder on every batch.
   let orderedPhotos: PhotoMetadata[] | null = null;
   let appliedSort: AppliedSort | null = null;
+  // Cached path → index map for the incoming list. Materialization batches
+  // reuse it so a thumbnail patch is one pointer pass, not a full re-sort.
+  let orderedIncomingIndex = new Map<string, number>();
+  // The filtered input array the order was projected from. Identity is the
+  // "order inputs unchanged" signal: patches mutate slots, not this array.
+  let orderedIncoming: PhotoMetadata[] | null = null;
 
   let processedPhotos = $derived.by(() => {
     // In-place thumbnail patches keep the photos array identity. This counter
@@ -99,6 +109,18 @@
 
     const sortByNow = $sortBy;
     const sortOrderNow = $sortOrder;
+    const orderUnchanged =
+      orderedPhotos !== null &&
+      incoming === orderedIncoming &&
+      appliedSort?.sortBy === sortByNow &&
+      appliedSort?.sortOrder === sortOrderNow;
+
+    if (orderUnchanged) {
+      const next = remapOrder(orderedPhotos!, incoming, orderedIncomingIndex);
+      if (next !== orderedPhotos) orderedPhotos = next;
+      return next;
+    }
+
     const next = projectPhotoOrder(
       orderedPhotos,
       incoming,
@@ -106,7 +128,13 @@
       sortOrderNow,
       appliedSort,
     );
-    orderedPhotos = next;
+    if (next !== orderedPhotos) {
+      orderedPhotos = next;
+    }
+    orderedIncomingIndex = new Map(
+      incoming.map((photo, index) => [photo.path, index]),
+    );
+    orderedIncoming = incoming;
     appliedSort = { sortBy: sortByNow, sortOrder: sortOrderNow };
     return next;
   });
