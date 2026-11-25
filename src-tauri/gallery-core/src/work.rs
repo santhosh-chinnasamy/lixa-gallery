@@ -5,6 +5,8 @@
 //! decoded twice.
 
 use std::hash::{Hash, Hasher};
+use std::sync::atomic::{AtomicU64, Ordering};
+use std::sync::Arc;
 
 /// Prefer interactive slots. Ord so Interactive < Background for heap/queues.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Hash)]
@@ -89,6 +91,35 @@ pub fn recommended_pool_size() -> usize {
     cores.saturating_sub(1).max(2)
 }
 
+/// Reports whether the folder session that submitted a job is still live.
+///
+/// A job can be admitted while its folder is current and then outlive a
+/// switch. Long stages (decode) consult this so work from the previous folder
+/// can be deprioritised instead of competing with the folder on screen.
+#[derive(Clone, Debug)]
+pub struct StaleCheck {
+    generation: Arc<AtomicU64>,
+    submitted: u64,
+}
+
+impl StaleCheck {
+    pub fn new(generation: Arc<AtomicU64>, submitted: u64) -> Self {
+        Self {
+            generation,
+            submitted,
+        }
+    }
+
+    /// True once a newer folder session has replaced the submitting one.
+    pub fn is_stale(&self) -> bool {
+        self.generation.load(Ordering::SeqCst) != self.submitted
+    }
+
+    pub fn submitted(&self) -> u64 {
+        self.submitted
+    }
+}
+
 /// At most one background materialize at a time.
 ///
 /// This does not reserve a worker. Visible work may use every pool slot.
@@ -124,5 +155,19 @@ mod tests {
         let a = WorkKey::materialize("/a.jpg", 1, 10);
         let b = WorkKey::materialize("/a.jpg", 2, 10);
         assert_ne!(a, b);
+    }
+
+    #[test]
+    fn stale_check_flips_only_when_the_generation_moves() {
+        let generation = Arc::new(AtomicU64::new(7));
+        let check = StaleCheck::new(generation.clone(), 7);
+        assert!(!check.is_stale());
+        assert_eq!(check.submitted(), 7);
+
+        generation.store(8, Ordering::SeqCst);
+        assert!(check.is_stale(), "a newer folder session must read stale");
+
+        let older = StaleCheck::new(generation.clone(), 6);
+        assert!(older.is_stale(), "an older session is stale immediately");
     }
 }
