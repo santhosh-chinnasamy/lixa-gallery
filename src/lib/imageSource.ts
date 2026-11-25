@@ -81,3 +81,21 @@ export function viewerImageUrl(
   }
   return assetUrl(photo.path);
 }
+
+/** Originals above this decode faster through the cached 2048px WebP preview. */
+const LARGE_ORIGINAL_BYTES = 10 * 1024 * 1024;
+
+/**
+ * Should the viewer paint a cached decoded preview before the original?
+ *
+ * Only large originals the webview can paint natively benefit: RAW, TIFF and
+ * HEIC already route through previews (or are unsupported) elsewhere.
+ */
+export function prefersDecodedPreview(
+  photo: Pick<PhotoMetadata, 'path' | 'metadata' | 'is_raw' | 'preview_path'>,
+): boolean {
+  if (photo.is_raw || photo.preview_path) return false;
+  if (photo.metadata.size < LARGE_ORIGINAL_BYTES) return false;
+  const ext = extensionOf(photo.path);
+  return !isHeic(ext) && !isTiff(ext);
+}

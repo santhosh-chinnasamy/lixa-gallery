@@ -493,6 +493,23 @@ impl GalleryService {
         original_path: &Path,
         thumb_dir: &str,
     ) -> Result<String> {
+        self.preview_with_priority(original_path, thumb_dir, WorkPriority::Interactive)
+            .await
+    }
+
+    /// Warm the viewer preview for a photo the user is likely to open next.
+    /// Background priority, so visible thumbnails and the open viewer win.
+    pub async fn warm_preview(&self, original_path: &Path, thumb_dir: &str) -> Result<String> {
+        self.preview_with_priority(original_path, thumb_dir, WorkPriority::Background)
+            .await
+    }
+
+    async fn preview_with_priority(
+        &self,
+        original_path: &Path,
+        thumb_dir: &str,
+        priority: WorkPriority,
+    ) -> Result<String> {
         let file_meta = self.fs.get_file_metadata(original_path).await?;
         let path_str = original_path.to_string_lossy().into_owned();
         let key = WorkKey::preview(path_str.clone(), file_meta.modified, file_meta.size);

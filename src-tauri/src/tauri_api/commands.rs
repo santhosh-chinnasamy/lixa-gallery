@@ -254,6 +254,39 @@ pub async fn ensure_thumbnail_path(
         .map_err(|err| err.to_string())
 }
 
+/// Is the viewer-sized WebP for this original already on disk?
+///
+/// The viewer uses this to paint the cached preview immediately and defer the
+/// full-resolution decode. Cheap: one stat plus the cache path computation.
+#[tauri::command]
+pub fn preview_is_cached(state: State<'_, AppState>, path: String) -> Result<bool, String> {
+    use std::path::Path;
+
+    let original = Path::new(&path);
+    let identity =
+        infra::thumbnail_cache::ThumbnailIdentity::read(original).map_err(|err| err.to_string())?;
+    let preview = infra::thumbnail_cache::preview_disk_path(
+        Path::new(&state.thumbnail_path),
+        original,
+        identity,
+    );
+    Ok(preview.is_file())
+}
+
+/// Warm the viewer preview in the background so the next visit is instant.
+/// Fire-and-forget: failures are logged and never reach the UI.
+#[tauri::command]
+pub async fn warm_preview(state: State<'_, AppState>, path: String) -> Result<(), String> {
+    if let Err(err) = state
+        .gallery
+        .warm_preview(std::path::Path::new(&path), &state.thumbnail_path)
+        .await
+    {
+        log::debug!("Could not warm viewer preview for {path}: {err}");
+    }
+    Ok(())
+}
+
 /// Thumbnail / preview bytes as base64. Used when WebKit blocks custom-protocol
 /// `<img>` / `fetch` from the Vite `http://localhost` origin (tauri#16201).
 ///
@@ -296,9 +329,7 @@ pub async fn get_thumbnail_bytes(
     if !want_preview {
         // Disk hit first — same path as the URI protocol. Avoids Interactive
         // materialize + photos-updated storms when the WebP already exists.
-        if let Ok(identity) =
-            infra::thumbnail_cache::ThumbnailIdentity::read(&original_path)
-        {
+        if let Ok(identity) = infra::thumbnail_cache::ThumbnailIdentity::read(&original_path) {
             let thumb_path = infra::thumbnail_cache::thumbnail_disk_path(
                 Path::new(thumb_dir),
                 &original_path,
