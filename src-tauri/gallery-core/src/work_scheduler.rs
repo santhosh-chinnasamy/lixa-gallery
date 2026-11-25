@@ -13,7 +13,10 @@
 //! themselves stay within it.
 
 use crate::models::{GalleryError, PhotoMetadata, Result};
-use crate::work::{recommended_background_slots, recommended_pool_size, WorkKey, WorkPriority};
+use crate::work::{
+    recommended_background_slots, recommended_pool_size, StaleCheck, WorkKey, WorkPriority,
+};
+use futures::FutureExt;
 use std::collections::{HashMap, VecDeque};
 use std::future::Future;
 use std::pin::Pin;
@@ -51,7 +54,7 @@ struct State {
 }
 
 struct Inner {
-    generation: AtomicU64,
+    generation: Arc<AtomicU64>,
     state: Mutex<State>,
     notify: Notify,
     max_workers: usize,
@@ -80,7 +83,7 @@ impl ImageWorkScheduler {
         let max_background = max_background.clamp(1, max_workers);
         Self {
             inner: Arc::new(Inner {
-                generation: AtomicU64::new(0),
+                generation: Arc::new(AtomicU64::new(0)),
                 state: Mutex::new(State {
                     interactive: VecDeque::new(),
                     background: VecDeque::new(),
@@ -144,6 +147,14 @@ impl ImageWorkScheduler {
 
     pub fn is_current(&self, generation: u64) -> bool {
         self.current_generation() == generation
+    }
+
+    /// A handle for a submitted job to notice that its folder is no longer open.
+    ///
+    /// Long stages (decode) use this to run demoted instead of competing with
+    /// the folder the user is actually looking at.
+    pub fn stale_check(&self, submitted: u64) -> StaleCheck {
+        StaleCheck::new(self.inner.generation.clone(), submitted)
     }
 
     /// True while interactive work is queued or running (background alone is idle).
@@ -379,9 +390,20 @@ async fn worker_loop(inner: Arc<Inner>) {
                 inner_job.notify.notify_waiters();
                 return;
             }
-            let outcome = match job.work.await {
-                Ok(photo) => Ok(photo),
-                Err(err) => Err(err.to_string()),
+            let outcome = match std::panic::AssertUnwindSafe(job.work).catch_unwind().await {
+                Ok(Ok(photo)) => Ok(photo),
+                Ok(Err(err)) => Err(err.to_string()),
+                Err(_) => {
+                    // A panicking decode must not keep the admission slot or
+                    // strand coalesced waiters: release both, then let callers
+                    // retry or surface the error. Without this, a few panics
+                    // exhaust `max_workers` and the grid stops filling.
+                    log::error!(
+                        "Image work panicked for {}; releasing its slot and waiters",
+                        key.path
+                    );
+                    Err("image job panicked".to_string())
+                }
             };
             settle_job(&inner_job, generation, is_background, key, outcome).await;
             inner_job.notify.notify_waiters();
@@ -1152,5 +1174,49 @@ mod tests {
         for handle in interactive {
             let _ = handle.await.unwrap();
         }
+    }
+
+    #[tokio::test]
+    async fn panicking_job_releases_its_slot_and_waiters() {
+        let sched = ImageWorkScheduler::with_limits(1, 1);
+        let gen = sched.begin_generation().await;
+
+        let failed = sched
+            .run(
+                WorkPriority::Interactive,
+                WorkKey::materialize("/panic.jpg", 1, 1),
+                gen,
+                || async { panic!("decode exploded") },
+            )
+            .await;
+        assert!(failed.is_err(), "a panicking job must answer its waiter");
+
+        // The only admission slot must be free again. Before the catch_unwind
+        // fix this timed out: `running_current` never dropped and `active`
+        // kept the poisoned key, so every later job waited forever.
+        let ok = tokio::time::timeout(
+            Duration::from_secs(2),
+            sched.run(
+                WorkPriority::Interactive,
+                WorkKey::materialize("/ok.jpg", 1, 1),
+                gen,
+                || async { Ok(photo("/ok.jpg")) },
+            ),
+        )
+        .await
+        .expect("scheduler deadlocked after a panicking job")
+        .expect("the next job must run");
+        assert_eq!(ok.path, "/ok.jpg");
+    }
+
+    #[tokio::test]
+    async fn stale_check_tracks_begin_generation() {
+        let sched = ImageWorkScheduler::with_limits(2, 1);
+        let first = sched.begin_generation().await;
+        let check = sched.stale_check(first);
+        assert!(!check.is_stale());
+        let _second = sched.begin_generation().await;
+        assert!(check.is_stale());
+        assert!(!sched.stale_check(sched.current_generation()).is_stale());
     }
 }

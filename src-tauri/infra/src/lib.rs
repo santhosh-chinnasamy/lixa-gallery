@@ -5,6 +5,7 @@ pub mod formats;
 pub mod fs_ops;
 pub mod image;
 pub mod raw_preview;
+pub mod thread_priority;
 pub mod thumbnail_cache;
 
 #[cfg(test)]

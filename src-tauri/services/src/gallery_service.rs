@@ -6,7 +6,7 @@ use gallery_core::image::ImageProcessor;
 use gallery_core::models::{FolderNode, FolderScanResult, LoadingMode, PhotoMetadata, Result};
 use gallery_core::repos::{CachedPhotoRecord, PhotoRepository};
 use gallery_core::thumbnail_cache::stored_thumbnail_is_current;
-use gallery_core::work::{WorkKey, WorkPriority};
+use gallery_core::work::{StaleCheck, WorkKey, WorkPriority};
 use gallery_core::work_scheduler::ImageWorkScheduler;
 use std::{
     collections::HashMap,
@@ -226,13 +226,16 @@ impl GalleryService {
                         let sidecar = photo.sidecar_path.clone();
                         let is_raw = photo.is_raw;
                         let path = photo.path.clone();
+                        let stale = scheduler.stale_check(generation);
                         match scheduler
                             .run(WorkPriority::Background, key, generation, move || {
                                 let processor = processor.clone();
                                 let thumb_path = thumb_path.clone();
                                 let path = path.clone();
                                 async move {
-                                    processor.convert_image(Path::new(&path), &thumb_path).await
+                                    processor
+                                        .convert_image_tracked(Path::new(&path), &thumb_path, stale)
+                                        .await
                                 }
                             })
                             .await
@@ -362,13 +365,14 @@ impl GalleryService {
                         let is_raw = photo.is_raw;
                         let prior_exif = photo.exif.clone();
                         let path = photo.path.clone();
+                        let stale = scheduler.stale_check(generation);
                         match scheduler
                             .run(WorkPriority::Background, key, generation, move || {
                                 let processor = processor.clone();
                                 let thumb_path = thumb_path.clone();
                                 async move {
                                     processor
-                                        .convert_image(Path::new(&path), &thumb_path)
+                                        .convert_image_tracked(Path::new(&path), &thumb_path, stale)
                                         .await
                                 }
                             })
@@ -423,11 +427,8 @@ impl GalleryService {
                                 let processor = processor.clone();
                                 let mut photo = photo;
                                 async move {
-                                    photo.exif = processor
-                                        .read_exif(Path::new(&path))
-                                        .await
-                                        .ok()
-                                        .flatten();
+                                    photo.exif =
+                                        processor.read_exif(Path::new(&path)).await.ok().flatten();
                                     Ok(photo)
                                 }
                             })
@@ -508,28 +509,23 @@ impl GalleryService {
             let key = key.clone();
             match self
                 .scheduler
-                .run(
-                    WorkPriority::Interactive,
-                    key,
-                    generation,
-                    move || {
-                        let processor = processor.clone();
-                        async move {
-                            let preview = processor
-                                .ensure_decoded_preview(&path, Path::new(&thumb_dir))
-                                .await?;
-                            Ok(PhotoMetadata {
-                                metadata: file_meta,
-                                thumbnail_path: String::new(),
-                                path: path_str,
-                                sidecar_path: None,
-                                preview_path: Some(preview.to_string_lossy().into_owned()),
-                                exif: None,
-                                is_raw: is_raw_path(&path),
-                            })
-                        }
-                    },
-                )
+                .run(priority, key, generation, move || {
+                    let processor = processor.clone();
+                    async move {
+                        let preview = processor
+                            .ensure_decoded_preview(&path, Path::new(&thumb_dir))
+                            .await?;
+                        Ok(PhotoMetadata {
+                            metadata: file_meta,
+                            thumbnail_path: String::new(),
+                            path: path_str,
+                            sidecar_path: None,
+                            preview_path: Some(preview.to_string_lossy().into_owned()),
+                            exif: None,
+                            is_raw: is_raw_path(&path),
+                        })
+                    }
+                })
                 .await
             {
                 Ok(metadata) => {
@@ -539,9 +535,7 @@ impl GalleryService {
                         )
                     });
                 }
-                Err(err)
-                    if attempts < 2 && err.to_string().contains("cancelled") =>
-                {
+                Err(err) if attempts < 2 && err.to_string().contains("cancelled") => {
                     continue;
                 }
                 Err(err) => return Err(err),
@@ -573,13 +567,14 @@ impl GalleryService {
             let path = original_path.to_path_buf();
             let thumb_dir = thumb_dir.to_string();
             let key = key.clone();
+            let stale = self.scheduler.stale_check(generation);
             match self
                 .scheduler
                 .run(priority, key, generation, move || {
                     let processor = processor.clone();
                     let photo_repo = photo_repo.clone();
                     async move {
-                        materialize_inner(&processor, &photo_repo, &path, &thumb_dir).await
+                        materialize_inner(&processor, &photo_repo, &path, &thumb_dir, stale).await
                     }
                 })
                 .await
@@ -591,9 +586,7 @@ impl GalleryService {
                     }
                     break metadata;
                 }
-                Err(err)
-                    if attempts < 2 && err.to_string().contains("cancelled") =>
-                {
+                Err(err) if attempts < 2 && err.to_string().contains("cancelled") => {
                     continue;
                 }
                 Err(err) => return Err(err),
@@ -650,8 +643,11 @@ async fn materialize_inner(
     photo_repo: &Arc<dyn PhotoRepository>,
     original_path: &Path,
     thumb_dir: &str,
+    stale: StaleCheck,
 ) -> Result<PhotoMetadata> {
-    let mut metadata = processor.convert_image(original_path, thumb_dir).await?;
+    let mut metadata = processor
+        .convert_image_tracked(original_path, thumb_dir, stale)
+        .await?;
     if let Ok(existing) = photo_repo
         .get_photos_by_paths(&[metadata.path.clone()])
         .await

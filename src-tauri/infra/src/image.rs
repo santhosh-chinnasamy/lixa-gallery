@@ -6,6 +6,7 @@ use async_trait::async_trait;
 use gallery_core::formats::is_raw_path;
 use gallery_core::image::ImageProcessor as ImageProcessorTrait;
 use gallery_core::models::{ExifInfo, GalleryError, PhotoMetadata, Result};
+use gallery_core::work::StaleCheck;
 use image::{GenericImageView, ImageDecoder};
 use std::path::{Path, PathBuf};
 
@@ -18,17 +19,18 @@ impl RayonImageProcessor {
         // scheduler could admit several jobs and still decode one at a time.
         Self
     }
-}
 
-impl Default for RayonImageProcessor {
-    fn default() -> Self {
-        Self::new()
-    }
-}
-
-#[async_trait]
-impl ImageProcessorTrait for RayonImageProcessor {
-    async fn convert_image(&self, file_path: &Path, thumbnail_dir: &str) -> Result<PhotoMetadata> {
+    /// Shared conversion path.
+    ///
+    /// `stale` reports whether the folder that submitted this job has been
+    /// replaced. Stale decodes run on a short-lived, lower-priority thread so
+    /// they still land in the cache without competing with the open folder.
+    async fn convert_inner(
+        &self,
+        file_path: &Path,
+        thumbnail_dir: &str,
+        stale: Option<StaleCheck>,
+    ) -> Result<PhotoMetadata> {
         let metadata = fs_ops::get_file_metadata(file_path).await?;
         let source_path = file_path.to_string_lossy().into_owned();
         let is_raw = is_raw_path(file_path);
@@ -36,10 +38,9 @@ impl ImageProcessorTrait for RayonImageProcessor {
         if is_raw {
             let path = file_path.to_path_buf();
             let thumb_dir = thumbnail_dir.to_string();
+            let demote = stale.as_ref().is_some_and(StaleCheck::is_stale);
             let rendered =
-                tokio::task::spawn_blocking(move || raw_preview::render_raw(&path, &thumb_dir))
-                    .await
-                    .map_err(|err| GalleryError::Unknown(err.to_string()))??;
+                run_decode(demote, move || raw_preview::render_raw(&path, &thumb_dir)).await?;
 
             return Ok(PhotoMetadata {
                 metadata,
@@ -100,7 +101,8 @@ impl ImageProcessorTrait for RayonImageProcessor {
         // Decode off the async executor. The output path is already unique to
         // this source path and identity, so two folders cannot overwrite it.
         let path = file_path.to_path_buf();
-        let output_path_result = tokio::task::spawn_blocking(move || {
+        let demote = stale.as_ref().is_some_and(StaleCheck::is_stale);
+        let output_path_result = run_decode(demote, move || {
             let thumbnail = match open_oriented_thumbnail(&path, THUMB_MAX_EDGE) {
                 Ok(img) => img,
                 Err(e) => {
@@ -122,8 +124,7 @@ impl ImageProcessorTrait for RayonImageProcessor {
             }
             Ok::<Option<PathBuf>, GalleryError>(Some(output_path))
         })
-        .await
-        .map_err(|e| GalleryError::Unknown(e.to_string()))?;
+        .await;
 
         let thumbnail_path = match output_path_result {
             Ok(Some(path)) => path.to_string_lossy().into_owned(),
@@ -147,6 +148,29 @@ impl ImageProcessorTrait for RayonImageProcessor {
             is_raw: false,
         })
     }
+}
+
+impl Default for RayonImageProcessor {
+    fn default() -> Self {
+        Self::new()
+    }
+}
+
+#[async_trait]
+impl ImageProcessorTrait for RayonImageProcessor {
+    async fn convert_image(&self, file_path: &Path, thumbnail_dir: &str) -> Result<PhotoMetadata> {
+        self.convert_inner(file_path, thumbnail_dir, None).await
+    }
+
+    async fn convert_image_tracked(
+        &self,
+        file_path: &Path,
+        thumbnail_dir: &str,
+        stale: StaleCheck,
+    ) -> Result<PhotoMetadata> {
+        self.convert_inner(file_path, thumbnail_dir, Some(stale))
+            .await
+    }
 
     async fn read_exif(&self, file_path: &Path) -> Result<Option<ExifInfo>> {
         let path = file_path.to_path_buf();
@@ -159,6 +183,36 @@ impl ImageProcessorTrait for RayonImageProcessor {
     async fn ensure_decoded_preview(&self, source: &Path, cache_dir: &Path) -> Result<PathBuf> {
         ensure_decoded_preview(source, cache_dir).await
     }
+}
+
+/// Run blocking image work off the async executor.
+///
+/// Stale work gets its own short-lived thread with a lowered OS priority: the
+/// folder on screen keeps the cores, while the old decode still finishes and
+/// lands in the thumbnail cache. The priority is deliberately not restored —
+/// raising it again needs privileges — so the thread exits afterwards instead
+/// of returning to a shared pool.
+async fn run_decode<T, F>(demote: bool, work: F) -> Result<T>
+where
+    T: Send + 'static,
+    F: FnOnce() -> Result<T> + Send + 'static,
+{
+    if !demote {
+        return tokio::task::spawn_blocking(work)
+            .await
+            .map_err(|err| GalleryError::Unknown(err.to_string()))?;
+    }
+
+    let (tx, rx) = tokio::sync::oneshot::channel();
+    std::thread::Builder::new()
+        .name("lixa-stale-decode".to_string())
+        .spawn(move || {
+            crate::thread_priority::demote_current_thread();
+            let _ = tx.send(work());
+        })
+        .map_err(|err| GalleryError::Unknown(err.to_string()))?;
+    rx.await
+        .map_err(|err| GalleryError::Unknown(err.to_string()))?
 }
 
 /// Longest edge of a viewer preview. Smaller frames are not enlarged.
