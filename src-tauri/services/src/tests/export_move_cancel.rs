@@ -230,10 +230,7 @@ async fn short_copy_keeps_the_source_and_the_next_file_still_moves() {
     assert!(fs.read("/shoot/b.jpg").is_none());
     assert_eq!(fs.read("/out/b.jpg").unwrap(), b"second-ok");
     assert_eq!(favourites.flags.lock().unwrap().len(), 1);
-    assert_eq!(
-        favourites.flags.lock().unwrap()[0].path,
-        "/shoot/a.jpg"
-    );
+    assert_eq!(favourites.flags.lock().unwrap()[0].path, "/shoot/a.jpg");
 
     let removed = fs.removed_paths();
     assert!(
@@ -404,10 +401,7 @@ async fn one_permission_failure_does_not_stop_the_rest() {
     assert!(fs.read("/shoot/c.jpg").is_none());
     assert_eq!(fs.read("/out/c.jpg").unwrap(), b"ccc");
     assert_eq!(favourites.flags.lock().unwrap().len(), 1);
-    assert_eq!(
-        favourites.flags.lock().unwrap()[0].path,
-        "/shoot/b.jpg"
-    );
+    assert_eq!(favourites.flags.lock().unwrap()[0].path, "/shoot/b.jpg");
 }
 
 #[tokio::test]

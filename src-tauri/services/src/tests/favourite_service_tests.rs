@@ -135,8 +135,13 @@ async fn test_export_favourites_selective() {
         copied: Mutex::new(vec![]),
     });
 
-    let service =
-        FavouriteService::new(repo.clone(), repo.clone(), photo_repo, workspace_repo, fs.clone());
+    let service = FavouriteService::new(
+        repo.clone(),
+        repo.clone(),
+        photo_repo,
+        workspace_repo,
+        fs.clone(),
+    );
 
     service.add_favourite("/a/1.jpg".to_string()).await.unwrap();
     service.add_favourite("/b/2.jpg".to_string()).await.unwrap();
