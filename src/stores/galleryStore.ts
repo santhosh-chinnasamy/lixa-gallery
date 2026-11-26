@@ -1,6 +1,7 @@
 import { invoke } from '@tauri-apps/api/core';
 import { derived, get, writable } from 'svelte/store';
 import { errorText, favouriteToggleError } from '$lib/errorText';
+import { patchByPath, rebuildPathIndex } from '$lib/photoListPatch';
 import { reportError } from '$lib/logger';
 import {
   flagAfterAction,
@@ -19,9 +20,104 @@ export interface FolderNode {
   has_children: boolean;
 }
 
-export const photos = writable<PhotoMetadata[]>([]);
+function createIndexedPhotoList() {
+  const store = writable<PhotoMetadata[]>([]);
+  const index = new Map<string, number>();
+  return {
+    subscribe: store.subscribe,
+    set(list: PhotoMetadata[]) {
+      rebuildPathIndex(list, index);
+      store.set(list);
+    },
+    update(fn: (list: PhotoMetadata[]) => PhotoMetadata[]) {
+      store.update((current) => {
+        const next = fn(current);
+        if (next !== current) rebuildPathIndex(next, index);
+        return next;
+      });
+    },
+    /** Patch by path. Does not copy the list; only changed slots are replaced. */
+    patch(updates: PhotoMetadata[]): boolean {
+      const list = get(store);
+      const changed = patchByPath(list, index, updates, (existing, update) => ({
+        ...existing,
+        ...update,
+      }));
+      if (changed) store.set(list);
+      return changed;
+    },
+  };
+}
+
+type GroupSlot = { group: number; photo: number };
+
+function createIndexedGroupList() {
+  const store = writable<FavouriteFolderGroup[]>([]);
+  const index = new Map<string, GroupSlot>();
+
+  function reindex(groups: FavouriteFolderGroup[]) {
+    index.clear();
+    for (let groupIndex = 0; groupIndex < groups.length; groupIndex++) {
+      const groupPhotos = groups[groupIndex].photos;
+      for (let photoIndex = 0; photoIndex < groupPhotos.length; photoIndex++) {
+        index.set(groupPhotos[photoIndex].path, {
+          group: groupIndex,
+          photo: photoIndex,
+        });
+      }
+    }
+  }
+
+  return {
+    subscribe: store.subscribe,
+    set(groups: FavouriteFolderGroup[]) {
+      reindex(groups);
+      store.set(groups);
+    },
+    update(fn: (groups: FavouriteFolderGroup[]) => FavouriteFolderGroup[]) {
+      store.update((current) => {
+        const next = fn(current);
+        if (next !== current) reindex(next);
+        return next;
+      });
+    },
+    patch(updates: PhotoMetadata[]): boolean {
+      const groups = get(store);
+      let changed = false;
+      let rebuilt = false;
+      for (const update of updates) {
+        let slot = index.get(update.path);
+        const current = slot
+          ? groups[slot.group]?.photos[slot.photo]
+          : undefined;
+        if (!current || current.path !== update.path) {
+          if (!rebuilt) {
+            reindex(groups);
+            rebuilt = true;
+          }
+          slot = index.get(update.path);
+        }
+        if (!slot) continue;
+        const existing = groups[slot.group].photos[slot.photo];
+        groups[slot.group].photos[slot.photo] = { ...existing, ...update };
+        changed = true;
+      }
+      if (changed) store.set(groups);
+      return changed;
+    },
+  };
+}
+
+export const photos = createIndexedPhotoList();
 export const isLoading = writable(false);
 export const currentFolder = writable<string | null>(null);
+/** Folder session from the last successful `scan_folder`. */
+export const folderGeneration = writable(0);
+/**
+ * Bumps when thumbnail patches mutate `photos` in place. The array identity
+ * stays put, so the grid reads this to skip a full re-sort.
+ */
+export const photosRevision = writable(0);
 export const folderTree = writable<FolderNode | null>(null);
 
 export type SortOption = 'name' | 'date' | 'size';
@@ -350,8 +446,8 @@ export const favorites = {
 
 export type FavouriteScope = 'current' | 'all';
 export const favouriteScope = writable<FavouriteScope>('current');
-export const favouritePhotos = writable<PhotoMetadata[]>([]);
-export const favouriteFolderGroups = writable<FavouriteFolderGroup[]>([]);
+export const favouritePhotos = createIndexedPhotoList();
+export const favouriteFolderGroups = createIndexedGroupList();
 export const isLoadingFavourites = writable<boolean>(false);
 
 export const currentFolderFavoritesCount = derived(
@@ -396,8 +492,66 @@ export async function refreshFavourites() {
 export function clearPhotos() {
   photos.set([]);
   currentFolder.set(null);
+  folderGeneration.set(0);
   folderTree.set(null);
   expandedFolders.clear();
+}
+
+/**
+ * Bump the materialization revision at most once per frame.
+ *
+ * The backend emits a `photos-updated` batch every ~10–64 rows, so a cold
+ * 2,000-photo folder produced hundreds of grid re-derives per second. The
+ * patches are already in the array by the next frame; one revision bump per
+ * frame is enough to make the grid read them.
+ */
+let revisionFrame = 0;
+
+function schedulePhotosRevision() {
+  if (revisionFrame) return;
+  const schedule = (callback: () => void): number => {
+    if (typeof requestAnimationFrame === 'function') {
+      return requestAnimationFrame(callback);
+    }
+    return setTimeout(callback, 16) as unknown as number;
+  };
+  revisionFrame = schedule(() => {
+    revisionFrame = 0;
+    photosRevision.update((revision) => revision + 1);
+  });
+}
+
+/** True while the Favourites page owns the lists that `mergePhotoUpdates` patches. */
+function favouritesPageIsOpen(): boolean {
+  if (typeof location === 'undefined') return false;
+  return location.pathname.replace(/\/+$/, '') === '/favourites';
+}
+
+/**
+ * Merge backend materialize/EXIF results into the open folder list.
+ * Drops patches from a different folder session; patches by path only.
+ * Preserves list order so thumb-only patches do not reshuffle the grid.
+ */
+export function mergePhotoUpdates(
+  generation: number,
+  updates: PhotoMetadata[],
+) {
+  if (!Array.isArray(updates) || updates.length === 0) return;
+  const liveGeneration = get(folderGeneration);
+  // Drop patches from a different folder session. generation 0 means "use live".
+  if (generation !== 0 && generation !== liveGeneration) return;
+
+  if (photos.patch(updates)) schedulePhotosRevision();
+
+  // Favourites rebuilds both lists from `refreshFavourites()` when the page
+  // mounts, so patching them on every library batch is wasted work for a grid
+  // nobody is looking at. Patch them only while that page is open.
+  if (favouritesPageIsOpen()) {
+    favouritePhotos.patch(updates);
+    // All Folders favourites render from group.photos; patch those too or
+    // thumbs stay empty after background materialize.
+    favouriteFolderGroups.patch(updates);
+  }
 }
 
 export async function loadFolderTree(path: string) {

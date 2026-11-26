@@ -1,10 +1,9 @@
 //! EXIF shooting settings via `kamadak-exif`.
 //!
 //! The crate is pure Rust (MIT OR Apache-2.0) and reads JPEG, TIFF, and the
-//! TIFF-based RAW containers. Formats it cannot open (CR3, some RAF files)
-//! fall back to the EXIF segment inside the embedded preview JPEG.
+//! TIFF-based RAW containers. Embedded-preview fallback for CR3/RAF lives in
+//! `raw_preview::render_raw` so EXIF-only reads never load the whole file.
 
-use gallery_core::formats::is_raw_path;
 use gallery_core::models::ExifInfo;
 use std::fs::File;
 use std::io::{BufReader, Cursor};
@@ -64,16 +63,11 @@ pub fn orientation_from_bytes(bytes: &[u8]) -> Option<u16> {
     parse_bytes(bytes).orientation_value
 }
 
+/// Container tags only. Do not read the whole RAW here — embedded JPEG
+/// fallback belongs in [`crate::raw_preview::render_raw`], which already
+/// loads the file once for the thumbnail/preview.
 pub fn parse_path(path: &Path) -> ParsedExif {
-    let mut parsed = read_container_file(path);
-    if is_raw_path(path) && !parsed.has_shooting_settings() {
-        if let Ok(bytes) = std::fs::read(path) {
-            if let Some(preview) = crate::raw_preview::extract_largest_jpeg(&bytes) {
-                parsed.fill_gaps_from(&parse_bytes(&preview.bytes));
-            }
-        }
-    }
-    parsed
+    read_container_file(path)
 }
 
 pub fn parse_bytes(bytes: &[u8]) -> ParsedExif {

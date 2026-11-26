@@ -1,10 +1,10 @@
-import { convertFileSrc, invoke } from '@tauri-apps/api/core';
-import { viewerImageUrl } from './imageSource';
+import { invoke } from '@tauri-apps/api/core';
+import { assetUrl, viewerImageUrl } from './imageSource';
 import type { PhotoMetadata } from '../types/photo';
 
 /** A URL the webview can paint, or null when a RAW preview still has to be extracted. */
 export function immediateViewerSrc(photo: PhotoMetadata): string | null {
-  if (photo.preview_path) return convertFileSrc(photo.preview_path);
+  if (photo.preview_path) return assetUrl(photo.preview_path);
   if (photo.is_raw) return null;
   return viewerImageUrl(photo);
 }
@@ -18,10 +18,26 @@ export async function resolveViewerSrc(
     const preview = await invoke<string | null>('ensure_raw_preview', {
       path: photo.path,
     });
-    return preview ? convertFileSrc(preview) : null;
+    return preview ? assetUrl(preview) : null;
   } catch {
     return null;
   }
+}
+
+/** Is the viewer-sized WebP already on disk? Cheap stat; false on any error. */
+export async function previewIsCached(
+  photo: Pick<PhotoMetadata, 'path'>,
+): Promise<boolean> {
+  try {
+    return await invoke<boolean>('preview_is_cached', { path: photo.path });
+  } catch {
+    return false;
+  }
+}
+
+/** Warm the viewer preview in the background for a photo likely to be opened. */
+export function warmViewerPreview(photo: Pick<PhotoMetadata, 'path'>): void {
+  void invoke('warm_preview', { path: photo.path }).catch(() => {});
 }
 
 export function formatLabel(photo: PhotoMetadata): string {
@@ -31,11 +47,4 @@ export function formatLabel(photo: PhotoMetadata): string {
   return side ? `${own} + ${side}` : own;
 }
 
-/** Capture time when the file has it, otherwise the file's own timestamp. */
-export function dateSortKey(photo: PhotoMetadata): number {
-  const captured = photo.exif?.captured_at;
-  if (captured != null) {
-    return captured * 1_000_000 + (photo.exif?.captured_subsec ?? 0);
-  }
-  return (photo.metadata.created || photo.metadata.modified) * 1_000_000;
-}
+export { dateSortKey } from './photoOrder';

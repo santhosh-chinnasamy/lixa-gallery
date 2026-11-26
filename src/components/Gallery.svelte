@@ -5,15 +5,20 @@
   import ControlBar from './ControlBar.svelte';
   import type { PhotoMetadata } from '../types/photo';
   import type { CullAction } from '../lib/cull';
-  import { dateSortKey } from '$lib/photoView';
+  import {
+    projectPhotoOrder,
+    remapOrder,
+    type AppliedSort,
+  } from '$lib/photoOrder';
   import { createVirtualizer } from '@tanstack/svelte-virtual';
   import { immediateSubfolders } from '$lib/folderEmptyState';
-  import { tick } from 'svelte';
+  import { tick, untrack } from 'svelte';
   import { get } from 'svelte/store';
   import {
     searchQuery,
     sortBy,
     sortOrder,
+    photosRevision,
     gridSize,
     folderTree,
     currentFolder,
@@ -31,60 +36,107 @@
     shortcutMatches,
   } from '$lib/shortcuts';
 
-  let { photos = [] }: { photos: PhotoMetadata[] } = $props();
+  let {
+    photos = [],
+    embedded = false,
+    source = 'library',
+  }: {
+    photos: PhotoMetadata[];
+    embedded?: boolean;
+    source?: 'library' | 'favourites';
+  } = $props();
+  // Guard against a bad scan payload so the grid never receives a non-array.
+  const photoList = $derived(Array.isArray(photos) ? photos : []);
+  const fromFavourites = $derived(source === 'favourites');
 
   let selectedImage = $state<PhotoMetadata | null>(null);
   let isSlideshowOpen = $state(false);
   let galleryContainer = $state<HTMLElement | null>(null);
+  /** Stable grid width; ignore transient 0/tiny values that unmount the virtual row. */
   let containerWidth = $state(0);
   let activeIndex = $state(0);
   let focusCard = $state(false);
+  let widthProbe = $state<HTMLElement | null>(null);
 
   const pickedCount = $derived(
-    photos.filter((photo) => $cullFlags.get(photo.path) === 'picked').length,
+    photoList.filter((photo) => $cullFlags.get(photo.path) === 'picked').length,
   );
 
-  // Calculate dynamic columns based on container width and grid size
+  // Bucket width so scrollbar / sub-pixel jitter cannot flip column count.
+  let widthBucket = $derived(Math.floor(containerWidth / 16) * 16);
   let columns = $derived(
-    containerWidth > 0
-      ? Math.max(1, Math.floor(containerWidth / ($gridSize + 16)))
+    widthBucket > 0
+      ? Math.max(1, Math.floor(widthBucket / ($gridSize + 16)))
       : 1,
   );
 
   let subfolders = $derived(immediateSubfolders($folderTree, $currentFolder));
 
+  // Last displayed order. Thumbnail patches keep it so the grid does not
+  // localeCompare the whole folder on every batch.
+  let orderedPhotos: PhotoMetadata[] | null = null;
+  let appliedSort: AppliedSort | null = null;
+  // Cached path → index map for the incoming list. Materialization batches
+  // reuse it so a thumbnail patch is one pointer pass, not a full re-sort.
+  let orderedIncomingIndex = new Map<string, number>();
+  // The filtered input array the order was projected from. Identity is the
+  // "order inputs unchanged" signal: patches mutate slots, not this array.
+  let orderedIncoming: PhotoMetadata[] | null = null;
+
   let processedPhotos = $derived.by(() => {
-    let result = [...photos];
+    // In-place thumbnail patches keep the photos array identity. This counter
+    // is what makes the derived re-read those slots.
+    void $photosRevision;
+    let incoming = photoList;
 
-    if ($cullFilter !== 'all') {
-      result = result.filter((photo) => {
-        const flag = $cullFlags.get(photo.path) ?? 'unflagged';
-        return flag === $cullFilter;
-      });
-    }
-
-    if ($searchQuery.trim()) {
-      const q = $searchQuery.toLowerCase();
-      result = result.filter((p) => p.metadata.name.toLowerCase().includes(q));
-    }
-
-    result.sort((a, b) => {
-      let comparison = 0;
-      switch ($sortBy) {
-        case 'name':
-          comparison = a.metadata.name.localeCompare(b.metadata.name);
-          break;
-        case 'date':
-          comparison = dateSortKey(a) - dateSortKey(b);
-          break;
-        case 'size':
-          comparison = a.metadata.size - b.metadata.size;
-          break;
+    // Favourites already passes a curated list. Library cull/search must not
+    // re-filter it (empty cullFlags + cull_filter=picked blanks the grid).
+    if (!fromFavourites) {
+      if ($cullFilter !== 'all') {
+        incoming = incoming.filter((photo) => {
+          const flag = $cullFlags.get(photo.path) ?? 'unflagged';
+          return flag === $cullFilter;
+        });
       }
-      return $sortOrder === 'asc' ? comparison : -comparison;
-    });
 
-    return result;
+      if ($searchQuery.trim()) {
+        const q = $searchQuery.toLowerCase();
+        incoming = incoming.filter((p) =>
+          p.metadata.name.toLowerCase().includes(q),
+        );
+      }
+    }
+
+    const sortByNow = $sortBy;
+    const sortOrderNow = $sortOrder;
+    const orderUnchanged =
+      orderedPhotos !== null &&
+      incoming === orderedIncoming &&
+      appliedSort?.sortBy === sortByNow &&
+      appliedSort?.sortOrder === sortOrderNow;
+
+    if (orderUnchanged) {
+      const next = remapOrder(orderedPhotos!, incoming, orderedIncomingIndex);
+      if (next !== orderedPhotos) orderedPhotos = next;
+      return next;
+    }
+
+    const next = projectPhotoOrder(
+      orderedPhotos,
+      incoming,
+      sortByNow,
+      sortOrderNow,
+      appliedSort,
+    );
+    if (next !== orderedPhotos) {
+      orderedPhotos = next;
+    }
+    orderedIncomingIndex = new Map(
+      incoming.map((photo, index) => [photo.path, index]),
+    );
+    orderedIncoming = incoming;
+    appliedSort = { sortBy: sortByNow, sortOrder: sortOrderNow };
+    return next;
   });
 
   const handleImageClick = (photo: PhotoMetadata) => {
@@ -187,44 +239,162 @@
     estimateSize: () => 100,
   });
 
-  // Keep it reactive
+  // Width from a short probe (not the tall virtual content). Rapid scroll on
+  // WebKit used to flicker bind:clientWidth → containerWidth < 48 → unmount
+  // every card, leaving the virtualizer range stuck on one empty row.
   $effect(() => {
-    // When the photo list changes (e.g navigating to a new folder), reset the scroll
-    // to prevent the virtualizer from rendering items out of bounds or caching old heights.
-    const count = processedPhotos.length;
+    const el = widthProbe;
+    if (!el || typeof ResizeObserver === 'undefined') return;
 
-    $virtualizer.setOptions({
-      count,
-      getScrollElement: () => galleryContainer,
-      estimateSize: () => $gridSize + 48,
-      overscan: 10,
-      lanes: columns,
-      onChange: () => {
-        // Optional reactive sync hook
-      },
+    const applyWidth = (next: number) => {
+      untrack(() => {
+        if (next > 48) {
+          if (Math.abs(next - containerWidth) >= 1) containerWidth = next;
+          return;
+        }
+        // Ignore transient collapse; keep last good width for columns/layout.
+      });
+    };
+
+    applyWidth(el.clientWidth);
+    const ro = new ResizeObserver((entries) => {
+      const w = entries[0]?.contentRect.width ?? el.clientWidth;
+      applyWidth(w);
+    });
+    ro.observe(el);
+    return () => ro.disconnect();
+  });
+
+  // Keep options in sync without subscribing to the virtualizer store.
+  // `$virtualizer.setOptions` notifies the store (onChange → writable.set),
+  // which would re-run this effect forever and freeze the UI.
+  // Also skip no-op updates: measure() can nudge width → columns → effect,
+  // which pegged WebKit when Favourites rendered ~100+ cards.
+  let lastVirtualOpts = { count: -1, size: -1, lanes: -1, hasEl: false };
+  let measureRaf = 0;
+
+  function scheduleMeasure() {
+    if (measureRaf) cancelAnimationFrame(measureRaf);
+    measureRaf = requestAnimationFrame(() => {
+      measureRaf = 0;
+      get(virtualizer).measure();
+    });
+  }
+
+  $effect(() => {
+    const count = processedPhotos.length;
+    const el = galleryContainer;
+    const size = $gridSize;
+    const lanes = columns;
+    const hasEl = !!el;
+    const overscan = embedded ? 5 : 12;
+
+    untrack(() => {
+      const prev = lastVirtualOpts;
+      if (
+        prev.count === count &&
+        prev.size === size &&
+        prev.lanes === lanes &&
+        prev.hasEl === hasEl
+      ) {
+        return;
+      }
+
+      const lanesOnly =
+        prev.count === count &&
+        prev.size === size &&
+        prev.hasEl === hasEl &&
+        prev.lanes !== lanes;
+
+      lastVirtualOpts = { count, size, lanes, hasEl };
+
+      const api = get(virtualizer);
+      api.setOptions({
+        count,
+        getScrollElement: () => el,
+        estimateSize: () => size + 48,
+        overscan,
+        lanes,
+      });
+      if (!el || count === 0) return;
+
+      if (lanesOnly) {
+        scheduleMeasure();
+      } else {
+        queueMicrotask(() => api.measure());
+      }
     });
 
-    if (galleryContainer && count > 0) {
-      // Small tick to ensure the new virtualizer bounds are respected
-      setTimeout(() => {
-        $virtualizer.measure();
-      }, 0);
-    }
+    return () => {
+      if (measureRaf) {
+        cancelAnimationFrame(measureRaf);
+        measureRaf = 0;
+      }
+    };
+  });
+
+  // After fast front/back scroll, WebKit can leave getVirtualItems() empty or
+  // stuck on a single row while total size stays huge. Remeasure on settle.
+  $effect(() => {
+    const el = galleryContainer;
+    if (!el) return;
+
+    let settleTimer = 0;
+    const recover = () => {
+      const api = get(virtualizer);
+      const count = untrack(() => processedPhotos.length);
+      if (count === 0) return;
+      const visible = api.getVirtualItems().length;
+      const rowH = untrack(() => $gridSize) + 48;
+      const viewportRows = Math.max(
+        1,
+        Math.ceil(el.clientHeight / Math.max(rowH, 1)),
+      );
+      const lanes = untrack(() => columns);
+      // One stuck row (screenshot symptom) is ~lanes items; a healthy
+      // viewport should paint roughly viewportRows * lanes (+ overscan).
+      const expectedMin = Math.min(
+        count,
+        Math.max(lanes + 1, viewportRows * lanes),
+      );
+      if (visible === 0 || visible < expectedMin) {
+        // Remeasure + resync scroll offset (stale offset → blank grid).
+        const top = el.scrollTop;
+        api.measure();
+        api.scrollToOffset(top);
+      }
+    };
+
+    const onScroll = () => {
+      if (settleTimer) clearTimeout(settleTimer);
+      settleTimer = window.setTimeout(recover, 80);
+    };
+    const onScrollEnd = () => recover();
+
+    el.addEventListener('scroll', onScroll, { passive: true });
+    el.addEventListener('scrollend', onScrollEnd);
+    return () => {
+      el.removeEventListener('scroll', onScroll);
+      el.removeEventListener('scrollend', onScrollEnd);
+      if (settleTimer) clearTimeout(settleTimer);
+    };
   });
 
   // Explicitly watch for photo array changes to force scroll to top
-  let listKey = $derived(photos.map((photo) => photo.path).join('\n'));
+  let listKey = $derived(photoList.map((photo) => photo.path).join('\n'));
   let seenListKey = '';
 
   $effect(() => {
     if (listKey === seenListKey) return;
     seenListKey = listKey;
     activeIndex = 0;
-    if (photos && galleryContainer) {
-      galleryContainer.scrollTo({ top: 0 });
-      setTimeout(() => {
-        $virtualizer.measure();
-      }, 10);
+    const el = galleryContainer;
+    if (el) {
+      el.scrollTo({ top: 0 });
+      untrack(() => {
+        const api = get(virtualizer);
+        queueMicrotask(() => api.measure());
+      });
     }
   });
 
@@ -244,11 +414,10 @@
       return;
     }
     const index = activeIndex;
-    const rendered = $virtualizer
-      .getVirtualItems()
-      .some((item) => item.index === index);
+    const api = untrack(() => get(virtualizer));
+    const rendered = api.getVirtualItems().some((item) => item.index === index);
     if (!rendered) {
-      $virtualizer.scrollToIndex(index, { align: 'auto' });
+      api.scrollToIndex(index, { align: 'auto' });
       return;
     }
     tick().then(() => {
@@ -269,6 +438,7 @@
   });
 
   $effect(() => {
+    if (embedded || fromFavourites) return;
     setShortcutLayer('grid', true);
     return () => setShortcutLayer('grid', false);
   });
@@ -280,20 +450,28 @@
   class="relative flex h-full flex-col overflow-hidden"
   style="--grid-item-size: {$gridSize}px"
 >
-  <ControlBar
-    onStartSlideshow={() => (isSlideshowOpen = true)}
-    canStartSlideshow={processedPhotos.length > 0}
-    photoCount={photos.length}
-    {pickedCount}
-  />
+  {#if !embedded}
+    <ControlBar
+      onStartSlideshow={() => (isSlideshowOpen = true)}
+      canStartSlideshow={processedPhotos.length > 0}
+      photoCount={photoList.length}
+      {pickedCount}
+    />
+  {/if}
   <main
-    class="custom-scrollbar flex-1 overflow-y-auto scroll-smooth"
+    class="custom-scrollbar flex-1 overflow-y-auto"
     bind:this={galleryContainer}
   >
-    <div class="h-full p-6 lg:p-10">
+    <div class={embedded ? 'h-full p-2' : 'h-full p-6 lg:p-10'}>
+      <!-- Width probe: short element so scroll cannot zero clientWidth. -->
+      <div
+        bind:this={widthProbe}
+        class="h-0 w-full overflow-hidden"
+        aria-hidden="true"
+      ></div>
       {#if processedPhotos.length === 0}
         <div class="flex h-full min-h-[400px] items-center justify-center">
-          {#if photos.length === 0 && subfolders.length > 0}
+          {#if photoList.length === 0 && subfolders.length > 0}
             <div
               class="animate-in fade-in slide-in-from-bottom-4 w-full max-w-lg duration-700"
             >
@@ -338,7 +516,7 @@
             >
               <div class="mb-2 text-lg font-medium">No results found</div>
               <p class="text-sm">
-                {#if photos.length === 0}
+                {#if photoList.length === 0}
                   This directory doesn't appear to contain any supported files.
                 {:else}
                   No files match your current search and filter criteria.
@@ -349,11 +527,10 @@
         </div>
       {:else}
         <div
-          bind:clientWidth={containerWidth}
           class="relative w-full"
           style="height: {$virtualizer.getTotalSize()}px;"
         >
-          {#each $virtualizer.getVirtualItems() as virtualItem (processedPhotos[virtualItem.index]?.path ?? virtualItem.index)}
+          {#each $virtualizer.getVirtualItems() as virtualItem (virtualItem.key)}
             {@const photo = processedPhotos[virtualItem.index]}
             {@const columnWidth = columns > 0 ? containerWidth / columns : 0}
             <div
@@ -363,7 +540,7 @@
               <div
                 style="width: 100%; max-width: calc(var(--grid-item-size) * 1.5);"
               >
-                {#if photo}
+                {#if photo && columnWidth > 0}
                   <ImageCard
                     {photo}
                     tabindex={virtualItem.index === activeIndex ? 0 : -1}

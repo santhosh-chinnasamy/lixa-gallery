@@ -7,6 +7,7 @@ import {
   isLoading,
   favorites,
   currentFolder,
+  folderGeneration,
   recentFolders,
   loadFolderTree,
   loadingMode,
@@ -16,18 +17,46 @@ import { get } from 'svelte/store';
 import type {
   ExportFailure,
   ExportReport,
+  FolderScanResult,
   PhotoMetadata,
 } from '../../types/photo';
 
+function normalizeScanResult(raw: unknown): FolderScanResult {
+  if (Array.isArray(raw)) {
+    // Older backend returned a bare photo list.
+    return { generation: Date.now(), photos: raw as PhotoMetadata[] };
+  }
+  if (
+    raw &&
+    typeof raw === 'object' &&
+    Array.isArray((raw as FolderScanResult).photos)
+  ) {
+    const result = raw as FolderScanResult;
+    return {
+      generation: Number(result.generation) || Date.now(),
+      photos: result.photos,
+    };
+  }
+  throw new Error('scan_folder returned an unexpected payload');
+}
+
 export async function loadPath(folderPath: string, isRoot = true) {
+  // Re-clicking the open folder rescans and remounts cards; ImageCards then
+  // flash Loading even though WebPs are already on disk. No-op when unchanged.
+  if (folderPath === get(currentFolder)) {
+    return;
+  }
+
   try {
     isLoading.set(true);
     const mode = get(loadingMode);
-    const loadedPhotos: PhotoMetadata[] = await invoke('scan_folder', {
+    const raw = await invoke<unknown>('scan_folder', {
       path: folderPath,
       mode: mode,
     });
-    photos.set(loadedPhotos);
+    const result = normalizeScanResult(raw);
+    folderGeneration.set(result.generation);
+    photos.set(result.photos);
     currentFolder.set(folderPath);
     toasts.dismissAll();
     if (isRoot) {

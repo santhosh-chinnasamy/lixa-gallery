@@ -1,10 +1,13 @@
 use gallery_core::benchmark::BenchmarkLogger;
+use gallery_core::events::EventHub;
 use gallery_core::formats::{group_raw_jpeg_pairs, is_raw_path};
 use gallery_core::fs::FileSystem;
 use gallery_core::image::ImageProcessor;
-use gallery_core::models::{ExifInfo, FolderNode, LoadingMode, PhotoMetadata, Result};
+use gallery_core::models::{FolderNode, FolderScanResult, LoadingMode, PhotoMetadata, Result};
 use gallery_core::repos::{CachedPhotoRecord, PhotoRepository};
 use gallery_core::thumbnail_cache::stored_thumbnail_is_current;
+use gallery_core::work::{StaleCheck, WorkKey, WorkPriority};
+use gallery_core::work_scheduler::ImageWorkScheduler;
 use std::{
     collections::HashMap,
     path::{Path, PathBuf},
@@ -17,6 +20,8 @@ pub struct GalleryService {
     fs: Arc<dyn FileSystem>,
     benchmark_logger: Arc<dyn BenchmarkLogger>,
     runtime: tokio::runtime::Handle,
+    scheduler: ImageWorkScheduler,
+    events: Arc<dyn EventHub>,
 }
 
 impl GalleryService {
@@ -26,6 +31,7 @@ impl GalleryService {
         fs: Arc<dyn FileSystem>,
         benchmark_logger: Arc<dyn BenchmarkLogger>,
         runtime: tokio::runtime::Handle,
+        events: Arc<dyn EventHub>,
     ) -> Self {
         Self {
             photo_repo,
@@ -33,7 +39,13 @@ impl GalleryService {
             fs,
             benchmark_logger,
             runtime,
+            scheduler: ImageWorkScheduler::new(),
+            events,
         }
+    }
+
+    pub fn scheduler(&self) -> &ImageWorkScheduler {
+        &self.scheduler
     }
 
     pub async fn scan_folder(
@@ -41,12 +53,18 @@ impl GalleryService {
         folder: &str,
         thumbnail_path: &str,
         mode: LoadingMode,
-    ) -> Result<Vec<PhotoMetadata>> {
+    ) -> Result<FolderScanResult> {
         use futures::stream::{self, StreamExt};
         use gallery_core::benchmark::BenchmarkEntry;
 
+        let generation = self.scheduler.begin_generation().await;
         let start_time = std::time::Instant::now();
-        log::info!("Scanning folder: {} (Mode: {:?})", folder, mode);
+        log::info!(
+            "Scanning folder: {} (Mode: {:?}, gen: {})",
+            folder,
+            mode,
+            generation
+        );
 
         let folder_path = PathBuf::from(folder);
         let image_files = self.fs.list_images_in_dir(&folder_path).await?;
@@ -66,19 +84,23 @@ impl GalleryService {
 
         let fs_ref = &self.fs;
         let db_lookup_ref = &db_lookup;
-        let processor = &self.image_processor;
-        let lazy = mode == LoadingMode::Lazy;
 
         enum MetaResult {
-            Cached { photo: PhotoMetadata, persist: bool },
+            Cached {
+                photo: PhotoMetadata,
+                persist: bool,
+                needs_exif: bool,
+            },
             NeedsProcessing(PhotoMetadata),
             Failed,
         }
 
         let mut needs_processing = Vec::new();
+        let mut needs_exif = Vec::new();
         let mut all_photos = Vec::new();
         let mut pending_writes = Vec::new();
 
+        // Critical path: stat + DB only. No EXIF, no decode.
         let mut metadata_stream = stream::iter(groups)
             .map(|group| async move {
                 let file_path = group.primary;
@@ -93,21 +115,17 @@ impl GalleryService {
                 let is_raw = is_raw_path(&file_path);
 
                 if let Some(record) = db_lookup_ref.get(&path_str) {
-                    // `{stem}.webp` rows from the v1 cache are not unique
-                    // across folders, so only a current identity file counts.
-                    // Empty thumbnail_path is allowed for RAW files with no
-                    // embedded preview.
-                    let thumb_ready = record.thumbnail_path.is_empty()
-                        || (stored_thumbnail_is_current(
-                            &record.thumbnail_path,
-                            record.mtime,
-                            record.size,
-                        ) && Path::new(&record.thumbnail_path).exists());
+                    let thumb_ready = thumbnail_is_ready(
+                        &path_str,
+                        &record.thumbnail_path,
+                        record.mtime,
+                        record.size,
+                    );
                     if current_metadata.modified as i64 == record.mtime
                         && current_metadata.size as i64 == record.size
                         && thumb_ready
                     {
-                        let mut photo = PhotoMetadata {
+                        let photo = PhotoMetadata {
                             metadata: current_metadata,
                             thumbnail_path: record.thumbnail_path.clone(),
                             path: path_str,
@@ -116,16 +134,17 @@ impl GalleryService {
                             exif: record.exif.clone(),
                             is_raw,
                         };
-                        let mut persist = record.sidecar_path != sidecar;
-                        if record.exif.is_none() {
-                            photo.exif = processor.read_exif(&file_path).await.ok().flatten();
-                            persist = true;
-                        }
-                        return MetaResult::Cached { photo, persist };
+                        let persist = record.sidecar_path != sidecar;
+                        let needs_exif = record.exif.is_none();
+                        return MetaResult::Cached {
+                            photo,
+                            persist,
+                            needs_exif,
+                        };
                     }
                 }
 
-                let mut photo = PhotoMetadata {
+                MetaResult::NeedsProcessing(PhotoMetadata {
                     metadata: current_metadata,
                     thumbnail_path: String::new(),
                     path: path_str,
@@ -133,19 +152,22 @@ impl GalleryService {
                     preview_path: None,
                     exif: None,
                     is_raw,
-                };
-                if lazy {
-                    photo.exif = processor.read_exif(&file_path).await.ok().flatten();
-                }
-                MetaResult::NeedsProcessing(photo)
+                })
             })
             .buffer_unordered(32);
 
         while let Some(result) = metadata_stream.next().await {
             match result {
-                MetaResult::Cached { photo, persist } => {
+                MetaResult::Cached {
+                    photo,
+                    persist,
+                    needs_exif: missing_exif,
+                } => {
                     if persist {
                         pending_writes.push(photo.clone());
+                    }
+                    if missing_exif {
+                        needs_exif.push(photo.clone());
                     }
                     all_photos.push(photo);
                 }
@@ -161,100 +183,102 @@ impl GalleryService {
         let final_result = if mode == LoadingMode::Lazy {
             let total_found = all_photos.len() + needs_processing.len();
             log::info!(
-                "Lazy mode: Returning {} photos immediately. {} need background processing.",
+                "Lazy mode: Returning {} photos immediately. {} need materialize, {} need EXIF.",
                 total_found,
-                needs_processing.len()
+                needs_processing.len(),
+                needs_exif.len()
             );
 
             let mut final_photos = all_photos;
-            let background_photos = needs_processing.clone();
-            final_photos.extend(needs_processing);
+            final_photos.extend(needs_processing.iter().cloned());
 
-            if !background_photos.is_empty() {
-                let photo_repo = self.photo_repo.clone();
-                let processor = self.image_processor.clone();
-                let t_path = thumbnail_path.to_string();
+            self.spawn_background_work(
+                generation,
+                thumbnail_path.to_string(),
+                needs_processing,
+                needs_exif,
+            );
 
-                self.runtime.spawn(async move {
-                    log::info!(
-                        "Starting optimized background indexing for {} photos",
-                        background_photos.len()
-                    );
+            Ok(FolderScanResult {
+                generation,
+                photos: final_photos,
+            })
+        } else {
+            // Sync: same scheduler, await every materialize before return.
+            let thumb_path = thumbnail_path.to_string();
+            let max_concurrent = self.scheduler.max_workers();
+            let scheduler = self.scheduler.clone();
+            let processor = self.image_processor.clone();
+            let events = self.events.clone();
 
-                    let mut chunk = Vec::new();
-                    for photo in background_photos {
-                        match processor
-                            .convert_image(Path::new(&photo.path), &t_path)
+            let mut processed = Vec::new();
+            let mut stream = stream::iter(needs_processing)
+                .map(|photo| {
+                    let scheduler = scheduler.clone();
+                    let processor = processor.clone();
+                    let thumb_path = thumb_path.clone();
+                    async move {
+                        let key = WorkKey::materialize(
+                            photo.path.clone(),
+                            photo.metadata.modified,
+                            photo.metadata.size,
+                        );
+                        let sidecar = photo.sidecar_path.clone();
+                        let is_raw = photo.is_raw;
+                        let path = photo.path.clone();
+                        let stale = scheduler.stale_check(generation);
+                        match scheduler
+                            .run(WorkPriority::Background, key, generation, move || {
+                                let processor = processor.clone();
+                                let thumb_path = thumb_path.clone();
+                                let path = path.clone();
+                                async move {
+                                    processor
+                                        .convert_image_tracked(Path::new(&path), &thumb_path, stale)
+                                        .await
+                                }
+                            })
                             .await
                         {
-                            Ok(mut processed_photo) => {
-                                processed_photo.sidecar_path = photo.sidecar_path;
-                                processed_photo.is_raw = photo.is_raw;
-                                if processed_photo.exif.is_none() {
-                                    processed_photo.exif = photo.exif;
-                                }
-                                chunk.push(processed_photo);
-                                if chunk.len() >= 10 {
-                                    let _ = photo_repo.batch_insert_photos(&chunk).await;
-                                    chunk.clear();
-                                }
+                            Ok(mut meta) => {
+                                meta.sidecar_path = sidecar;
+                                meta.is_raw = is_raw;
+                                Ok(meta)
                             }
-                            Err(e) => {
-                                log::debug!(
-                                    "Background processing skipped for {}: {}",
-                                    photo.path,
-                                    e
-                                );
-                            }
+                            Err(err) => Err(err),
                         }
                     }
+                })
+                .buffer_unordered(max_concurrent);
 
-                    if !chunk.is_empty() {
-                        let _ = photo_repo.batch_insert_photos(&chunk).await;
-                    }
-                    log::info!("Background indexing complete.");
-                });
-            }
-
-            Ok(final_photos)
-        } else {
-            if !needs_processing.is_empty() {
-                let processor = self.image_processor.clone();
-                let thumb_path_str = thumbnail_path.to_string();
-                let max_concurrent_tasks = 8;
-
-                let mut processing_stream = stream::iter(needs_processing)
-                    .map(|photo| {
-                        let p = processor.clone();
-                        let t = thumb_path_str.clone();
-                        async move {
-                            let sidecar = photo.sidecar_path.clone();
-                            let is_raw = photo.is_raw;
-                            match p.convert_image(Path::new(&photo.path), &t).await {
-                                Ok(mut processed) => {
-                                    processed.sidecar_path = sidecar;
-                                    processed.is_raw = is_raw;
-                                    Ok(processed)
-                                }
-                                Err(err) => Err(err),
-                            }
-                        }
-                    })
-                    .buffer_unordered(max_concurrent_tasks);
-
-                let mut processed_photos = Vec::new();
-                while let Some(Ok(photo)) = processing_stream.next().await {
-                    processed_photos.push(photo);
-                }
-
-                if !processed_photos.is_empty() {
-                    for chunk in processed_photos.chunks(100) {
-                        self.photo_repo.batch_insert_photos(chunk).await?;
-                    }
-                    all_photos.extend(processed_photos);
+            while let Some(result) = stream.next().await {
+                if let Ok(photo) = result {
+                    processed.push(photo);
                 }
             }
-            Ok(all_photos)
+
+            if !processed.is_empty() {
+                for chunk in processed.chunks(100) {
+                    self.photo_repo.batch_insert_photos(chunk).await?;
+                    if self.scheduler.is_current(generation) {
+                        let _ = events.emit_photos_updated(generation, chunk);
+                    }
+                }
+                all_photos.extend(processed);
+            }
+
+            // EXIF-only for already-thumbed rows missing tags.
+            self.spawn_background_work(
+                generation,
+                thumbnail_path.to_string(),
+                Vec::new(),
+                needs_exif,
+            );
+
+            Ok(FolderScanResult {
+                generation,
+                photos: all_photos,
+            })
         };
 
         let elapsed = start_time.elapsed();
@@ -263,7 +287,7 @@ impl GalleryService {
         if final_result.is_ok() {
             let entry = BenchmarkEntry {
                 timestamp: chrono::Utc::now(),
-                approach_name: "rayon_fixed_pool".to_string(),
+                approach_name: "priority_scheduler".to_string(),
                 operation: "full_folder_scan".to_string(),
                 file_count,
                 duration_ms,
@@ -284,12 +308,166 @@ impl GalleryService {
         final_result
     }
 
+    fn spawn_background_work(
+        &self,
+        generation: u64,
+        thumbnail_path: String,
+        needs_processing: Vec<PhotoMetadata>,
+        needs_exif: Vec<PhotoMetadata>,
+    ) {
+        if needs_processing.is_empty() && needs_exif.is_empty() {
+            return;
+        }
+
+        let photo_repo = self.photo_repo.clone();
+        let processor = self.image_processor.clone();
+        let scheduler = self.scheduler.clone();
+        let events = self.events.clone();
+        let bg_slots = gallery_core::work::recommended_background_slots(scheduler.max_workers());
+
+        self.runtime.spawn(async move {
+            use futures::stream::{self, StreamExt};
+
+            // Let on-screen Interactive protocol work claim the pool first.
+            scheduler
+                .wait_until_interactive_idle(
+                    std::time::Duration::from_millis(250),
+                    std::time::Duration::from_secs(2),
+                )
+                .await;
+            if !scheduler.is_current(generation) {
+                log::info!("Background work skipped; gen={generation} is stale");
+                return;
+            }
+
+            log::info!(
+                "Background work gen={generation}: {} materialize, {} exif",
+                needs_processing.len(),
+                needs_exif.len()
+            );
+
+            // Larger chunks → fewer photos-updated storms while the user scrolls.
+            const FLUSH_EVERY: usize = 64;
+            let mut chunk: Vec<PhotoMetadata> = Vec::new();
+
+            let mut materialize_stream = stream::iter(needs_processing)
+                .map(|photo| {
+                    let scheduler = scheduler.clone();
+                    let processor = processor.clone();
+                    let thumb_path = thumbnail_path.clone();
+                    async move {
+                        let key = WorkKey::materialize(
+                            photo.path.clone(),
+                            photo.metadata.modified,
+                            photo.metadata.size,
+                        );
+                        let sidecar = photo.sidecar_path.clone();
+                        let is_raw = photo.is_raw;
+                        let prior_exif = photo.exif.clone();
+                        let path = photo.path.clone();
+                        let stale = scheduler.stale_check(generation);
+                        match scheduler
+                            .run(WorkPriority::Background, key, generation, move || {
+                                let processor = processor.clone();
+                                let thumb_path = thumb_path.clone();
+                                async move {
+                                    processor
+                                        .convert_image_tracked(Path::new(&path), &thumb_path, stale)
+                                        .await
+                                }
+                            })
+                            .await
+                        {
+                            Ok(mut processed) => {
+                                processed.sidecar_path = sidecar;
+                                processed.is_raw = is_raw;
+                                match (&mut processed.exif, prior_exif) {
+                                    (Some(incoming), Some(prior)) => {
+                                        // Keep freshly read tags; fill gaps from the prior row.
+                                        incoming.merge_gaps_from(&prior);
+                                    }
+                                    (None, Some(prior)) => processed.exif = Some(prior),
+                                    _ => {}
+                                }
+                                Some(processed)
+                            }
+                            Err(err) => {
+                                log::debug!("Background materialize skipped: {err}");
+                                None
+                            }
+                        }
+                    }
+                })
+                .buffer_unordered(bg_slots);
+
+            while let Some(maybe) = materialize_stream.next().await {
+                let Some(photo) = maybe else { continue };
+                // Always persist so the next open is warm, even if the folder changed.
+                chunk.push(photo);
+                if chunk.len() >= FLUSH_EVERY {
+                    flush_chunk(&photo_repo, &events, &scheduler, generation, &mut chunk).await;
+                    // Let Interactive (visible thumbs / UI) claim the pool between batches.
+                    breathe_for_interactive(&scheduler).await;
+                }
+            }
+
+            let mut exif_stream = stream::iter(needs_exif)
+                .map(|photo| {
+                    let scheduler = scheduler.clone();
+                    let processor = processor.clone();
+                    async move {
+                        let key = WorkKey::exif_only(
+                            photo.path.clone(),
+                            photo.metadata.modified,
+                            photo.metadata.size,
+                        );
+                        let path = photo.path.clone();
+                        match scheduler
+                            .run(WorkPriority::Background, key, generation, move || {
+                                let processor = processor.clone();
+                                let mut photo = photo;
+                                async move {
+                                    photo.exif =
+                                        processor.read_exif(Path::new(&path)).await.ok().flatten();
+                                    Ok(photo)
+                                }
+                            })
+                            .await
+                        {
+                            Ok(photo) => Some(photo),
+                            Err(err) => {
+                                log::debug!("Background EXIF skipped: {err}");
+                                None
+                            }
+                        }
+                    }
+                })
+                .buffer_unordered(bg_slots);
+
+            while let Some(maybe) = exif_stream.next().await {
+                let Some(photo) = maybe else { continue };
+                chunk.push(photo);
+                if chunk.len() >= FLUSH_EVERY {
+                    flush_chunk(&photo_repo, &events, &scheduler, generation, &mut chunk).await;
+                    breathe_for_interactive(&scheduler).await;
+                }
+            }
+
+            if !chunk.is_empty() {
+                flush_chunk(&photo_repo, &events, &scheduler, generation, &mut chunk).await;
+            }
+            log::info!("Background indexing complete for gen={generation}.");
+        });
+    }
+
     pub async fn get_or_create_thumbnail(
         &self,
         original_path: &Path,
         thumb_dir: &str,
     ) -> Result<String> {
-        let metadata = self.materialize(original_path, thumb_dir).await?;
+        let metadata = self
+            .schedule_materialize(original_path, thumb_dir, WorkPriority::Interactive)
+            .await?;
         Ok(metadata.thumbnail_path)
     }
 
@@ -302,40 +480,135 @@ impl GalleryService {
         if !is_raw_path(original_path) {
             return Ok(Some(original_path.to_string_lossy().into_owned()));
         }
-        let metadata = self.materialize(original_path, thumb_dir).await?;
+        let metadata = self
+            .schedule_materialize(original_path, thumb_dir, WorkPriority::Interactive)
+            .await?;
         Ok(metadata.preview_path)
     }
 
-    async fn materialize(&self, original_path: &Path, thumb_dir: &str) -> Result<PhotoMetadata> {
-        let mut metadata = self
-            .image_processor
-            .convert_image(original_path, thumb_dir)
-            .await?;
-        if let Ok(existing) = self
-            .photo_repo
-            .get_photos_by_paths(&[metadata.path.clone()])
+    /// Decode a viewer preview through the bounded scheduler (`kind=preview`).
+    /// Returns the on-disk WebP path.
+    pub async fn get_or_create_preview(
+        &self,
+        original_path: &Path,
+        thumb_dir: &str,
+    ) -> Result<String> {
+        self.preview_with_priority(original_path, thumb_dir, WorkPriority::Interactive)
             .await
-        {
-            if let Some(row) = existing.into_iter().next() {
-                if metadata.sidecar_path.is_none() {
-                    metadata.sidecar_path = row.sidecar_path;
+    }
+
+    /// Warm the viewer preview for a photo the user is likely to open next.
+    /// Background priority, so visible thumbnails and the open viewer win.
+    pub async fn warm_preview(&self, original_path: &Path, thumb_dir: &str) -> Result<String> {
+        self.preview_with_priority(original_path, thumb_dir, WorkPriority::Background)
+            .await
+    }
+
+    async fn preview_with_priority(
+        &self,
+        original_path: &Path,
+        thumb_dir: &str,
+        priority: WorkPriority,
+    ) -> Result<String> {
+        let file_meta = self.fs.get_file_metadata(original_path).await?;
+        let path_str = original_path.to_string_lossy().into_owned();
+        let key = WorkKey::preview(path_str.clone(), file_meta.modified, file_meta.size);
+
+        let mut attempts = 0;
+        loop {
+            attempts += 1;
+            let generation = self.scheduler.current_generation();
+            let processor = self.image_processor.clone();
+            let path = original_path.to_path_buf();
+            let thumb_dir = thumb_dir.to_string();
+            let file_meta = file_meta.clone();
+            let path_str = path_str.clone();
+            let key = key.clone();
+            match self
+                .scheduler
+                .run(priority, key, generation, move || {
+                    let processor = processor.clone();
+                    async move {
+                        let preview = processor
+                            .ensure_decoded_preview(&path, Path::new(&thumb_dir))
+                            .await?;
+                        Ok(PhotoMetadata {
+                            metadata: file_meta,
+                            thumbnail_path: String::new(),
+                            path: path_str,
+                            sidecar_path: None,
+                            preview_path: Some(preview.to_string_lossy().into_owned()),
+                            exif: None,
+                            is_raw: is_raw_path(&path),
+                        })
+                    }
+                })
+                .await
+            {
+                Ok(metadata) => {
+                    return metadata.preview_path.ok_or_else(|| {
+                        gallery_core::models::GalleryError::Unknown(
+                            "preview job returned no path".to_string(),
+                        )
+                    });
                 }
-                let incoming_empty = metadata
-                    .exif
-                    .as_ref()
-                    .map(ExifInfo::is_empty)
-                    .unwrap_or(true);
-                if incoming_empty && row.exif.is_some() {
-                    metadata.exif = row.exif;
+                Err(err) if attempts < 2 && err.to_string().contains("cancelled") => {
+                    continue;
                 }
-                if metadata.preview_path.is_none() {
-                    metadata.preview_path = row.preview_path;
-                }
+                Err(err) => return Err(err),
             }
         }
-        self.photo_repo
-            .batch_insert_photos(std::slice::from_ref(&metadata))
-            .await?;
+    }
+
+    async fn schedule_materialize(
+        &self,
+        original_path: &Path,
+        thumb_dir: &str,
+        priority: WorkPriority,
+    ) -> Result<PhotoMetadata> {
+        let file_meta = self.fs.get_file_metadata(original_path).await?;
+        let path_str = original_path.to_string_lossy().into_owned();
+        let key = WorkKey::materialize(path_str, file_meta.modified, file_meta.size);
+        let events = self.events.clone();
+        let scheduler = self.scheduler.clone();
+
+        // One retry covers "queued job drained by begin_generation" so the
+        // thumbnail protocol does not answer 404 for a path that can still be
+        // decoded under the live session (webview may cache that 404).
+        let mut attempts = 0;
+        let metadata = loop {
+            attempts += 1;
+            let generation = self.scheduler.current_generation();
+            let processor = self.image_processor.clone();
+            let photo_repo = self.photo_repo.clone();
+            let path = original_path.to_path_buf();
+            let thumb_dir = thumb_dir.to_string();
+            let key = key.clone();
+            let stale = self.scheduler.stale_check(generation);
+            match self
+                .scheduler
+                .run(priority, key, generation, move || {
+                    let processor = processor.clone();
+                    let photo_repo = photo_repo.clone();
+                    async move {
+                        materialize_inner(&processor, &photo_repo, &path, &thumb_dir, stale).await
+                    }
+                })
+                .await
+            {
+                Ok(metadata) => {
+                    if scheduler.is_current(generation) {
+                        let _ =
+                            events.emit_photos_updated(generation, std::slice::from_ref(&metadata));
+                    }
+                    break metadata;
+                }
+                Err(err) if attempts < 2 && err.to_string().contains("cancelled") => {
+                    continue;
+                }
+                Err(err) => return Err(err),
+            }
+        };
         Ok(metadata)
     }
 
@@ -358,7 +631,6 @@ impl GalleryService {
                 .and_then(|s| s.to_str())
                 .map(str::to_owned)
                 .unwrap_or_else(|| path_str.clone());
-            // An unreadable child still shows up; it just has no expand arrow.
             let has_children = self
                 .fs
                 .list_subfolders(&folder)
@@ -380,5 +652,103 @@ impl GalleryService {
             children,
             has_children,
         })
+    }
+}
+
+async fn materialize_inner(
+    processor: &Arc<dyn ImageProcessor>,
+    photo_repo: &Arc<dyn PhotoRepository>,
+    original_path: &Path,
+    thumb_dir: &str,
+    stale: StaleCheck,
+) -> Result<PhotoMetadata> {
+    let mut metadata = processor
+        .convert_image_tracked(original_path, thumb_dir, stale)
+        .await?;
+    if let Ok(existing) = photo_repo
+        .get_photos_by_paths(&[metadata.path.clone()])
+        .await
+    {
+        if let Some(row) = existing.into_iter().next() {
+            if metadata.sidecar_path.is_none() {
+                metadata.sidecar_path = row.sidecar_path;
+            }
+            match (&mut metadata.exif, row.exif) {
+                (Some(incoming), Some(prior)) => incoming.merge_gaps_from(&prior),
+                (None, Some(prior)) => metadata.exif = Some(prior),
+                _ => {}
+            }
+            if metadata.preview_path.is_none() {
+                metadata.preview_path = row.preview_path;
+            }
+        }
+    }
+    photo_repo
+        .batch_insert_photos(std::slice::from_ref(&metadata))
+        .await?;
+    Ok(metadata)
+}
+
+async fn flush_chunk(
+    photo_repo: &Arc<dyn PhotoRepository>,
+    events: &Arc<dyn EventHub>,
+    scheduler: &ImageWorkScheduler,
+    generation: u64,
+    chunk: &mut Vec<PhotoMetadata>,
+) {
+    if chunk.is_empty() {
+        return;
+    }
+    // Always persist so the next open is warm, even if the folder changed.
+    let _ = photo_repo.batch_insert_photos(chunk).await;
+    if scheduler.is_current(generation) {
+        let _ = events.emit_photos_updated(generation, chunk);
+    }
+    chunk.clear();
+}
+
+/// Pause background indexing briefly so Interactive work and the webview can run.
+async fn breathe_for_interactive(scheduler: &ImageWorkScheduler) {
+    scheduler
+        .wait_until_interactive_idle(
+            std::time::Duration::from_millis(50),
+            std::time::Duration::from_millis(200),
+        )
+        .await;
+    tokio::task::yield_now().await;
+}
+
+/// True when the stored thumb path is usable for this identity.
+/// Native web formats store the source path as the "thumbnail".
+fn thumbnail_is_ready(source_path: &str, thumb_path: &str, mtime: i64, size: i64) -> bool {
+    if thumb_path.is_empty() {
+        // Empty path is a durable "no preview" marker for RAW only.
+        return is_raw_path(Path::new(source_path));
+    }
+    if thumb_path == source_path {
+        // svg/webp/gif store the original path; the scan already saw the file.
+        return true;
+    }
+    stored_thumbnail_is_current(thumb_path, mtime, size) && Path::new(thumb_path).exists()
+}
+
+#[cfg(test)]
+mod thumb_ready_tests {
+    use super::thumbnail_is_ready;
+
+    #[test]
+    fn native_format_source_path_counts_as_ready() {
+        assert!(thumbnail_is_ready("/pics/a.webp", "/pics/a.webp", 1, 2));
+        assert!(thumbnail_is_ready("/pics/a.gif", "/pics/a.gif", 1, 2));
+    }
+
+    #[test]
+    fn empty_raw_placeholder_is_ready() {
+        assert!(thumbnail_is_ready("/pics/a.CR2", "", 1, 2));
+    }
+
+    #[test]
+    fn empty_non_raw_is_not_ready() {
+        assert!(!thumbnail_is_ready("/pics/a.jpg", "", 1, 2));
     }
 }

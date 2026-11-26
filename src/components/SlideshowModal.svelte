@@ -7,6 +7,7 @@
     immediateViewerSrc,
     resolveViewerSrc,
   } from '$lib/photoView';
+  import { webviewSafeImageSrc } from '$lib/protocolImage';
   import { getCurrentWindow } from '@tauri-apps/api/window';
   import { untrack, onDestroy } from 'svelte';
   import { fade } from 'svelte/transition';
@@ -34,6 +35,7 @@
   import ChevronLeft from '@lucide/svelte/icons/chevron-left';
   import ChevronRight from '@lucide/svelte/icons/chevron-right';
   import { warn as logWarn } from '$lib/logger';
+  import { LruCache, VIEWER_PRELOAD_LIMIT } from '$lib/lruCache';
   import type { PhotoMetadata } from '../types/photo';
 
   let {
@@ -74,8 +76,13 @@
   let hudTimeoutRef: ReturnType<typeof setTimeout> | null = null;
   let loadSafetyTimeout: ReturnType<typeof setTimeout> | null = null;
 
-  // Preloading cache
-  const preloadedPaths = new Set<string>();
+  // Full-res preload cache. Cap and release so a long show cannot retain
+  // every decoded frame in WebKit.
+  type PreloadSlot = { img: HTMLImageElement; revoke: () => void };
+  const preloadedImages = new LruCache<PreloadSlot>(VIEWER_PRELOAD_LIMIT, (slot) => {
+    slot.img.src = '';
+    slot.revoke();
+  });
 
   // Derive current photo
   const currentPhoto = $derived.by(() => {
@@ -114,46 +121,38 @@
     return indices;
   }
 
-  // Preload upcoming photos
+  // Preload the next upcoming frame only
   function preloadUpcoming(startPos: number) {
     if (photos.length <= 1) return;
-    const toPreload: PhotoMetadata[] = [];
+    let nextPhoto: PhotoMetadata | undefined;
 
     if (isShuffle && shuffleOrder.length === photos.length) {
-      for (let offset = 1; offset <= 3; offset++) {
-        const nextPos = (startPos + offset) % shuffleOrder.length;
-        const photoIdx = shuffleOrder[nextPos];
-        if (photoIdx !== undefined && photos[photoIdx]) {
-          toPreload.push(photos[photoIdx]);
-        }
-      }
+      const nextPos = (startPos + 1) % shuffleOrder.length;
+      const photoIdx = shuffleOrder[nextPos];
+      if (photoIdx !== undefined) nextPhoto = photos[photoIdx];
     } else {
-      for (let offset = 1; offset <= 3; offset++) {
-        const nextPos = (startPos + offset) % photos.length;
-        if (photos[nextPos]) {
-          toPreload.push(photos[nextPos]);
-        }
-      }
+      nextPhoto = photos[(startPos + 1) % photos.length];
     }
 
-    toPreload.forEach((photo) => {
-      if (preloadedPaths.has(photo.path)) return;
-      const ready = immediateViewerSrc(photo);
-      if (ready) {
-        preloadedPaths.add(photo.path);
+    if (!nextPhoto || preloadedImages.has(nextPhoto.path)) return;
+    const photo = nextPhoto;
+
+    const warm = (raw: string | null) => {
+      if (!raw || preloadedImages.has(photo.path)) return;
+      void webviewSafeImageSrc(raw).then((safe) => {
+        if (preloadedImages.has(photo.path)) {
+          safe.revoke();
+          return;
+        }
         const img = new Image();
-        img.src = ready;
-        return;
-      }
-      if (photo.is_raw) {
-        preloadedPaths.add(photo.path);
-        resolveViewerSrc(photo).then((src) => {
-          if (!src) return;
-          const img = new Image();
-          img.src = src;
-        });
-      }
-    });
+        img.src = safe.src;
+        preloadedImages.set(photo.path, { img, revoke: safe.revoke });
+      });
+    };
+
+    const ready = immediateViewerSrc(photo);
+    if (ready) warm(ready);
+    else if (photo.is_raw) void resolveViewerSrc(photo).then(warm);
   }
 
   $effect(() => {
@@ -163,18 +162,39 @@
       return;
     }
     let cancelled = false;
+    let revoke = () => {};
+
+    const apply = async (raw: string | null) => {
+      if (!raw) {
+        if (!cancelled) handleImageError();
+        return;
+      }
+      try {
+        const safe = await webviewSafeImageSrc(raw);
+        if (cancelled) {
+          safe.revoke();
+          return;
+        }
+        revoke = safe.revoke;
+        slideSrc = safe.src;
+      } catch {
+        if (!cancelled) handleImageError();
+      }
+    };
+
     const ready = immediateViewerSrc(photo);
     if (ready) {
-      slideSrc = ready;
+      void apply(ready);
     } else {
       slideSrc = '';
-      resolveViewerSrc(photo).then((src) => {
-        if (!cancelled && src) slideSrc = src;
-        else if (!cancelled) handleImageError();
+      void resolveViewerSrc(photo).then((src) => {
+        if (cancelled) return;
+        void apply(src);
       });
     }
     return () => {
       cancelled = true;
+      revoke();
     };
   });
 
@@ -551,6 +571,7 @@
           clearTimeout(loadSafetyTimeout);
           loadSafetyTimeout = null;
         }
+        preloadedImages.clear();
         progress = 0;
         elapsedBeforePause = 0;
         isImageLoaded = false;
@@ -562,6 +583,7 @@
     if (rafId) cancelAnimationFrame(rafId);
     if (hudTimeoutRef) clearTimeout(hudTimeoutRef);
     if (loadSafetyTimeout) clearTimeout(loadSafetyTimeout);
+    preloadedImages.clear();
   });
 
   $effect(() => {

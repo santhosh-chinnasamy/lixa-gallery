@@ -6,36 +6,31 @@ use async_trait::async_trait;
 use gallery_core::formats::is_raw_path;
 use gallery_core::image::ImageProcessor as ImageProcessorTrait;
 use gallery_core::models::{ExifInfo, GalleryError, PhotoMetadata, Result};
+use gallery_core::work::StaleCheck;
 use image::{GenericImageView, ImageDecoder};
 use std::path::{Path, PathBuf};
-use std::sync::Arc;
 
-pub struct RayonImageProcessor {
-    pool: Arc<rayon::ThreadPool>,
-}
+pub struct RayonImageProcessor;
 
 impl RayonImageProcessor {
     pub fn new() -> Self {
-        let pool = rayon::ThreadPoolBuilder::new()
-            .num_threads(4)
-            .thread_name(|i| format!("rayon-img-{i}"))
-            .build()
-            .expect("Failed to create Rayon thread pool");
-        Self {
-            pool: Arc::new(pool),
-        }
+        // Each decode runs on its own `spawn_blocking` thread. A shared
+        // one-thread Rayon pool queued every `install` call, so the
+        // scheduler could admit several jobs and still decode one at a time.
+        Self
     }
-}
 
-impl Default for RayonImageProcessor {
-    fn default() -> Self {
-        Self::new()
-    }
-}
-
-#[async_trait]
-impl ImageProcessorTrait for RayonImageProcessor {
-    async fn convert_image(&self, file_path: &Path, thumbnail_dir: &str) -> Result<PhotoMetadata> {
+    /// Shared conversion path.
+    ///
+    /// `stale` reports whether the folder that submitted this job has been
+    /// replaced. Stale decodes run on a short-lived, lower-priority thread so
+    /// they still land in the cache without competing with the open folder.
+    async fn convert_inner(
+        &self,
+        file_path: &Path,
+        thumbnail_dir: &str,
+        stale: Option<StaleCheck>,
+    ) -> Result<PhotoMetadata> {
         let metadata = fs_ops::get_file_metadata(file_path).await?;
         let source_path = file_path.to_string_lossy().into_owned();
         let is_raw = is_raw_path(file_path);
@@ -43,12 +38,9 @@ impl ImageProcessorTrait for RayonImageProcessor {
         if is_raw {
             let path = file_path.to_path_buf();
             let thumb_dir = thumbnail_dir.to_string();
-            let pool = self.pool.clone();
-            let rendered = tokio::task::spawn_blocking(move || {
-                pool.install(|| raw_preview::render_raw(&path, &thumb_dir))
-            })
-            .await
-            .map_err(|err| GalleryError::Unknown(err.to_string()))??;
+            let demote = stale.as_ref().is_some_and(StaleCheck::is_stale);
+            let rendered =
+                run_decode(demote, move || raw_preview::render_raw(&path, &thumb_dir)).await?;
 
             return Ok(PhotoMetadata {
                 metadata,
@@ -69,8 +61,7 @@ impl ImageProcessorTrait for RayonImageProcessor {
 
         let exif = {
             let path = file_path.to_path_buf();
-            let pool = self.pool.clone();
-            tokio::task::spawn_blocking(move || pool.install(|| exif_info::from_path(&path)))
+            tokio::task::spawn_blocking(move || exif_info::from_path(&path))
                 .await
                 .map_err(|err| GalleryError::Unknown(err.to_string()))?
         };
@@ -110,34 +101,30 @@ impl ImageProcessorTrait for RayonImageProcessor {
         // Decode off the async executor. The output path is already unique to
         // this source path and identity, so two folders cannot overwrite it.
         let path = file_path.to_path_buf();
-        let pool = self.pool.clone();
-        let output_path_result = tokio::task::spawn_blocking(move || {
-            pool.install(|| {
-                let img = match open_oriented(&path) {
-                    Ok(img) => img,
-                    Err(e) => {
-                        log::warn!(
-                            "Failed to open image {}: {}. Falling back to original.",
-                            path.display(),
-                            e
-                        );
-                        return Ok::<Option<PathBuf>, GalleryError>(None);
-                    }
-                };
-
-                let thumbnail = img.thumbnail(512, 512);
-                write_webp_atomic(&thumbnail, &output_path)?;
-                if let Err(err) = thumbnail_cache::remove_other_identity_files(&output_path) {
+        let demote = stale.as_ref().is_some_and(StaleCheck::is_stale);
+        let output_path_result = run_decode(demote, move || {
+            let thumbnail = match open_oriented_thumbnail(&path, THUMB_MAX_EDGE) {
+                Ok(img) => img,
+                Err(e) => {
                     log::warn!(
-                        "Could not remove stale thumbnails beside {}: {err}",
-                        output_path.display()
+                        "Failed to open image {}: {}. Falling back to original.",
+                        path.display(),
+                        e
                     );
+                    return Ok::<Option<PathBuf>, GalleryError>(None);
                 }
-                Ok::<Option<PathBuf>, GalleryError>(Some(output_path))
-            })
+            };
+
+            write_webp_atomic(&thumbnail, &output_path)?;
+            if let Err(err) = thumbnail_cache::remove_other_identity_files(&output_path) {
+                log::warn!(
+                    "Could not remove stale thumbnails beside {}: {err}",
+                    output_path.display()
+                );
+            }
+            Ok::<Option<PathBuf>, GalleryError>(Some(output_path))
         })
-        .await
-        .map_err(|e| GalleryError::Unknown(e.to_string()))?;
+        .await;
 
         let thumbnail_path = match output_path_result {
             Ok(Some(path)) => path.to_string_lossy().into_owned(),
@@ -161,20 +148,78 @@ impl ImageProcessorTrait for RayonImageProcessor {
             is_raw: false,
         })
     }
+}
+
+impl Default for RayonImageProcessor {
+    fn default() -> Self {
+        Self::new()
+    }
+}
+
+#[async_trait]
+impl ImageProcessorTrait for RayonImageProcessor {
+    async fn convert_image(&self, file_path: &Path, thumbnail_dir: &str) -> Result<PhotoMetadata> {
+        self.convert_inner(file_path, thumbnail_dir, None).await
+    }
+
+    async fn convert_image_tracked(
+        &self,
+        file_path: &Path,
+        thumbnail_dir: &str,
+        stale: StaleCheck,
+    ) -> Result<PhotoMetadata> {
+        self.convert_inner(file_path, thumbnail_dir, Some(stale))
+            .await
+    }
 
     async fn read_exif(&self, file_path: &Path) -> Result<Option<ExifInfo>> {
         let path = file_path.to_path_buf();
-        let pool = self.pool.clone();
-        let info =
-            tokio::task::spawn_blocking(move || pool.install(|| exif_info::from_path(&path)))
-                .await
-                .map_err(|err| GalleryError::Unknown(err.to_string()))?;
+        let info = tokio::task::spawn_blocking(move || exif_info::from_path(&path))
+            .await
+            .map_err(|err| GalleryError::Unknown(err.to_string()))?;
         Ok(Some(info))
     }
+
+    async fn ensure_decoded_preview(&self, source: &Path, cache_dir: &Path) -> Result<PathBuf> {
+        ensure_decoded_preview(source, cache_dir).await
+    }
+}
+
+/// Run blocking image work off the async executor.
+///
+/// Stale work gets its own short-lived thread with a lowered OS priority: the
+/// folder on screen keeps the cores, while the old decode still finishes and
+/// lands in the thumbnail cache. The priority is deliberately not restored —
+/// raising it again needs privileges — so the thread exits afterwards instead
+/// of returning to a shared pool.
+async fn run_decode<T, F>(demote: bool, work: F) -> Result<T>
+where
+    T: Send + 'static,
+    F: FnOnce() -> Result<T> + Send + 'static,
+{
+    if !demote {
+        return tokio::task::spawn_blocking(work)
+            .await
+            .map_err(|err| GalleryError::Unknown(err.to_string()))?;
+    }
+
+    let (tx, rx) = tokio::sync::oneshot::channel();
+    std::thread::Builder::new()
+        .name("lixa-stale-decode".to_string())
+        .spawn(move || {
+            crate::thread_priority::demote_current_thread();
+            let _ = tx.send(work());
+        })
+        .map_err(|err| GalleryError::Unknown(err.to_string()))?;
+    rx.await
+        .map_err(|err| GalleryError::Unknown(err.to_string()))?
 }
 
 /// Longest edge of a viewer preview. Smaller frames are not enlarged.
 const PREVIEW_MAX_EDGE: u32 = 2048;
+
+/// Longest edge written for grid thumbnails.
+const THUMB_MAX_EDGE: u32 = 512;
 
 /// Decode `source` and write a WebP the webview can paint.
 ///
@@ -221,6 +266,89 @@ fn open_oriented(path: &Path) -> std::result::Result<image::DynamicImage, String
     let mut image = image::DynamicImage::from_decoder(decoder).map_err(|err| err.to_string())?;
     image.apply_orientation(orientation);
     Ok(image)
+}
+
+/// Decode only as much as needed for a grid thumb, then rotate the small bitmap.
+fn open_oriented_thumbnail(
+    path: &Path,
+    max_edge: u32,
+) -> std::result::Result<image::DynamicImage, String> {
+    let ext = path
+        .extension()
+        .and_then(|s| s.to_str())
+        .unwrap_or("")
+        .to_ascii_lowercase();
+    if matches!(ext.as_str(), "jpg" | "jpeg" | "jpe") {
+        if let Ok(thumb) = open_jpeg_thumbnail(path, max_edge) {
+            return Ok(thumb);
+        }
+    }
+
+    let reader = image::ImageReader::open(path).map_err(|err| err.to_string())?;
+    let mut decoder = reader
+        .with_guessed_format()
+        .map_err(|err| err.to_string())?
+        .into_decoder()
+        .map_err(|err| err.to_string())?;
+    let orientation = decoder.orientation().map_err(|err| err.to_string())?;
+    let image = image::DynamicImage::from_decoder(decoder).map_err(|err| err.to_string())?;
+    let mut thumb = image.thumbnail(max_edge, max_edge);
+    thumb.apply_orientation(orientation);
+    Ok(thumb)
+}
+
+/// JPEG DCT scale during decode, then EXIF orientation on the small frame.
+fn open_jpeg_thumbnail(
+    path: &Path,
+    max_edge: u32,
+) -> std::result::Result<image::DynamicImage, String> {
+    use std::io::BufReader;
+
+    let file = std::fs::File::open(path).map_err(|err| err.to_string())?;
+    let mut decoder = jpeg_decoder::Decoder::new(BufReader::new(file));
+    decoder.read_info().map_err(|err| err.to_string())?;
+    let info = decoder
+        .info()
+        .ok_or_else(|| "jpeg missing header info".to_string())?;
+    let target = max_edge.min(u32::from(u16::MAX)) as u16;
+    let (out_w, out_h) = decoder
+        .scale(target, target)
+        .map_err(|err| err.to_string())?;
+    let pixels = decoder.decode().map_err(|err| err.to_string())?;
+    let width = u32::from(out_w);
+    let height = u32::from(out_h);
+
+    let rgb = match info.pixel_format {
+        jpeg_decoder::PixelFormat::L8 => {
+            let gray = image::GrayImage::from_raw(width, height, pixels)
+                .ok_or_else(|| "jpeg gray buffer size mismatch".to_string())?;
+            image::DynamicImage::ImageLuma8(gray).to_rgb8()
+        }
+        jpeg_decoder::PixelFormat::RGB24 => image::RgbImage::from_raw(width, height, pixels)
+            .ok_or_else(|| "jpeg rgb buffer size mismatch".to_string())?,
+        jpeg_decoder::PixelFormat::CMYK32 => {
+            return Err("cmyk jpeg thumb path unsupported".to_string());
+        }
+        other => {
+            return Err(format!("unsupported jpeg pixel format: {other:?}"));
+        }
+    };
+
+    let mut thumb = image::DynamicImage::ImageRgb8(rgb).thumbnail(max_edge, max_edge);
+    if let Ok(orientation) = jpeg_orientation(path) {
+        thumb.apply_orientation(orientation);
+    }
+    Ok(thumb)
+}
+
+fn jpeg_orientation(path: &Path) -> std::result::Result<image::metadata::Orientation, String> {
+    let reader = image::ImageReader::open(path).map_err(|err| err.to_string())?;
+    let mut decoder = reader
+        .with_guessed_format()
+        .map_err(|err| err.to_string())?
+        .into_decoder()
+        .map_err(|err| err.to_string())?;
+    decoder.orientation().map_err(|err| err.to_string())
 }
 
 fn fit_within(image: image::DynamicImage, max_edge: u32) -> image::DynamicImage {
@@ -620,5 +748,26 @@ mod tests {
         let again = ensure_decoded_preview(&tiff, &cache).await.unwrap();
         assert_eq!(preview, again);
         assert_eq!(webp_files(&cache).len(), 1);
+    }
+
+    #[tokio::test]
+    async fn camera_jpeg_writes_a_decodable_webp_thumb() {
+        let source = Path::new("/home/santhosh/Pictures/marriage/100MSDCF/DSC04630.JPG");
+        if !source.is_file() {
+            return;
+        }
+        let root = tempfile::tempdir().unwrap();
+        let cache = root.path().join("cache");
+        let processor = RayonImageProcessor::new();
+        let meta = processor
+            .convert_image(source, cache.to_str().unwrap())
+            .await
+            .expect("convert_image");
+        assert_ne!(meta.thumbnail_path, meta.path);
+        let bytes = std::fs::read(&meta.thumbnail_path).unwrap();
+        assert_eq!(&bytes[0..4], b"RIFF");
+        assert_eq!(&bytes[8..12], b"WEBP");
+        let decoded = image::load_from_memory(&bytes).unwrap();
+        assert!(decoded.width() <= 512 && decoded.height() <= 512);
     }
 }

@@ -6,3 +6,5 @@ pub mod image;
 pub mod models;
 pub mod repos;
 pub mod thumbnail_cache;
+pub mod work;
+pub mod work_scheduler;

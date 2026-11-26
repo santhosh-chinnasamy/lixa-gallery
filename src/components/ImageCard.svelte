@@ -1,6 +1,9 @@
 <script lang="ts">
   import * as Card from '$lib/components/ui/card';
-  import { gridImageUrl, UNSUPPORTED_FORMAT_MESSAGE } from '$lib/imageSource';
+  import { UNSUPPORTED_FORMAT_MESSAGE } from '$lib/imageSource';
+  import { ensureThumbnailPath } from '$lib/ensureThumbQueue';
+  import { gridThumbUrl } from '$lib/gridThumbUrl';
+  import { pageIsHttpOrigin } from '$lib/protocolImage';
   import { cullFlags, gridFit } from '../stores/galleryStore';
   import Filename from './Filename.svelte';
   import Heart from '@lucide/svelte/icons/heart';
@@ -30,12 +33,73 @@
   let fileName = $derived(photo.metadata.name);
   let showWholeFrame = $derived($gridFit === 'fit');
 
-  // Decoded WebP thumbnail, or the original HEIC on macOS. Null means this
-  // platform cannot show the file, so the card does not request it.
-  let imageSrc = $derived(gridImageUrl(photo));
-
+  // Sync URL from disk path. Override only after a one-shot ensure.
+  // Under http, never fall through to protocol URLs (gridThumbUrl returns null).
+  let ensuredSrc = $state<string | null>(null);
+  let ensureAttempted = $state(false);
+  let ensureForPath = $state<string | null>(null);
   let imageLoaded = $state(false);
   let imageError = $state(false);
+  let lastPaintSrc = $state<string | null>(null);
+
+  let imageSrc = $derived(ensuredSrc ?? gridThumbUrl(photo));
+  // Http + no disk webp yet: stay on Loading until ensure finishes (or errors).
+  let awaitingHttpThumb = $derived(
+    pageIsHttpOrigin() && imageSrc === null && !imageError,
+  );
+
+  function applyEnsuredThumb(thumbPath: string) {
+    if (!thumbPath || !/\.webp$/i.test(thumbPath)) {
+      imageError = true;
+      imageLoaded = false;
+      return;
+    }
+    ensuredSrc = `/__lixa_thumb__?p=${encodeURIComponent(thumbPath)}`;
+  }
+
+  // Reset paint state only when the URL identity changes. Replacing the photo
+  // object (same path + same thumb URL) must not clear imageLoaded — browsers
+  // often skip onload for a cached src, which left cards stuck on Loading.
+  $effect(() => {
+    const src = imageSrc;
+    if (src === lastPaintSrc) return;
+    lastPaintSrc = src;
+    imageLoaded = false;
+    imageError = false;
+  });
+
+  $effect(() => {
+    const path = photo.path;
+    void photo.thumbnail_path;
+
+    if (ensureForPath !== path) {
+      ensureForPath = path;
+      ensureAttempted = false;
+      ensuredSrc = null;
+    }
+
+    if (!pageIsHttpOrigin()) return;
+    if (gridThumbUrl(photo) !== null) return;
+    if (ensureAttempted) return;
+
+    let cancelled = false;
+    ensureAttempted = true;
+    void ensureThumbnailPath(path)
+      .then((thumbPath) => {
+        if (cancelled) return;
+        applyEnsuredThumb(thumbPath);
+      })
+      .catch(() => {
+        if (!cancelled) {
+          imageError = true;
+          imageLoaded = false;
+        }
+      });
+
+    return () => {
+      cancelled = true;
+    };
+  });
 
   const handleClick = () => handleImageClick(photo);
 
@@ -50,6 +114,17 @@
   }
 
   function handleImageError() {
+    // Stale DB path. Rematerialize once — never invoke→blob on the grid.
+    if (!ensureAttempted && pageIsHttpOrigin()) {
+      ensureAttempted = true;
+      void ensureThumbnailPath(photo.path)
+        .then(applyEnsuredThumb)
+        .catch(() => {
+          imageError = true;
+          imageLoaded = false;
+        });
+      return;
+    }
     imageError = true;
     imageLoaded = false;
   }
@@ -67,13 +142,25 @@
   onclick={handleClick}
 >
   <Card.Content class="relative overflow-hidden rounded-lg p-0">
-    <!-- Image container with consistent aspect ratio -->
     <div
       class={`relative aspect-[1/1] h-auto w-full overflow-hidden ${
         showWholeFrame ? 'bg-neutral-300 dark:bg-neutral-800' : 'bg-muted'
       }`}
     >
-      {#if imageSrc === null}
+      {#if awaitingHttpThumb}
+        <div
+          class="flex h-full w-full animate-pulse items-center justify-center bg-muted"
+        >
+          <div class="text-sm text-muted-foreground">Loading...</div>
+        </div>
+      {:else if imageSrc === null && imageError}
+        <div class="flex h-full w-full items-center justify-center bg-muted">
+          <div class="p-2 text-center text-xs text-muted-foreground">
+            <div>Failed to load</div>
+            <div class="max-w-full truncate px-2">{fileName}</div>
+          </div>
+        </div>
+      {:else if imageSrc === null}
         <div
           class="flex h-full w-full items-center justify-center bg-muted px-3 text-center"
         >
@@ -83,7 +170,6 @@
           </div>
         </div>
       {:else}
-        <!-- Loading placeholder -->
         {#if !imageLoaded && !imageError}
           <div
             class="flex h-full w-full animate-pulse items-center justify-center bg-muted"
@@ -92,21 +178,15 @@
           </div>
         {/if}
 
-        <!-- Error placeholder -->
         {#if imageError}
-          <div
-            class="flex h-full w-full items-center justify-center bg-muted"
-          >
+          <div class="flex h-full w-full items-center justify-center bg-muted">
             <div class="p-2 text-center text-xs text-muted-foreground">
               <div>Failed to load</div>
-              <div class="max-w-full truncate px-2">
-                {fileName}
-              </div>
+              <div class="max-w-full truncate px-2">{fileName}</div>
             </div>
           </div>
         {/if}
 
-        <!-- Actual image -->
         <img
           src={imageSrc}
           alt={fileName}
@@ -118,8 +198,7 @@
           onerror={handleImageError}
         />
         {#if isRejected}
-          <div
-            class="pointer-events-none absolute inset-0 bg-background/55"
+          <div class="pointer-events-none absolute inset-0 bg-background/55"
           ></div>
         {/if}
       {/if}

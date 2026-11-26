@@ -95,13 +95,61 @@ pub struct ThumbnailRequest<'a> {
     pub preview: bool,
 }
 
-/// Split a protocol path from the query the webview adds.
+/// Split a protocol request after the `lixa-thumbnail://localhost/` prefix.
 ///
-/// The source path is percent-encoded, so a literal `?` is not part of the
-/// filename the UI sends. A query is recognized only when every parameter is
-/// `v=<mtime>_<size>` or `kind=preview`. Anything else is left unchanged so a
-/// stray `?` cannot swallow part of the path.
+/// Preferred form: `thumb?path=<urlencoded>&v=<mtime>_<size>&kind=preview`.
+/// The filesystem path must not live in the URI path segment. WebKit decodes
+/// `%2F` there and turns `/home/...` into `home/...`, which then 404s.
+///
+/// Legacy form `\<urlencoded-path\>?v=...` is still accepted so older clients
+/// keep working where the path bytes survive.
 pub fn parse_thumbnail_request(encoded_path: &str) -> ThumbnailRequest<'_> {
+    let rest = encoded_path.strip_prefix('/').unwrap_or(encoded_path);
+
+    if let Some(query) = rest.strip_prefix("thumb?") {
+        return parse_thumb_query(query, encoded_path);
+    }
+    if let Some(query) = rest.strip_prefix('?') {
+        if query.split('&').any(|part| part.starts_with("path=")) {
+            return parse_thumb_query(query, encoded_path);
+        }
+    }
+
+    parse_legacy_path_request(encoded_path)
+}
+
+fn parse_thumb_query<'a>(query: &'a str, fallback: &'a str) -> ThumbnailRequest<'a> {
+    let mut path = None;
+    let mut preview = false;
+    for part in query.split('&') {
+        if let Some(value) = part.strip_prefix("path=") {
+            path = Some(value);
+        } else if let Some(value) = part.strip_prefix("v=") {
+            if !is_cache_buster_token(value) {
+                return ThumbnailRequest {
+                    path: fallback,
+                    preview: false,
+                };
+            }
+        } else if part == "kind=preview" {
+            preview = true;
+        } else if !part.is_empty() {
+            return ThumbnailRequest {
+                path: fallback,
+                preview: false,
+            };
+        }
+    }
+    match path {
+        Some(path) => ThumbnailRequest { path, preview },
+        None => ThumbnailRequest {
+            path: fallback,
+            preview: false,
+        },
+    }
+}
+
+fn parse_legacy_path_request(encoded_path: &str) -> ThumbnailRequest<'_> {
     let Some((path, query)) = encoded_path.split_once('?') else {
         return ThumbnailRequest {
             path: encoded_path,
@@ -729,6 +777,79 @@ mod tests {
         let unknown = parse_thumbnail_request("plain.jpg?v=10_20&kind=full");
         assert_eq!(unknown.path, "plain.jpg?v=10_20&kind=full");
         assert!(!unknown.preview);
+    }
+
+    #[test]
+    fn path_query_form_keeps_absolute_unix_paths() {
+        let encoded = "%2Fhome%2Fsanthosh%2FPictures%2Fmarriage%2F100MSDCF%2FDSC04630.JPG";
+        let request_uri = format!("thumb?path={encoded}&v=1741468426_18277968");
+        let request = parse_thumbnail_request(&request_uri);
+        assert_eq!(request.path, encoded);
+        assert!(!request.preview);
+
+        let preview_uri = format!("thumb?path={encoded}&v=1_2&kind=preview");
+        let preview = parse_thumbnail_request(&preview_uri);
+        assert_eq!(preview.path, encoded);
+        assert!(preview.preview);
+
+        // Leading slash from uri.path() must not break parsing.
+        let slash_uri = format!("/thumb?path={encoded}&v=1_2");
+        let with_slash = parse_thumbnail_request(&slash_uri);
+        assert_eq!(with_slash.path, encoded);
+    }
+
+    /// WebKit decodes `%2F` in the URI *path* segment, so
+    /// `lixa-thumbnail://localhost/%2Fhome%2F...JPG?v=1_2` arrives as
+    /// `home/...JPG?v=1_2` (leading slash gone). Legacy parse then points at a
+    /// relative path that does not exist → protocol 404 → Failed to load.
+    #[test]
+    fn webkit_decoded_legacy_path_loses_unix_root() {
+        let webkit_tail =
+            "home/santhosh/Pictures/marriage/100MSDCF/DSC04630.JPG?v=1741468426_18277968";
+        let request = parse_legacy_path_request(webkit_tail);
+        assert_eq!(
+            request.path,
+            "home/santhosh/Pictures/marriage/100MSDCF/DSC04630.JPG"
+        );
+        let relative = PathBuf::from(request.path);
+        assert!(
+            !relative.is_absolute(),
+            "WebKit-normalized legacy URI is relative"
+        );
+        let err = ThumbnailIdentity::read(&relative).expect_err("must miss without leading /");
+        assert_eq!(err.kind(), std::io::ErrorKind::NotFound);
+    }
+
+    #[test]
+    fn path_query_roundtrip_resolves_camera_jpeg_when_present() {
+        let source = Path::new("/home/santhosh/Pictures/marriage/100MSDCF/DSC04630.JPG");
+        if !source.is_file() {
+            return;
+        }
+        // Same encoding as `encodeURIComponent` for this ASCII path.
+        let encoded = "%2Fhome%2Fsanthosh%2FPictures%2Fmarriage%2F100MSDCF%2FDSC04630.JPG";
+        let uri_tail = format!("thumb?path={encoded}&v=1_2");
+        let request = parse_thumbnail_request(&uri_tail);
+        assert_eq!(request.path, encoded);
+
+        let decoded = {
+            let mut out = Vec::new();
+            let bytes = request.path.as_bytes();
+            let mut i = 0;
+            while i < bytes.len() {
+                if bytes[i] == b'%' && i + 2 < bytes.len() {
+                    let hex = std::str::from_utf8(&bytes[i + 1..i + 3]).unwrap();
+                    out.push(u8::from_str_radix(hex, 16).unwrap());
+                    i += 3;
+                } else {
+                    out.push(bytes[i]);
+                    i += 1;
+                }
+            }
+            String::from_utf8(out).unwrap()
+        };
+        assert_eq!(Path::new(&decoded), source);
+        assert!(ThumbnailIdentity::read(Path::new(&decoded)).is_ok());
     }
 
     #[test]

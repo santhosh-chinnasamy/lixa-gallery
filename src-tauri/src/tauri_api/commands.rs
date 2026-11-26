@@ -2,7 +2,7 @@ use crate::tauri_api::events::TauriEventHub;
 use crate::tauri_api::state::AppState;
 use gallery_core::models::{
     CullFlag, ExportOptions, ExportReport, Favourite, FavouriteFolderGroup, FolderNode,
-    LoadingMode, PhotoCullState, PhotoMetadata, Workspace,
+    FolderScanResult, LoadingMode, PhotoCullState, PhotoMetadata, Workspace,
 };
 use std::sync::atomic::Ordering;
 use std::sync::Arc;
@@ -13,7 +13,7 @@ pub async fn scan_folder(
     state: State<'_, AppState>,
     path: &str,
     mode: LoadingMode,
-) -> Result<Vec<PhotoMetadata>, String> {
+) -> Result<FolderScanResult, String> {
     state
         .gallery
         .scan_folder(path, &state.thumbnail_path, mode)
@@ -236,4 +236,134 @@ pub fn get_log_dir(app_handle: AppHandle) -> Result<String, String> {
     use tauri::Manager;
     let log_dir = app_handle.path().app_log_dir().map_err(|e| e.to_string())?;
     Ok(log_dir.to_string_lossy().to_string())
+}
+
+/// Ensure a WebP thumbnail exists on disk and return its absolute path.
+/// Used by the Vite grid (`/__lixa_thumb__`) when DB `thumbnail_path` is stale.
+#[tauri::command]
+pub async fn ensure_thumbnail_path(
+    state: State<'_, AppState>,
+    path: String,
+) -> Result<String, String> {
+    use std::path::PathBuf;
+    let original_path = PathBuf::from(&path);
+    state
+        .gallery
+        .get_or_create_thumbnail(&original_path, &state.thumbnail_path)
+        .await
+        .map_err(|err| err.to_string())
+}
+
+/// Is the viewer-sized WebP for this original already on disk?
+///
+/// The viewer uses this to paint the cached preview immediately and defer the
+/// full-resolution decode. Cheap: one stat plus the cache path computation.
+#[tauri::command]
+pub fn preview_is_cached(state: State<'_, AppState>, path: String) -> Result<bool, String> {
+    use std::path::Path;
+
+    let original = Path::new(&path);
+    let identity =
+        infra::thumbnail_cache::ThumbnailIdentity::read(original).map_err(|err| err.to_string())?;
+    let preview = infra::thumbnail_cache::preview_disk_path(
+        Path::new(&state.thumbnail_path),
+        original,
+        identity,
+    );
+    Ok(preview.is_file())
+}
+
+/// Warm the viewer preview in the background so the next visit is instant.
+/// Fire-and-forget: failures are logged and never reach the UI.
+#[tauri::command]
+pub async fn warm_preview(state: State<'_, AppState>, path: String) -> Result<(), String> {
+    if let Err(err) = state
+        .gallery
+        .warm_preview(std::path::Path::new(&path), &state.thumbnail_path)
+        .await
+    {
+        log::debug!("Could not warm viewer preview for {path}: {err}");
+    }
+    Ok(())
+}
+
+/// Thumbnail / preview bytes as base64. Used when WebKit blocks custom-protocol
+/// `<img>` / `fetch` from the Vite `http://localhost` origin (tauri#16201).
+///
+/// Only returns real WebP thumb/preview bytes (capped). Never base64-encodes a
+/// full-size original — that froze the webview and pushed WebKit past 10+ GiB.
+#[tauri::command]
+pub async fn get_thumbnail_bytes(
+    state: State<'_, AppState>,
+    path: String,
+    preview: Option<bool>,
+) -> Result<String, String> {
+    use base64::{engine::general_purpose::STANDARD, Engine};
+    use std::path::{Path, PathBuf};
+
+    const MAX_BYTES: usize = 1_500_000;
+
+    fn is_webp(data: &[u8]) -> bool {
+        data.len() >= 12 && data.starts_with(b"RIFF") && &data[8..12] == b"WEBP"
+    }
+
+    fn read_capped_webp(path: &Path) -> Result<Vec<u8>, String> {
+        let data = std::fs::read(path).map_err(|err| err.to_string())?;
+        if !is_webp(&data) {
+            return Err(format!("not a webp thumbnail: {}", path.display()));
+        }
+        if data.len() > MAX_BYTES {
+            return Err(format!(
+                "thumbnail too large ({} bytes): {}",
+                data.len(),
+                path.display()
+            ));
+        }
+        Ok(data)
+    }
+
+    let original_path = PathBuf::from(&path);
+    let thumb_dir = &state.thumbnail_path;
+    let want_preview = preview.unwrap_or(false);
+
+    if !want_preview {
+        // Disk hit first — same path as the URI protocol. Avoids Interactive
+        // materialize + photos-updated storms when the WebP already exists.
+        if let Ok(identity) = infra::thumbnail_cache::ThumbnailIdentity::read(&original_path) {
+            let thumb_path = infra::thumbnail_cache::thumbnail_disk_path(
+                Path::new(thumb_dir),
+                &original_path,
+                identity,
+            );
+            if let Ok(data) = read_capped_webp(&thumb_path) {
+                return Ok(STANDARD.encode(data));
+            }
+        }
+    }
+
+    let file_path = if want_preview {
+        state
+            .gallery
+            .get_or_create_preview(&original_path, thumb_dir)
+            .await
+            .map_err(|err| err.to_string())?
+    } else {
+        state
+            .gallery
+            .get_or_create_thumbnail(&original_path, thumb_dir)
+            .await
+            .map_err(|err| err.to_string())?
+    };
+
+    let data = read_capped_webp(Path::new(&file_path))?;
+    Ok(STANDARD.encode(data))
+}
+
+/// Original / preview file bytes as base64 for the Vite http origin, where
+/// `asset://` and `http://asset.localhost` `<img>` loads are blocked.
+#[tauri::command]
+pub async fn read_image_bytes(path: String) -> Result<String, String> {
+    use base64::{engine::general_purpose::STANDARD, Engine};
+    let data = std::fs::read(&path).map_err(|err| err.to_string())?;
+    Ok(STANDARD.encode(data))
 }

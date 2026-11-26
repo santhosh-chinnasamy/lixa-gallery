@@ -184,6 +184,14 @@ impl ImageProcessor for FakeImageProcessor {
     async fn read_exif(&self, _file_path: &Path) -> Result<Option<gallery_core::models::ExifInfo>> {
         Ok(None)
     }
+
+    async fn ensure_decoded_preview(
+        &self,
+        source: &Path,
+        _cache_dir: &Path,
+    ) -> Result<std::path::PathBuf> {
+        Ok(source.to_path_buf())
+    }
 }
 
 pub struct FakePhotoRepository {
@@ -227,6 +235,34 @@ impl PhotoRepository for FakePhotoRepository {
 pub struct FakeEventHub;
 impl EventHub for FakeEventHub {
     fn emit_progress(&self, _event: &str, _progress: u32) -> anyhow::Result<()> {
+        Ok(())
+    }
+
+    fn emit_photos_updated(
+        &self,
+        _generation: u64,
+        _photos: &[gallery_core::models::PhotoMetadata],
+    ) -> anyhow::Result<()> {
+        Ok(())
+    }
+}
+
+/// Records photo-updated batches for tests.
+pub struct RecordingEventHub {
+    pub photos: Mutex<Vec<PhotoMetadata>>,
+}
+
+impl EventHub for RecordingEventHub {
+    fn emit_progress(&self, _event: &str, _progress: u32) -> anyhow::Result<()> {
+        Ok(())
+    }
+
+    fn emit_photos_updated(
+        &self,
+        _generation: u64,
+        photos: &[PhotoMetadata],
+    ) -> anyhow::Result<()> {
+        self.photos.lock().unwrap().extend_from_slice(photos);
         Ok(())
     }
 }

@@ -1,7 +1,7 @@
 <script lang="ts">
   import { Button } from '$lib/components/ui/button';
   import {
-    gridImageUrl,
+    prefersDecodedPreview,
     UNSUPPORTED_FORMAT_MESSAGE,
   } from '$lib/imageSource';
   import { LruCache, VIEWER_PRELOAD_LIMIT } from '$lib/lruCache';
@@ -26,8 +26,14 @@
   import {
     formatLabel,
     immediateViewerSrc,
+    previewIsCached,
     resolveViewerSrc,
+    warmViewerPreview,
   } from '$lib/photoView';
+  import { gridThumbUrl } from '$lib/gridThumbUrl';
+  import { previewUrl } from '$lib/thumbnail';
+  import { probe, probeWarn } from '$lib/debugProbe';
+  import { webviewSafeImageSrc } from '$lib/protocolImage';
   import Filename from './Filename.svelte';
   import X from '@lucide/svelte/icons/x';
   import Info from '@lucide/svelte/icons/info';
@@ -76,19 +82,21 @@
       : 'unflagged',
   );
   const fileName = $derived(selectedImage?.metadata.name);
-  const blurSrc = $derived(selectedImage ? gridImageUrl(selectedImage) : null);
 
   // Modal and Image states
   let isSlideshowOpen = $state(false);
   let imageLoaded = $state(false);
   let imageError = $state(false);
+  let blurSrc = $state<string | null>(null);
   // Full-size originals. Capped so stepping through a shoot cannot keep
   // every visited file alive, and cleared when the viewer closes or the
   // open folder changes.
-  const preloadedImages = new LruCache<HTMLImageElement>(
+  type PreloadSlot = { img: HTMLImageElement; revoke: () => void };
+  const preloadedImages = new LruCache<PreloadSlot>(
     VIEWER_PRELOAD_LIMIT,
-    (img) => {
-      img.src = '';
+    (slot) => {
+      slot.img.src = '';
+      slot.revoke();
     },
   );
   let preloadedFolder: string | null = null;
@@ -250,9 +258,13 @@
   function handleImageError() {
     imageError = true;
     imageLoaded = false;
+    probeWarn('modal.img.onerror', {
+      name: fileName ?? null,
+      src: viewerSrc.slice(0, 80),
+    });
   }
 
-  // Preload adjacent images
+  // Preload adjacent images through the same blob bridge as the main viewer.
   function preloadAdjacentImages() {
     if (!selectedImage || currentIndex === -1) return;
 
@@ -260,28 +272,37 @@
     if (canShowPrevious) indicesToPreload.push(currentIndex - 1);
     if (canShowNext) indicesToPreload.push(currentIndex + 1);
 
-    // Preload next 2 images in each direction for smoother navigation
-    if (currentIndex - 2 >= 0) indicesToPreload.push(currentIndex - 2);
-    if (currentIndex + 2 < photoSource.length)
-      indicesToPreload.push(currentIndex + 2);
-
     indicesToPreload.forEach((index) => {
       const photo = photoSource[index];
-      if (photo && !preloadedImages.has(photo.path)) {
-        const ready = immediateViewerSrc(photo);
-        if (ready) {
+      if (!photo || preloadedImages.has(photo.path)) return;
+
+      const warm = (raw: string | null) => {
+        if (!raw || preloadedImages.has(photo.path)) return;
+        void webviewSafeImageSrc(raw).then((safe) => {
+          if (preloadedImages.has(photo.path)) {
+            safe.revoke();
+            return;
+          }
           const img = new Image();
-          img.src = ready;
-          preloadedImages.set(photo.path, img);
-        } else if (photo.is_raw) {
-          resolveViewerSrc(photo).then((src) => {
-            if (!src || preloadedImages.has(photo.path)) return;
-            const img = new Image();
-            img.src = src;
-            preloadedImages.set(photo.path, img);
-          });
-        }
+          img.src = safe.src;
+          preloadedImages.set(photo.path, { img, revoke: safe.revoke });
+        });
+      };
+
+      // Large originals: neighbours warm the small decoded preview (cheap to
+      // keep and fast to paint) or ask for one in the background. Only a cold
+      // preview falls back to warming the full original.
+      if (prefersDecodedPreview(photo)) {
+        void previewIsCached(photo).then((cached) => {
+          if (cached) warm(previewUrl(photo));
+          else warmViewerPreview(photo);
+        });
+        return;
       }
+
+      const ready = immediateViewerSrc(photo);
+      if (ready) warm(ready);
+      else if (photo.is_raw) void resolveViewerSrc(photo).then(warm);
     });
   }
 
@@ -507,26 +528,136 @@
     return () => clearTimeout(uiTimeoutRef);
   });
 
+  /** How long to stay on the decoded preview before loading the original. */
+  const FULL_RES_SETTLE_MS = 300;
+
   $effect(() => {
     const photo = selectedImage;
     if (!photo) {
       viewerSrc = '';
+      blurSrc = null;
+      probe('modal.close');
       return;
     }
+    probe('modal.open', {
+      name: photo.metadata.name,
+      path: photo.path.slice(0, 80),
+    });
     let cancelled = false;
-    const ready = immediateViewerSrc(photo);
-    if (ready) {
-      viewerSrc = ready;
-    } else {
-      viewerSrc = '';
-      resolveViewerSrc(photo).then((src) => {
-        if (cancelled) return;
-        if (src) viewerSrc = src;
-        else imageError = true;
+    let revokeViewer = () => {};
+    let swapTimer: ReturnType<typeof setTimeout> | undefined;
+    // Monotonic display stage so a late preview apply cannot overwrite a
+    // loaded original (preview apply is fire-and-forget relative to decode).
+    const PREVIEW = 0;
+    const FULL = 1;
+    let stage = PREVIEW;
+
+    // Blur placeholder: same-origin /@fs (or protocol). Never invoke→blob.
+    blurSrc = gridThumbUrl(photo);
+
+    const applySafe = (
+      safe: { src: string; revoke: () => void },
+      forStage: number,
+    ) => {
+      if (cancelled || forStage < stage) {
+        safe.revoke();
+        return;
+      }
+      revokeViewer();
+      revokeViewer = safe.revoke;
+      viewerSrc = safe.src;
+      probe('modal.viewerSrc', {
+        form: safe.src.slice(0, 64),
+        via: safe.src.startsWith('blob:') ? 'invoke-blob' : 'url',
       });
+    };
+
+    const applyViewer = async (raw: string | null, forStage: number) => {
+      if (!raw) {
+        if (!cancelled && forStage >= stage) {
+          viewerSrc = '';
+          imageError = true;
+          probeWarn('modal.viewerSrc.fail', { name: photo.metadata.name });
+        }
+        return;
+      }
+      try {
+        applySafe(await webviewSafeImageSrc(raw), forStage);
+      } catch (error) {
+        if (cancelled || forStage < stage) return;
+        imageError = true;
+        probeWarn('modal.viewerSrc.fail', {
+          name: photo.metadata.name,
+          err: error instanceof Error ? error.message : String(error),
+        });
+      }
+    };
+
+    // Swap to the original only after it decoded, so moving from the preview
+    // never shows a blank frame.
+    const applyOriginalAfterDecode = async (
+      raw: string | null,
+      forStage: number,
+    ) => {
+      if (!raw) return;
+      try {
+        const safe = await webviewSafeImageSrc(raw);
+        if (cancelled || forStage < stage) {
+          safe.revoke();
+          return;
+        }
+        const probeImg = new Image();
+        probeImg.onload = () => applySafe(safe, forStage);
+        probeImg.onerror = () => safe.revoke();
+        probeImg.src = safe.src;
+      } catch {
+        // Keep the preview on screen; a failed original is not an error state.
+      }
+    };
+
+    const showOriginal = () => {
+      stage = FULL;
+      const ready = immediateViewerSrc(photo);
+      if (ready) {
+        void applyViewer(ready, FULL);
+      } else {
+        viewerSrc = '';
+        void resolveViewerSrc(photo).then((src) => {
+          if (!cancelled) void applyViewer(src, FULL);
+        });
+      }
+    };
+
+    if (prefersDecodedPreview(photo)) {
+      void previewIsCached(photo).then(async (cached) => {
+        if (cancelled) return;
+        if (!cached) {
+          // Cold preview: no reason to wait for one. Paint the original and
+          // warm the preview for the next visit.
+          showOriginal();
+          warmViewerPreview(photo);
+          return;
+        }
+        // Warm preview: paint the small WebP now, then bring in the original
+        // once the frame is settled. Rapid arrow browsing stays on previews.
+        // Await apply so the settle timer starts after the preview is on
+        // screen, not after the cache check alone.
+        await applyViewer(previewUrl(photo), PREVIEW);
+        if (cancelled) return;
+        swapTimer = setTimeout(() => {
+          if (cancelled) return;
+          stage = FULL;
+          void applyOriginalAfterDecode(immediateViewerSrc(photo), FULL);
+        }, FULL_RES_SETTLE_MS);
+      });
+    } else {
+      showOriginal();
     }
+
     return () => {
       cancelled = true;
+      if (swapTimer) clearTimeout(swapTimer);
+      revokeViewer();
     };
   });
 
