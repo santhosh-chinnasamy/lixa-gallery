@@ -27,7 +27,6 @@
         from: nav.from?.url?.pathname ?? null,
         to: nav.to?.url?.pathname ?? null,
         type: nav.type,
-        willLoad: nav.willLoad,
       });
     } catch (error) {
       console.warn('[probe] nav.before failed', error);
